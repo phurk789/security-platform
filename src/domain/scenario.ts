@@ -1,0 +1,290 @@
+import type { AppState, Device, Incident, TimelineEvent, User } from './types';
+
+/** 17 Oct 2026 05:27:00 Asia/Bangkok — the scenario start time from the concept mockup. */
+export const SCENARIO_START = Date.UTC(2026, 9, 16, 22, 27, 0);
+
+const MIN = 60_000;
+
+// ---------------------------------------------------------------------------
+// Site geometry (metres, local site grid; origin = north-west corner, +y = south)
+// ---------------------------------------------------------------------------
+
+export const SITE = {
+  name: 'Civic Center',
+  org: '13STORE Demo Org',
+  width: 420,
+  height: 290,
+  crs: 'Local site grid (m) → WGS 84 via 2-point transform (placeholder)',
+};
+
+export interface Building {
+  id: string;
+  name: string;
+  use: string;
+  x: number;
+  y: number;
+  w: number;
+  d: number;
+  h: number;
+  zone: string;
+}
+
+export const BUILDINGS: Building[] = [
+  { id: 'B1', name: 'Building 1', use: 'Administration', x: 50, y: 52, w: 92, d: 56, h: 22, zone: 'Zone A' },
+  { id: 'B2', name: 'Building 2', use: 'Public Services', x: 178, y: 26, w: 82, d: 62, h: 34, zone: 'Zone A' },
+  { id: 'B3', name: 'Building 3', use: 'Civic Hall', x: 284, y: 40, w: 62, d: 72, h: 26, zone: 'Zone B' },
+  { id: 'B4', name: 'Building 4', use: 'Operations', x: 300, y: 128, w: 74, d: 58, h: 24, zone: 'Zone B' },
+  { id: 'B5', name: 'Building 5', use: 'Logistics', x: 78, y: 140, w: 84, d: 60, h: 18, zone: 'Zone A' },
+];
+
+export interface Zone {
+  id: string;
+  name: string;
+  poly: [number, number][];
+  label: [number, number];
+}
+
+export const ZONES: Zone[] = [
+  { id: 'A', name: 'Zone A', poly: [[20, 16], [244, 16], [244, 232], [20, 232]], label: [96, 30] },
+  { id: 'B', name: 'Zone B', poly: [[244, 16], [400, 16], [400, 232], [244, 232]], label: [376, 30] },
+];
+
+export const PARKING = { x: 178, y: 196, w: 104, d: 30 };
+export const PLAZA = { cx: 214, cy: 126, r: 26 };
+export const FENCE_Y = 232;
+export const GATE = { x: 322, w: 26 };
+export const ROAD = { y: 246, h: 26 };
+
+// ---------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------
+
+export const USERS: User[] = [
+  { id: 'u-alex', name: 'Alex Chen', role: 'dispatcher', title: 'Security Operations · Dispatcher' },
+  { id: 'u-nida', name: 'Nida W.', role: 'supervisor', title: 'Shift Supervisor' },
+  { id: 'u-somchai', name: 'Somchai K.', role: 'operator', title: 'UGV Operator' },
+  { id: 'u-priya', name: 'Priya R.', role: 'auditor', title: 'Auditor (read-only)' },
+];
+
+// ---------------------------------------------------------------------------
+// Devices — all SIMULATED in this prototype (PRD §5: never claim an integration is ready)
+// ---------------------------------------------------------------------------
+
+function devices(now: number): Record<string, Device> {
+  const list: Device[] = [
+    {
+      id: 'CCTV-01',
+      kind: 'cctv',
+      model: 'Fixed dome 4MP (placeholder)',
+      adapterVersion: 'sim-cctv 0.3',
+      firmwareTested: '—',
+      integration: 'simulated',
+      capabilities: ['video'],
+      commands: [],
+      limitations: 'Simulated stream. No PTZ.',
+      zone: 'Zone B',
+      pos: { x: 262, y: 152 },
+      accuracyM: 1,
+      lastSeen: now,
+      rateMs: 1000,
+      speed: 0,
+      view: 'plaza',
+    },
+    {
+      id: 'CCTV-02',
+      kind: 'cctv',
+      model: 'Bullet 4MP IR (placeholder)',
+      adapterVersion: 'sim-cctv 0.3',
+      firmwareTested: '—',
+      integration: 'simulated',
+      capabilities: ['video', 'ir'],
+      commands: [],
+      limitations: 'Simulated stream of the service gate.',
+      zone: 'Zone B',
+      pos: { x: 376, y: 212 },
+      accuracyM: 1,
+      lastSeen: now,
+      rateMs: 1000,
+      speed: 0,
+      view: 'gate',
+    },
+    {
+      id: 'CCTV-03',
+      kind: 'cctv',
+      model: 'Fixed dome 4MP (placeholder)',
+      adapterVersion: 'sim-cctv 0.3',
+      firmwareTested: '—',
+      integration: 'simulated',
+      capabilities: ['video'],
+      commands: [],
+      limitations: 'Simulated stream.',
+      zone: 'Zone A',
+      pos: { x: 36, y: 118 },
+      accuracyM: 1,
+      lastSeen: now,
+      rateMs: 1000,
+      speed: 0,
+      view: 'path',
+    },
+    {
+      id: 'CCTV-04',
+      kind: 'cctv',
+      model: 'Bullet 2MP (placeholder)',
+      adapterVersion: 'sim-cctv 0.3',
+      firmwareTested: '—',
+      integration: 'simulated',
+      capabilities: ['video'],
+      commands: [],
+      limitations: 'Simulated. Currently offline (see INC-022).',
+      zone: 'Zone B',
+      pos: { x: 392, y: 96 },
+      accuracyM: 1,
+      lastSeen: now - 14 * MIN,
+      rateMs: 1000,
+      speed: 0,
+      view: 'lot',
+    },
+    {
+      id: 'UGV-01',
+      kind: 'ugv',
+      model: '6-wheel patrol UGV (demo build)',
+      adapterVersion: 'sim-ugv 0.5',
+      firmwareTested: 'not yet tested on hardware',
+      integration: 'simulated',
+      capabilities: ['camera', 'ground_patrol', 'waypoints'],
+      commands: ['start', 'pause', 'resume', 'stop'],
+      limitations: 'Demo area only. Link-loss failsafe: stop in place. Physical E-stop on vehicle.',
+      zone: 'Zone B',
+      pos: { x: 214, y: 218 },
+      accuracyM: 1.5,
+      battery: 82,
+      lastSeen: now - 1000,
+      rateMs: 1000,
+      speed: 0,
+    },
+    {
+      id: 'UAV-02',
+      kind: 'uav',
+      model: 'Static display airframe',
+      adapterVersion: 'sim-uav 0.1',
+      firmwareTested: 'not tested — display model only',
+      integration: 'simulated',
+      capabilities: ['camera', 'overwatch'],
+      commands: [],
+      limitations: 'No real flight at the booth. Position and video are simulated.',
+      zone: 'Zone B',
+      pos: { x: 318, y: 22 },
+      alt: 40,
+      accuracyM: 4,
+      battery: 64,
+      lastSeen: now,
+      rateMs: 1000,
+      speed: 0,
+    },
+  ];
+  return Object.fromEntries(list.map((d) => [d.id, d]));
+}
+
+function incidents(now: number): Incident[] {
+  return [
+    {
+      id: 'INC-024',
+      title: 'Service gate alert',
+      type: 'Sensor alert',
+      severity: 'medium',
+      status: 'new',
+      zone: 'Zone B',
+      place: 'Service gate',
+      pos: { x: 335, y: 236 },
+      source: 'Gate sensor SG-2 (simulated)',
+      createdAt: now - 2 * MIN - 48_000,
+      cameraId: 'CCTV-02',
+      thumb: 'gate',
+    },
+    {
+      id: 'INC-023',
+      title: 'Access obstruction',
+      type: 'Field report',
+      severity: 'low',
+      status: 'confirmed',
+      zone: 'Zone A',
+      place: 'West walkway',
+      pos: { x: 170, y: 120 },
+      source: 'Field responder report',
+      createdAt: now - 8 * MIN,
+      owner: 'Field team 2',
+      cameraId: 'CCTV-03',
+      thumb: 'path',
+    },
+    {
+      id: 'INC-022',
+      title: 'Equipment offline',
+      type: 'Device health',
+      severity: 'low',
+      status: 'triaging',
+      zone: 'Zone B',
+      place: 'East car park',
+      pos: { x: 392, y: 96 },
+      source: 'Device health monitor',
+      createdAt: now - 14 * MIN,
+      owner: 'Alex Chen',
+      thumb: 'equipment',
+    },
+  ];
+}
+
+function timeline(now: number): TimelineEvent[] {
+  return [
+    { id: 't1', incidentId: 'INC-022', at: now - 14 * MIN, receivedAt: now - 14 * MIN + 900, actor: 'System', title: 'CCTV-04 stopped reporting', tone: 'warn' },
+    { id: 't2', incidentId: 'INC-022', at: now - 13 * MIN, receivedAt: now - 13 * MIN, actor: 'Alex Chen', title: 'Triage started', detail: 'Checking power and network at east car park.' },
+    { id: 't3', incidentId: 'INC-023', at: now - 8 * MIN, receivedAt: now - 8 * MIN + 2000, actor: 'Field team 2', title: 'Report received', detail: 'Delivery cart blocking west walkway.' },
+    { id: 't4', incidentId: 'INC-023', at: now - 7 * MIN, receivedAt: now - 7 * MIN, actor: 'Alex Chen', title: 'Confirmed and assigned to Field team 2', tone: 'ok' },
+    { id: 't5', incidentId: 'INC-024', at: now - 2 * MIN - 48_000, receivedAt: now - 2 * MIN - 47_200, actor: 'Gate sensor SG-2', title: 'Alert received', detail: 'Service gate sensor triggered outside operating hours.', tone: 'alert' },
+  ];
+}
+
+export function initialState(): AppState {
+  const now = SCENARIO_START;
+  return {
+    now,
+    userId: 'u-alex',
+    users: USERS,
+    view: 'overview',
+    mapMode: '3d',
+    layers: { cctv: true, ugv: true, uav: true, zones: true, accuracy: true },
+    selectedIncidentId: 'INC-024',
+    selectedDeviceId: null,
+    incidents: incidents(now),
+    devices: devices(now),
+    missions: [],
+    commands: [],
+    timeline: timeline(now),
+    evidence: [
+      {
+        id: 'EV-0101',
+        incidentId: 'INC-024',
+        kind: 'snapshot',
+        title: 'Gate sensor trigger frame',
+        source: 'CCTV-02',
+        capturedAt: now - 2 * MIN - 48_000,
+        recordedBy: 'System',
+        simulated: true,
+      },
+    ],
+    audit: [],
+    telemetry: [],
+    linkCut: {},
+    failsafeAt: {},
+    replay: { active: false, at: now },
+    toasts: [],
+    presentation: false,
+    seq: 1,
+  };
+}
+
+/** Default inspection route for UGV-01 to the service gate (draft until approved). */
+export const DEFAULT_ROUTE = [
+  { x: 262, y: 218 },
+  { x: 312, y: 222 },
+  { x: 334, y: 228 },
+];
