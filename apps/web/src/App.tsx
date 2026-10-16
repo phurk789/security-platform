@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { History, List, Map as MapIcon, PanelRight, Radio } from 'lucide-react';
 import { fmtTime } from './domain/policy';
 import { useStore } from './store';
+import { useT } from './i18n';
 import { RightPanel } from './components/IncidentPanel';
 import { BottomTimeline, Footer, IncidentQueue, Kpis, SideNav, Toasts, TopBar } from './components/Shell';
 import { TwinMap } from './components/TwinMap';
 import { DevicesPage, EvidencePage, IncidentsPage, MissionsPage, ReportsPage } from './views/Pages';
+import { AdminPage } from './views/Admin';
 
 export function App() {
   const { s } = useStore();
@@ -20,6 +22,7 @@ export function App() {
         {s.view === 'devices' && <DevicesPage />}
         {s.view === 'evidence' && <EvidencePage />}
         {s.view === 'reports' && <ReportsPage />}
+        {s.view === 'admin' && <AdminPage />}
       </div>
       <Footer />
       <Toasts />
@@ -29,14 +32,15 @@ export function App() {
 
 function Overview() {
   const { s, dispatch } = useStore();
+  const t = useT();
   // Small screens show one pane at a time (UXUI §4).
   const [pane, setPane] = useState<'map' | 'queue' | 'detail'>('map');
   return (
     <div className={`overview pane-${pane}`}>
       <div className="mobile-tabs" role="tablist">
-        <button className={pane === 'queue' ? 'on' : ''} onClick={() => setPane('queue')}><List size={16} /> Queue</button>
-        <button className={pane === 'map' ? 'on' : ''} onClick={() => setPane('map')}><MapIcon size={16} /> Map</button>
-        <button className={pane === 'detail' ? 'on' : ''} onClick={() => setPane('detail')}><PanelRight size={16} /> Details</button>
+        <button className={pane === 'queue' ? 'on' : ''} onClick={() => setPane('queue')}><List size={16} /> {t('Queue')}</button>
+        <button className={pane === 'map' ? 'on' : ''} onClick={() => setPane('map')}><MapIcon size={16} /> {t('Map')}</button>
+        <button className={pane === 'detail' ? 'on' : ''} onClick={() => setPane('detail')}><PanelRight size={16} /> {t('Details')}</button>
       </div>
       <div className="ov-queue" onClick={(e) => (e.target as Element).closest('.inc-card') && setPane('detail')}>
         <IncidentQueue />
@@ -45,8 +49,8 @@ function Overview() {
         {s.replay.active && (
           <div className="replay-bar inline">
             <History size={16} /> <b>REPLAY</b> <span className="mono">{fmtTime(s.replay.at, true)}</span>
-            <span>Viewing past data. Device control is off.</span>
-            <button className="btn-primary small" onClick={() => dispatch({ type: 'exitReplay' })}><Radio size={14} /> Return to live</button>
+            <span>{t('You are viewing past data. Device control is off.')}</span>
+            <button className="btn-primary small" onClick={() => dispatch({ type: 'exitReplay' })}><Radio size={14} /> {t('Return to live')}</button>
           </div>
         )}
         <Kpis />

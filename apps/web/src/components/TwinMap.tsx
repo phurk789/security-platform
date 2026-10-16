@@ -1,10 +1,11 @@
 import { useMemo, useRef, useState, type JSX, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from 'react';
 import { Bot, Cctv, Drone, Layers, LocateFixed, Minus, Plus, TriangleAlert } from 'lucide-react';
 import { BUILDINGS, FENCE_Y, GATE, PARKING, PLAZA, ROAD, SITE, ZONES } from '@13store/shared';
-import { fmtAge, freshness, ageMs } from '../domain/policy';
+import { freshness, ageMs } from '../domain/policy';
 import { missionForIncident } from '../domain/reducer';
 import type { AppState, Device, Layers as LayerState, Point } from '@13store/shared';
 import { useStore } from '../store';
+import { ago, tr, useT } from '../i18n';
 
 // --- projection ------------------------------------------------------------
 // 2D: top-down site grid. 3D: oblique view from the south-west using the same
@@ -52,6 +53,7 @@ const LIT = BUILDINGS.map((_b, i) => {
 
 export function TwinMap() {
   const { s, dispatch } = useStore();
+  const t = useT();
   const mode = s.mapMode;
   const P = mode === '3d' ? P3 : P2;
   const [zoom, setZoom] = useState(1.1);
@@ -101,7 +103,7 @@ export function TwinMap() {
         onPointerMove={onMove}
         onPointerUp={onUp}
         role="img"
-        aria-label={`${SITE.name} digital twin, ${mode.toUpperCase()} view`}
+        aria-label={t('{site} digital twin, {mode} view', { site: SITE.name, mode: mode.toUpperCase() })}
       >
         <defs>
           <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -159,20 +161,20 @@ export function TwinMap() {
       </svg>
 
       <div className="map-tools">
-        <div className="seg" role="group" aria-label="Map view">
+        <div className="seg" role="group" aria-label={t('Map view')}>
           <button className={mode === '2d' ? 'on' : ''} onClick={() => dispatch({ type: 'setMapMode', mode: '2d' })}>2D</button>
           <button className={mode === '3d' ? 'on' : ''} onClick={() => dispatch({ type: 'setMapMode', mode: '3d' })}>3D</button>
         </div>
         <div className="layers">
           <button className="btn-ghost" onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen}>
-            <Layers size={16} /> Layers
+            <Layers size={16} /> {t('Layers')}
           </button>
           {layersOpen && (
             <div className="pop">
               {(['cctv', 'ugv', 'uav', 'zones', 'accuracy'] as (keyof LayerState)[]).map((k) => (
                 <label key={k}>
                   <input type="checkbox" checked={L[k]} onChange={() => dispatch({ type: 'toggleLayer', layer: k })} />
-                  {{ cctv: 'CCTV', ugv: 'UGV', uav: 'UAV (simulated)', zones: 'Zones', accuracy: 'Position accuracy' }[k]}
+                  {t({ cctv: 'CCTV', ugv: 'UGV', uav: 'UAV (simulated)', zones: 'Zones', accuracy: 'Position accuracy' }[k])}
                 </label>
               ))}
             </div>
@@ -181,10 +183,10 @@ export function TwinMap() {
       </div>
 
       <div className="zoom">
-        <button aria-label="Zoom in" onClick={() => setZoom((z) => Math.min(3, z * 1.25))}><Plus size={18} /></button>
-        <button aria-label="Zoom out" onClick={() => setZoom((z) => Math.max(0.7, z / 1.25))}><Minus size={18} /></button>
+        <button aria-label={t('Zoom in')} onClick={() => setZoom((z) => Math.min(3, z * 1.25))}><Plus size={18} /></button>
+        <button aria-label={t('Zoom out')} onClick={() => setZoom((z) => Math.max(0.7, z / 1.25))}><Minus size={18} /></button>
         <button
-          aria-label="Center on selection"
+          aria-label={t('Center on selection')}
           onClick={() => {
             const target = selInc?.pos;
             setZoom(target ? 1.6 : 1.1);
@@ -199,7 +201,7 @@ export function TwinMap() {
         <svg viewBox="0 0 20 20" width="18" height="18"><path d="M10 2 L15 17 L10 13 L5 17 Z" fill="currentColor" /></svg>
       </div>
       <div className="map-source">
-        Site model: placeholder geometry · {SITE.crs}
+        {t('Site model: placeholder geometry')} · {SITE.crs}
       </div>
     </div>
   );
@@ -405,7 +407,7 @@ function DeviceMarker({ d, pos, P, s, selected, onClick, replay }: { d: Device; 
         {f !== 'live' && (
           <g transform="translate(-14 -16)">
             <TriangleAlert x={0} y={0} width={9} height={9} className={f === 'offline' ? 'warn-red' : 'warn-amber'} />
-            <title>{`${d.id} telemetry ${f}, last seen ${fmtAge(age)} ago`}</title>
+            <title>{tr('{id} telemetry {f}, last seen {ago}', { id: d.id, f: f.toUpperCase(), ago: ago(age) })}</title>
           </g>
         )}
       </g>

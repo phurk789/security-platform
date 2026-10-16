@@ -1,4 +1,5 @@
 import { fmtDate, fmtTime } from '../domain/policy';
+import { tr } from '../i18n';
 import type { Freshness } from '@13store/shared';
 
 export type Scene = 'gate' | 'plaza' | 'path' | 'lot' | 'ugv' | 'equipment';
@@ -28,7 +29,7 @@ export function CameraFeed({
   const frozen = freshness !== 'live';
   return (
     <div className={`feed${compact ? ' compact' : ''}${frozen ? ' frozen' : ''}`}>
-      <svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-label={`${label} simulated camera view`}>
+      <svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-label={tr('{label} simulated camera view', { label })}>
         <defs>
           <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="#0b1626" />
@@ -57,7 +58,7 @@ export function CameraFeed({
             <span>
               {fmtDate(time)} &nbsp;{fmtTime(time, true)}
             </span>
-            {frozen && <span className="feed-frozen">{freshness === 'offline' ? 'NO SIGNAL · last frame' : 'FEED DELAYED · frame frozen'}</span>}
+            {frozen && <span className="feed-frozen">{freshness === 'offline' ? `NO SIGNAL · ${tr('last frame')}` : `FEED DELAYED · ${tr('frame frozen')}`}</span>}
           </div>
         </>
       )}

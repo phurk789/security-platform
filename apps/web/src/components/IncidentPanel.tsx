@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Ban,
   BatteryMedium,
@@ -10,6 +10,8 @@ import {
   Lock,
   MapPin,
   Merge,
+  RotateCcw,
+  Users,
   OctagonX,
   Pause,
   Play,
@@ -20,7 +22,7 @@ import {
   Video,
   X,
 } from 'lucide-react';
-import { ageMs, can, currentUser, fmtAge, fmtTime, freshness, isReady, userName } from '../domain/policy';
+import { ageMs, can, currentUser, fmtTime, freshness, isReady, userName } from '../domain/policy';
 import { isTerminal, missionForIncident } from '../domain/reducer';
 import { constraintChecks } from '../domain/policy';
 import { DEFAULT_ROUTE } from '@13store/shared';
@@ -29,6 +31,9 @@ import { useStore } from '../store';
 import { CameraFeed } from './CameraFeed';
 import { Badge, CommandBadge, FreshBadge, IncidentBadge, IntegrationBadge, MissionBadge } from './Badges';
 import { ReasonDialog } from './Dialog';
+import { ago, useT } from '../i18n';
+
+const SEV = { low: 'Low', medium: 'Medium', high: 'High' } as const;
 
 export const ROUTES: { id: string; label: string; pts: Point[] }[] = [
   { id: 'direct', label: 'Direct to service gate · 3 checkpoints', pts: DEFAULT_ROUTE },
@@ -51,6 +56,7 @@ function routeId(pts: Point[]) {
 
 export function RightPanel() {
   const { s } = useStore();
+  const t = useT();
   const dev = s.selectedDeviceId ? s.devices[s.selectedDeviceId] : undefined;
   if (dev) return <DevicePanel d={dev} />;
   const inc = s.incidents.find((i) => i.id === s.selectedIncidentId);
@@ -58,14 +64,15 @@ export function RightPanel() {
     return (
       <aside className="panel right empty-state">
         <MapPin size={28} />
-        <p>Select an incident in the queue or on the map.</p>
+        <p>{t('Select an incident in the queue or on the map.')}</p>
       </aside>
     );
   return <IncidentPanel inc={inc} />;
 }
 
 function IncidentPanel({ inc }: { inc: Incident }) {
-  const { s, dispatch } = useStore();
+  const { s, dispatch, mode } = useStore();
+  const t = useT();
   const me = currentUser(s);
   const m = missionForIncident(s, inc.id);
   const live = m && ['assigned', 'executing', 'paused'].includes(m.status);
@@ -74,18 +81,19 @@ function IncidentPanel({ inc }: { inc: Incident }) {
   const ugv = m ? s.devices[m.deviceId] : undefined;
   const showUgvFeed = live && feedTab === 'ugv' && ugv;
   const replay = s.replay.active;
+  const videoOk = useVideoAllowed(showUgvFeed ? ugv?.id : cam?.id);
 
   return (
     <aside className="panel right">
       <div className="panel-head">
-        <h2>Incident details</h2>
-        <button className="icon-btn" aria-label="More"><Ellipsis size={18} /></button>
+        <h2>{t('Incident details')}</h2>
+        <button className="icon-btn" aria-label={t('More')}><Ellipsis size={18} /></button>
       </div>
       <div className="inc-head">
         <div className="row gap">
           <span className="inc-big-id">{inc.id}</span>
           {inc.status === 'new' || inc.status === 'triaging' ? (
-            <Badge tone="amber"><CircleAlert size={13} /> Unverified</Badge>
+            <Badge tone="amber"><CircleAlert size={13} /> {t('Unverified')}</Badge>
           ) : (
             <IncidentBadge status={inc.status} />
           )}
@@ -93,25 +101,43 @@ function IncidentPanel({ inc }: { inc: Incident }) {
         <h3>{inc.title}</h3>
         <div className="muted row gap-s"><MapPin size={14} /> {inc.place} <span className="sep">|</span> {inc.zone}</div>
         <dl className="meta">
-          <div><dt>Source</dt><dd>{inc.source}</dd></div>
-          <div><dt>Received</dt><dd>{fmtTime(inc.createdAt, true)} · {fmtAge(s.now - inc.createdAt)} ago</dd></div>
-          <div><dt>Owner</dt><dd>{inc.owner ?? 'Unassigned'}</dd></div>
-          <div><dt>Status</dt><dd><IncidentBadge status={inc.status} /></dd></div>
+          <div><dt>{t('Source')}</dt><dd>{inc.source}</dd></div>
+          <div><dt>{t('Received')}</dt><dd>{fmtTime(inc.createdAt, true)} · {ago(s.now - inc.createdAt)}</dd></div>
+          <div><dt>{t('Owner')}</dt><dd>{inc.owner ?? t('Unassigned')}</dd></div>
+          <div><dt>{t('Status')}</dt><dd><IncidentBadge status={inc.status} /></dd></div>
+          <div>
+            <dt>{t('Severity')}</dt>
+            <dd>
+              {mode === 'remote' && can(me.role, 'incident.edit') && !replay ? (
+                <select id={`sev-${inc.id}`} className="sev" value={inc.severity} onChange={(e) => dispatch({ type: 'editIncident', incidentId: inc.id, severity: e.target.value as Incident['severity'] })}>
+                  <option value="low">{t('Low')}</option>
+                  <option value="medium">{t('Medium')}</option>
+                  <option value="high">{t('High')}</option>
+                </select>
+              ) : (
+                <span className="cap">{t(SEV[inc.severity])}</span>
+              )}
+            </dd>
+          </div>
+          <div><dt>{t('Type')}</dt><dd>{inc.type}</dd></div>
         </dl>
       </div>
 
-      {(cam || showUgvFeed) && (
+      {(cam || showUgvFeed) && videoOk !== true && (
+        <div className="feed-wrap"><NoVideo why={videoOk === null ? t('Opening video…') : t('Your role cannot view video. Ask a supervisor if you need access.')} /></div>
+      )}
+      {(cam || showUgvFeed) && videoOk === true && (
         <div className="feed-wrap">
           {live && ugv && (
             <div className="tabs small">
               <button className={feedTab === 'cctv' ? 'on' : ''} onClick={() => setFeedTab('cctv')}>{cam?.id ?? 'CCTV'}</button>
-              <button className={feedTab === 'ugv' ? 'on' : ''} onClick={() => setFeedTab('ugv')}>{ugv.id} camera</button>
+              <button className={feedTab === 'ugv' ? 'on' : ''} onClick={() => setFeedTab('ugv')}>{t('{id} camera', { id: ugv.id })}</button>
             </div>
           )}
           {showUgvFeed ? (
             <CameraFeed
               scene="ugv"
-              label={`${ugv.id} onboard`}
+              label={t('{id} onboard', { id: ugv.id })}
               time={replay ? s.replay.at : freshness(s, ugv) === 'live' ? s.now : ugv.lastSeen}
               freshness={replay ? 'live' : freshness(s, ugv)}
               replay={replay}
@@ -131,11 +157,12 @@ function IncidentPanel({ inc }: { inc: Incident }) {
 
       <div className="panel-body">
         <Stage inc={inc} m={m} />
+        <FieldTasks inc={inc} />
       </div>
 
       <div className="panel-foot">
         <button className="btn-outline" onClick={() => dispatch({ type: 'setView', view: 'evidence' })}>
-          <FileText size={18} /> View evidence
+          <FileText size={18} /> {t('View evidence')}
         </button>
         <RoleHint s={s} inc={inc} m={m} role={me.role} />
       </div>
@@ -144,6 +171,7 @@ function IncidentPanel({ inc }: { inc: Incident }) {
 }
 
 function RoleHint({ s, inc, m, role }: { s: AppState; inc: Incident; m?: Mission; role: string }) {
+  const t = useT();
   let text: string | null = null;
   if (s.replay.active) text = 'You are viewing replay. Device control is off.';
   else if (role === 'auditor') text = 'Read-only role. Actions are disabled.';
@@ -153,12 +181,13 @@ function RoleHint({ s, inc, m, role }: { s: AppState; inc: Incident; m?: Mission
   else if (inc.status === 'confirmed' && !m) text = 'Approval required before dispatch.';
   if (!text) return null;
   return (
-    <p className="hint"><CircleAlert size={16} /> {text}</p>
+    <p className="hint"><CircleAlert size={16} /> {t(text)}</p>
   );
 }
 
 function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
   const { s, dispatch } = useStore();
+  const t = useT();
   const me = currentUser(s);
   const [dlg, setDlg] = useState<null | 'dismiss' | 'merge' | 'reject'>(null);
   const [mergeInto, setMergeInto] = useState('');
@@ -170,28 +199,28 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
     return (
       <>
         <section className="step">
-          <h4>Step 1 · Verify the alert</h4>
-          <p className="muted">New alert. Not yet confirmed by an operator. Review the camera before deciding.</p>
+          <h4>{t('Step 1 · Verify the alert')}</h4>
+          <p className="muted">{t('New alert. Not yet confirmed by an operator. Review the camera before deciding.')}</p>
           {inc.status === 'new' ? (
             <button className="btn-primary wide" disabled={!can(me.role, 'incident.triage') || s.replay.active} onClick={() => dispatch({ type: 'openCamera', incidentId: inc.id })}>
-              <Video size={18} /> Open camera &amp; start review
+              <Video size={18} /> {t('Open camera & start review')}
             </button>
           ) : (
             <button className="btn-primary wide" disabled={!canVerify} onClick={() => dispatch({ type: 'confirmIncident', incidentId: inc.id })}>
-              <ShieldCheck size={18} /> Confirm — action required
+              <ShieldCheck size={18} /> {t('Confirm — action required')}
             </button>
           )}
           <div className="row gap-s">
-            <button className="btn-secondary grow" disabled={!canVerify} onClick={() => setDlg('dismiss')}><Ban size={16} /> False alarm</button>
-            <button className="btn-secondary grow" disabled={!canVerify || !others.length} onClick={() => { setMergeInto(others[0]?.id ?? ''); setDlg('merge'); }}><Merge size={16} /> Merge duplicate</button>
+            <button className="btn-secondary grow" disabled={!canVerify} onClick={() => setDlg('dismiss')}><Ban size={16} /> {t('False alarm')}</button>
+            <button className="btn-secondary grow" disabled={!canVerify || !others.length} onClick={() => { setMergeInto(others[0]?.id ?? ''); setDlg('merge'); }}><Merge size={16} /> {t('Merge duplicate')}</button>
           </div>
         </section>
         <ReadyDevices />
         {dlg === 'dismiss' && (
           <ReasonDialog
-            title={`Dismiss ${inc.id} as false alarm`}
-            hint="e.g. Staff member opening the gate for a scheduled delivery, confirmed on CCTV-02."
-            confirmLabel="Dismiss alert"
+            title={t('Dismiss {id} as false alarm', { id: inc.id })}
+            hint={t('e.g. Staff member opening the gate for a scheduled delivery, confirmed on CCTV-02.')}
+            confirmLabel={t('Dismiss alert')}
             danger
             onClose={() => setDlg(null)}
             onConfirm={(r) => { dispatch({ type: 'dismissIncident', incidentId: inc.id, reason: r }); setDlg(null); }}
@@ -199,17 +228,17 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
         )}
         {dlg === 'merge' && (
           <ReasonDialog
-            title={`Merge ${inc.id} into another incident`}
-            hint="e.g. Same sensor triggered twice within one minute."
-            confirmLabel="Merge"
+            title={t('Merge {id} into another incident', { id: inc.id })}
+            hint={t('e.g. Same sensor triggered twice within one minute.')}
+            confirmLabel={t('Merge')}
             onClose={() => setDlg(null)}
             extra={
               <label className="field">
-                <span>Merge into</span>
+                <span>{t('Merge into')}</span>
                 <select value={mergeInto} onChange={(e) => setMergeInto(e.target.value)}>
                   {others.map((o) => <option key={o.id} value={o.id}>{o.id} · {o.title}</option>)}
                 </select>
-                <small className="muted">Original evidence stays attached to {inc.id}.</small>
+                <small className="muted">{t('Original evidence stays attached to {id}.', { id: inc.id })}</small>
               </label>
             }
             onConfirm={(r) => { dispatch({ type: 'mergeIncident', incidentId: inc.id, intoId: mergeInto, reason: r }); setDlg(null); }}
@@ -230,10 +259,10 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
   if (inc.status === 'confirmed' && (!m || ['cancelled', 'failed'].includes(m.status))) {
     return (
       <>
-        {m && <p className="banner info">Previous mission {m.id}: <MissionBadge status={m.status} /></p>}
+        {m && <p className="banner info">{t('Previous mission {id}:', { id: m.id })} <MissionBadge status={m.status} /></p>}
         <PrepareMission inc={inc} />
         <details className="step">
-          <summary>Resolve without a mission</summary>
+          <summary>{t('Resolve without a mission')}</summary>
           <Outcome inc={inc} />
         </details>
       </>
@@ -243,8 +272,8 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
   if (inc.status === 'confirmed' || inc.status === 'responding') {
     return (
       <section className="step">
-        <h4>Step 4 · Record the outcome</h4>
-        {m && <p className="muted">Mission {m.id}: <MissionBadge status={m.status} /></p>}
+        <h4>{t('Step 4 · Record the outcome')}</h4>
+        {m && <p className="muted">{t('Mission {id}:', { id: m.id })} <MissionBadge status={m.status} /></p>}
         <Outcome inc={inc} />
       </section>
     );
@@ -253,11 +282,11 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
   if (inc.status === 'resolved') {
     return (
       <section className="step">
-        <h4>Resolved</h4>
+        <h4>{t('Resolved')}</h4>
         <p>{inc.outcome}</p>
         <div className="row gap-s">
-          <button className="btn-primary grow" disabled={!can(me.role, 'incident.close') || s.replay.active} onClick={() => dispatch({ type: 'closeIncident', incidentId: inc.id })}><Lock size={16} /> Close incident</button>
-          <button className="btn-secondary grow" onClick={() => dispatch({ type: 'setView', view: 'reports' })}><FileText size={16} /> Report</button>
+          <button className="btn-primary grow" disabled={!can(me.role, 'incident.close') || s.replay.active} onClick={() => dispatch({ type: 'closeIncident', incidentId: inc.id })}><Lock size={16} /> {t('Close incident')}</button>
+          <button className="btn-secondary grow" onClick={() => dispatch({ type: 'setView', view: 'reports' })}><FileText size={16} /> {t('Report')}</button>
         </div>
       </section>
     );
@@ -265,25 +294,27 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
 
   return (
     <section className="step">
-      <h4>{inc.status === 'closed' ? 'Closed' : inc.status === 'duplicate' ? `Duplicate of ${inc.duplicateOf}` : 'Dismissed'}</h4>
+      <h4>{inc.status === 'closed' ? t('Closed') : inc.status === 'duplicate' ? t('Duplicate of {id}', { id: inc.duplicateOf }) : t('Dismissed')}</h4>
       {inc.outcome && <p>{inc.outcome}</p>}
-      <button className="btn-secondary wide" onClick={() => dispatch({ type: 'setView', view: 'reports' })}><FileText size={16} /> Open report</button>
+      <button className="btn-secondary wide" onClick={() => dispatch({ type: 'setView', view: 'reports' })}><FileText size={16} /> {t('Open report')}</button>
+      <Reopen inc={inc} />
     </section>
   );
 }
 
 function Outcome({ inc }: { inc: Incident }) {
   const { s, dispatch } = useStore();
+  const t = useT();
   const me = currentUser(s);
   const [outcome, setOutcome] = useState('');
   return (
     <>
       <label className="field">
-        <span>Outcome</span>
-        <textarea rows={3} value={outcome} onChange={(e) => setOutcome(e.target.value)} placeholder="e.g. Gate found closed and locked. No one present. Sensor flagged for maintenance." />
+        <span>{t('Outcome')}</span>
+        <textarea rows={3} value={outcome} onChange={(e) => setOutcome(e.target.value)} placeholder={t('e.g. Gate found closed and locked. No one present. Sensor flagged for maintenance.')} />
       </label>
       <button className="btn-primary wide" disabled={!outcome.trim() || !can(me.role, 'incident.resolve') || s.replay.active} onClick={() => dispatch({ type: 'resolveIncident', incidentId: inc.id, outcome })}>
-        <Check size={18} /> Resolve incident
+        <Check size={18} /> {t('Resolve incident')}
       </button>
     </>
   );
@@ -291,10 +322,11 @@ function Outcome({ inc }: { inc: Incident }) {
 
 function ReadyDevices({ onPick, picked }: { onPick?: (id: string) => void; picked?: string }) {
   const { s } = useStore();
+  const t = useT();
   const list = Object.values(s.devices).filter((d) => d.kind !== 'cctv');
   return (
     <section className="step">
-      <h4>{onPick ? 'Choose device' : 'Available device'}</h4>
+      <h4>{onPick ? t('Choose device') : t('Available device')}</h4>
       {list.map((d) => (
         <DeviceCard key={d.id} d={d} onPick={onPick} picked={picked === d.id} />
       ))}
@@ -304,6 +336,7 @@ function ReadyDevices({ onPick, picked }: { onPick?: (id: string) => void; picke
 
 function DeviceCard({ d, onPick, picked }: { d: Device; onPick?: (id: string) => void; picked?: boolean }) {
   const { s } = useStore();
+  const t = useT();
   const f = freshness(s, d);
   const ready = isReady(s, d);
   const canPatrol = d.commands.length > 0;
@@ -342,9 +375,9 @@ function DeviceCard({ d, onPick, picked }: { d: Device; onPick?: (id: string) =>
           <IntegrationBadge i={d.integration} />
           <FreshBadge f={f} />
         </div>
-        <small className="muted">Updated {fmtAge(ageMs(s, d))} ago · {d.capabilities.slice(0, 2).map((c) => c.replace('_', ' ')).join(' · ')}</small>
-        {!canPatrol && <small className="warn-text">Display only — no commands supported</small>}
-        {canPatrol && !ready && <small className="warn-text">Not ready{d.controlOwner ? ` · held by ${userName(s, d.controlOwner)}` : ''}</small>}
+        <small className="muted">{t('Updated {ago}', { ago: ago(ageMs(s, d)) })} · {d.capabilities.slice(0, 2).map((c) => t(c.replace('_', ' '))).join(' · ')}</small>
+        {!canPatrol && <small className="warn-text">{t('Display only — no commands supported')}</small>}
+        {canPatrol && !ready && <small className="warn-text">{t('Not ready')}{d.controlOwner ? ` · ${t('held by {name}', { name: userName(s, d.controlOwner) })}` : ''}</small>}
       </div>
     </button>
   );
@@ -352,6 +385,7 @@ function DeviceCard({ d, onPick, picked }: { d: Device; onPick?: (id: string) =>
 
 function PrepareMission({ inc }: { inc: Incident }) {
   const { s, dispatch } = useStore();
+  const t = useT();
   const me = currentUser(s);
   const [open, setOpen] = useState(false);
   const [deviceId, setDeviceId] = useState('UGV-01');
@@ -366,7 +400,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
         <ReadyDevices />
         <section className="step">
           <button className="btn-primary wide big" disabled={!allowed} onClick={() => setOpen(true)}>
-            <Play size={18} /> Prepare mission
+            <Play size={18} /> {t('Prepare mission')}
           </button>
         </section>
       </>
@@ -375,33 +409,33 @@ function PrepareMission({ inc }: { inc: Incident }) {
   return (
     <>
       <section className="step">
-        <h4>Step 2 · Prepare mission</h4>
+        <h4>{t('Step 2 · Prepare mission')}</h4>
         <ol className="stepper">
-          <li className="on">Device</li><li className="on">Route &amp; operator</li><li>Checks</li><li>Approval</li>
+          <li className="on">{t('Device')}</li><li className="on">{t('Route & operator')}</li><li>{t('Checks')}</li><li>{t('Approval')}</li>
         </ol>
       </section>
       <ReadyDevices onPick={setDeviceId} picked={deviceId} />
       <section className="step">
         <label className="field">
-          <span><RouteIcon size={14} /> Route</span>
+          <span><RouteIcon size={14} /> {t('Route')}</span>
           <select value={route} onChange={(e) => setRoute(e.target.value)}>
-            {ROUTES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+            {ROUTES.map((r) => <option key={r.id} value={r.id}>{t(r.label)}</option>)}
           </select>
         </label>
         <label className="field">
-          <span><UserCheck size={14} /> Operator</span>
+          <span><UserCheck size={14} /> {t('Operator')}</span>
           <select value={op} onChange={(e) => setOp(e.target.value)}>
             {operators.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.title}</option>)}
           </select>
         </label>
         <div className="row gap-s">
-          <button className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
+          <button className="btn-secondary" onClick={() => setOpen(false)}>{t('Cancel')}</button>
           <button
             className="btn-primary grow"
             disabled={!allowed || !deviceId}
             onClick={() => dispatch({ type: 'createMission', incidentId: inc.id, deviceId, operatorId: op, checkpoints: ROUTES.find((r) => r.id === route)!.pts })}
           >
-            Save draft &amp; run checks
+            {t('Save draft & run checks')}
           </button>
         </div>
       </section>
@@ -411,6 +445,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
 
 function Planner({ m }: { m: Mission }) {
   const { s, dispatch } = useStore();
+  const t = useT();
   const me = currentUser(s);
   const [dlg, setDlg] = useState(false);
   const checks = constraintChecks(s, m);
@@ -424,19 +459,19 @@ function Planner({ m }: { m: Mission }) {
     <>
       <section className="step">
         <div className="row between">
-          <h4>{m.status === 'draft' || m.status === 'rejected' ? 'Step 2 · Mission draft' : m.status === 'pending_approval' ? 'Step 3 · Approval' : 'Step 3 · Operator acceptance'}</h4>
+          <h4>{m.status === 'draft' || m.status === 'rejected' ? t('Step 2 · Mission draft') : m.status === 'pending_approval' ? t('Step 3 · Approval') : t('Step 3 · Operator acceptance')}</h4>
           <MissionBadge status={m.status} />
         </div>
-        {reapproval && <p className="banner warn">Route changed. Re-approval required (plan v{m.planVersion}, approved v{m.approvedVersion}).</p>}
-        {m.status === 'rejected' && m.note && <p className="banner warn">Rejected: {m.note}</p>}
+        {reapproval && <p className="banner warn">{t('Route changed. Re-approval required (plan v{v}, approved v{a}).', { v: m.planVersion, a: m.approvedVersion })}</p>}
+        {m.status === 'rejected' && m.note && <p className="banner warn">{t('Rejected:')} {m.note}</p>}
         <dl className="meta">
-          <div><dt>Mission</dt><dd>{m.id} · plan v{m.planVersion}</dd></div>
-          <div><dt>Device</dt><dd>{m.deviceId}</dd></div>
-          <div><dt>Operator</dt><dd>{userName(s, m.operatorId)}</dd></div>
-          <div><dt>Approved by</dt><dd>{m.approvedBy && m.approvedVersion === m.planVersion ? userName(s, m.approvedBy) : '—'}</dd></div>
+          <div><dt>{t('Mission')}</dt><dd>{m.id} · {t('plan v{v}', { v: m.planVersion })}</dd></div>
+          <div><dt>{t('Device')}</dt><dd>{m.deviceId}</dd></div>
+          <div><dt>{t('Operator')}</dt><dd>{userName(s, m.operatorId)}</dd></div>
+          <div><dt>{t('Approved by')}</dt><dd>{m.approvedBy && m.approvedVersion === m.planVersion ? userName(s, m.approvedBy) : '—'}</dd></div>
         </dl>
         <label className="field">
-          <span><RouteIcon size={14} /> Route {m.approvedVersion === m.planVersion ? '(approved — solid on map)' : '(draft — dashed on map)'}</span>
+          <span><RouteIcon size={14} /> {t('Route')} {m.approvedVersion === m.planVersion ? t('(approved — solid on map)') : t('(draft — dashed on map)')}</span>
           <select
             value={rid}
             disabled={!canPrep}
@@ -445,18 +480,18 @@ function Planner({ m }: { m: Mission }) {
               if (r) dispatch({ type: 'editRoute', missionId: m.id, checkpoints: r.pts });
             }}
           >
-            {ROUTES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-            {rid === 'custom' && <option value="custom">Custom route</option>}
+            {ROUTES.map((r) => <option key={r.id} value={r.id}>{t(r.label)}</option>)}
+            {rid === 'custom' && <option value="custom">{t('Custom route')}</option>}
           </select>
         </label>
       </section>
       <section className="step">
-        <h4>Constraint checks</h4>
+        <h4>{t('Constraint checks')}</h4>
         <ul className="checks">
           {checks.map((c) => (
             <li key={c.label} className={c.ok ? 'ok' : c.hard ? 'fail' : 'warn'}>
               {c.ok ? <Check size={15} /> : c.hard ? <X size={15} /> : <CircleAlert size={15} />}
-              <span>{c.label}</span>
+              <span>{t(c.label)}</span>
               <small>{c.detail}</small>
             </li>
           ))}
@@ -466,16 +501,16 @@ function Planner({ m }: { m: Mission }) {
         {(m.status === 'draft' || m.status === 'rejected') && (
           <>
             <button className="btn-primary wide big" disabled={!canPrep || hardFail} onClick={() => dispatch({ type: 'submitMission', missionId: m.id })}>
-              <Send size={18} /> Submit for approval
+              <Send size={18} /> {t('Submit for approval')}
             </button>
-            <button className="btn-secondary wide" disabled={!canPrep} onClick={() => dispatch({ type: 'cancelMission', missionId: m.id })}>Discard draft</button>
+            <button className="btn-secondary wide" disabled={!canPrep} onClick={() => dispatch({ type: 'cancelMission', missionId: m.id })}>{t('Discard draft')}</button>
           </>
         )}
         {m.status === 'pending_approval' && (
           <div className="row gap-s">
-            <button className="btn-secondary grow" disabled={!canApprove} onClick={() => setDlg(true)}>Reject</button>
+            <button className="btn-secondary grow" disabled={!canApprove} onClick={() => setDlg(true)}>{t('Reject')}</button>
             <button className="btn-primary grow" disabled={!canApprove || hardFail} onClick={() => dispatch({ type: 'approveMission', missionId: m.id })}>
-              <ShieldCheck size={18} /> Approve plan v{m.planVersion}
+              <ShieldCheck size={18} /> {t('Approve plan v{v}', { v: m.planVersion })}
             </button>
           </div>
         )}
@@ -485,15 +520,15 @@ function Planner({ m }: { m: Mission }) {
             disabled={me.role !== 'operator' || me.id !== m.operatorId || s.replay.active}
             onClick={() => dispatch({ type: 'acceptMission', missionId: m.id })}
           >
-            <Hand size={18} /> Accept mission &amp; take control
+            <Hand size={18} /> {t('Accept mission & take control')}
           </button>
         )}
       </section>
       {dlg && (
         <ReasonDialog
-          title={`Reject ${m.id}`}
-          hint="e.g. Use the perimeter route to avoid the delivery bay."
-          confirmLabel="Reject plan"
+          title={t('Reject {id}', { id: m.id })}
+          hint={t('e.g. Use the perimeter route to avoid the delivery bay.')}
+          confirmLabel={t('Reject plan')}
           danger
           onClose={() => setDlg(false)}
           onConfirm={(r) => { dispatch({ type: 'rejectMission', missionId: m.id, reason: r }); setDlg(false); }}
@@ -505,6 +540,7 @@ function Planner({ m }: { m: Mission }) {
 
 function LiveMission({ m }: { m: Mission }) {
   const { s, dispatch } = useStore();
+  const t = useT();
   const me = currentUser(s);
   const d = s.devices[m.deviceId];
   const f = freshness(s, d);
@@ -519,28 +555,28 @@ function LiveMission({ m }: { m: Mission }) {
     const n = s.commands.filter((c) => c.missionId === m.id && c.type === type && isTerminal(c)).length;
     dispatch({ type: 'issueCommand', missionId: m.id, command: type, idempotencyKey: `${m.id}:${type}:${n}` });
   };
-  const has = (t: CommandType) => d.commands.includes(t);
+  const has = (c: CommandType) => d.commands.includes(c);
 
   return (
     <>
       <section className="step">
         <div className="row between">
-          <h4>Step 3 · Live mission</h4>
+          <h4>{t('Step 3 · Live mission')}</h4>
           <MissionBadge status={m.status} />
         </div>
         <div className={`control-held${iHold ? ' me' : ''}`}>
-          <Lock size={15} /> CONTROL HELD: <strong>{userName(s, holder)}</strong>
-          {iHold && <span className="muted"> (you)</span>}
+          <Lock size={15} /> CONTROL HELD · {t('Controlled by')} <strong>{userName(s, holder)}</strong>
+          {iHold && <span className="muted"> {t('(you)')}</span>}
         </div>
         <dl className="meta">
-          <div><dt>Telemetry</dt><dd><FreshBadge f={f} age={`${fmtAge(age)} ago`} /></dd></div>
-          <div><dt>Battery</dt><dd>{Math.round(d.battery ?? 0)}%</dd></div>
-          <div><dt>Progress</dt><dd>Checkpoint {Math.min(m.nextCp + 1, m.checkpoints.length)} of {m.checkpoints.length}</dd></div>
-          <div><dt>Speed</dt><dd>{f === 'live' ? `${d.speed.toFixed(1)} m/s` : 'unknown'}</dd></div>
+          <div><dt>{t('Telemetry')}</dt><dd><FreshBadge f={f} age={ago(age)} /></dd></div>
+          <div><dt>{t('Battery')}</dt><dd>{Math.round(d.battery ?? 0)}%</dd></div>
+          <div><dt>{t('Progress')}</dt><dd>{t('Checkpoint {n} of {total}', { n: Math.min(m.nextCp + 1, m.checkpoints.length), total: m.checkpoints.length })}</dd></div>
+          <div><dt>{t('Speed')}</dt><dd>{f === 'live' ? `${d.speed.toFixed(1)} m/s` : t('unknown')}</dd></div>
         </dl>
         {f !== 'live' && (
           <p className="banner warn">
-            Last data {fmtAge(age)} ago. New start/resume commands are held. Vehicle state is uncertain — check with the field operator.
+            {t('Last data {ago}. New start/resume commands are held. Vehicle state is uncertain — check with the field operator.', { ago: ago(age) })}
           </p>
         )}
         {m.note && <p className="banner info">{m.note}</p>}
@@ -549,42 +585,42 @@ function LiveMission({ m }: { m: Mission }) {
       <section className="step">
         {!iHold && (
           <p className="banner info">
-            Only {userName(s, holder)} can command {d.id}.
+            {t('Only {name} can command {id}.', { name: userName(s, holder), id: d.id })}
             {can(me.role, 'control.handover') && !off && (
-              <button className="link" onClick={() => dispatch({ type: 'handover', deviceId: d.id, toUserId: me.id })}>Take over control (logged)</button>
+              <button className="link" onClick={() => dispatch({ type: 'handover', deviceId: d.id, toUserId: me.id })}>{t('Take over control (logged)')}</button>
             )}
           </p>
         )}
         {m.status === 'assigned' && has('start') && (
           <button className="btn-primary wide big" disabled={!iHold || off} onClick={() => send('start')}>
-            <Play size={18} /> {pending?.type === 'start' ? 'Start requested — waiting for vehicle' : 'Send start request'}
+            <Play size={18} /> {pending?.type === 'start' ? t('Start requested — waiting for vehicle') : t('Send start request')}
           </button>
         )}
         {(m.status === 'executing' || m.status === 'paused') && (
           <div className="ctl-grid">
             {m.status === 'executing' && has('pause') && (
-              <button className="btn-secondary" disabled={!iHold || off} onClick={() => send('pause')} title="Hold position. Mission can be resumed.">
-                <Pause size={18} /> Pause mission
+              <button className="btn-secondary" disabled={!iHold || off} onClick={() => send('pause')} title={t('Hold position. Mission can be resumed.')}>
+                <Pause size={18} /> {t('Pause mission')}
               </button>
             )}
             {m.status === 'paused' && has('resume') && (
               <button className="btn-secondary" disabled={!iHold || off} onClick={() => send('resume')}>
-                <Play size={18} /> Resume
+                <Play size={18} /> {t('Resume')}
               </button>
             )}
             {has('stop') && (
-              <button className="btn-danger" disabled={!iHold || off} onClick={() => send('stop')} title="Ask the vehicle to stop and end the mission. Not an emergency stop.">
-                <OctagonX size={18} /> Stop request
+              <button className="btn-danger" disabled={!iHold || off} onClick={() => send('stop')} title={t('Ask the vehicle to stop and end the mission. Not an emergency stop.')}>
+                <OctagonX size={18} /> {t('Stop request')}
               </button>
             )}
           </div>
         )}
-        <p className="fine">Stop request is not an emergency stop. Use the physical E-stop on the vehicle for emergencies.</p>
+        <p className="fine">{t('Stop request is not an emergency stop. Use the physical E-stop on the vehicle for emergencies.')}</p>
       </section>
 
       <section className="step">
-        <h4>Commands</h4>
-        {cmds.length === 0 && <p className="muted">No commands sent yet.</p>}
+        <h4>{t('Commands')}</h4>
+        {cmds.length === 0 && <p className="muted">{t('No commands sent yet.')}</p>}
         <ul className="cmds">
           {cmds.map((c) => (
             <li key={c.id}>
@@ -593,7 +629,7 @@ function LiveMission({ m }: { m: Mission }) {
                 <CommandBadge status={c.status} />
               </div>
               <small className="muted mono">
-                {c.id} · sent {fmtTime(c.issuedAt, true)} by {userName(s, c.issuer)} · key {c.idempotencyKey.split(':').slice(1).join(':')}
+                {t('{id} · sent {time} by {name} · key {key}', { id: c.id, time: fmtTime(c.issuedAt, true), name: userName(s, c.issuer), key: c.idempotencyKey.split(':').slice(1).join(':') })}
               </small>
               {c.detail && <small className={c.status === 'succeeded' ? 'muted' : 'warn-text'}>{c.detail}</small>}
             </li>
@@ -606,18 +642,19 @@ function LiveMission({ m }: { m: Mission }) {
 
 function DevicePanel({ d }: { d: Device }) {
   const { s, dispatch } = useStore();
+  const t = useT();
   const me = currentUser(s);
   const f = freshness(s, d);
   return (
     <aside className="panel right">
       <div className="panel-head">
-        <h2>Device</h2>
-        <button className="icon-btn" aria-label="Close device" onClick={() => dispatch({ type: 'selectDevice', id: null })}><X size={18} /></button>
+        <h2>{t('Device')}</h2>
+        <button className="icon-btn" aria-label={t('Close device')} onClick={() => dispatch({ type: 'selectDevice', id: null })}><X size={18} /></button>
       </div>
       <div className="inc-head">
         <div className="row gap"><span className="inc-big-id">{d.id}</span><IntegrationBadge i={d.integration} /></div>
         <h3>{d.model}</h3>
-        <div className="row gap-s"><FreshBadge f={f} age={`${fmtAge(ageMs(s, d))} ago`} /></div>
+        <div className="row gap-s"><FreshBadge f={f} age={ago(ageMs(s, d))} /></div>
       </div>
       {d.kind === 'cctv' && (
         <div className="feed-wrap">
@@ -627,23 +664,107 @@ function DevicePanel({ d }: { d: Device }) {
       <div className="panel-body">
         <section className="step">
           <dl className="meta">
-            <div><dt>Zone</dt><dd>{d.zone}</dd></div>
-            <div><dt>Position</dt><dd>{d.pos.x.toFixed(0)}, {d.pos.y.toFixed(0)} m ± {d.accuracyM} m</dd></div>
-            {d.alt !== undefined && <div><dt>Altitude</dt><dd>{d.alt} m (site datum, simulated)</dd></div>}
-            {d.battery !== undefined && <div><dt>Battery</dt><dd>{Math.round(d.battery)}%</dd></div>}
-            <div><dt>Adapter</dt><dd>{d.adapterVersion}</dd></div>
-            <div><dt>Firmware tested</dt><dd>{d.firmwareTested}</dd></div>
-            <div><dt>Control</dt><dd>{userName(s, d.controlOwner)}</dd></div>
-            <div><dt>Commands</dt><dd>{d.commands.length ? d.commands.join(', ') : 'none (view only)'}</dd></div>
+            <div><dt>{t('Zone')}</dt><dd>{d.zone}</dd></div>
+            <div><dt>{t('Position')}</dt><dd>{d.pos.x.toFixed(0)}, {d.pos.y.toFixed(0)} m ± {d.accuracyM} m</dd></div>
+            {d.alt !== undefined && <div><dt>{t('Altitude')}</dt><dd>{t('{alt} m (site datum, simulated)', { alt: d.alt })}</dd></div>}
+            {d.battery !== undefined && <div><dt>{t('Battery')}</dt><dd>{Math.round(d.battery)}%</dd></div>}
+            <div><dt>{t('Adapter')}</dt><dd>{d.adapterVersion}</dd></div>
+            <div><dt>{t('Firmware tested')}</dt><dd>{d.firmwareTested}</dd></div>
+            <div><dt>{t('Control')}</dt><dd>{userName(s, d.controlOwner)}</dd></div>
+            <div><dt>{t('Commands')}</dt><dd>{d.commands.length ? d.commands.join(', ') : t('none (view only)')}</dd></div>
           </dl>
           <p className="muted">{d.limitations}</p>
           {d.controlOwner && can(me.role, 'control.handover') && d.controlOwner !== me.id && !s.replay.active && (
             <button className="btn-secondary wide" onClick={() => dispatch({ type: 'handover', deviceId: d.id, toUserId: me.id })}>
-              <Hand size={16} /> Take over control (logged)
+              <Hand size={16} /> {t('Take over control (logged)')}
             </button>
           )}
         </section>
       </div>
     </aside>
+  );
+}
+
+/** Asks the media gateway for a signed stream; video stays hidden if the role may not view it (F13). */
+function useVideoAllowed(deviceId?: string) {
+  const { s, session } = useStore();
+  const role = currentUser(s).role;
+  const [ok, setOk] = useState<boolean | null>(session ? null : can(role, 'media.view'));
+  useEffect(() => {
+    if (!session) return setOk(can(role, 'media.view'));
+    if (!deviceId) return;
+    let live = true;
+    setOk(null);
+    session.mediaUrl(deviceId).then(
+      () => live && setOk(true),
+      () => live && setOk(false),
+    );
+    return () => {
+      live = false;
+    };
+  }, [deviceId, session, role]);
+  return ok;
+}
+
+function NoVideo({ why }: { why: string }) {
+  return (
+    <div className="feed no-video">
+      <Video size={22} />
+      <span>{why}</span>
+    </div>
+  );
+}
+
+function FieldTasks({ inc }: { inc: Incident }) {
+  const { s, dispatch, mode } = useStore();
+  const t = useT();
+  const me = currentUser(s);
+  const tasks = s.assignments.filter((a) => a.incidentId === inc.id);
+  const responders = s.users.filter((u) => u.role === 'responder');
+  const [pick, setPick] = useState('');
+  if (mode !== 'remote' || (!tasks.length && !can(me.role, 'incident.assign'))) return null;
+  const open = !['closed', 'dismissed', 'duplicate', 'resolved'].includes(inc.status);
+  const label = { assigned: t('Waiting to accept'), accepted: t('Accepted · en route'), on_scene: t('On scene'), reported: t('Report received'), cancelled: t('Cancelled') } as const;
+  return (
+    <section className="step">
+      <h4><Users size={14} /> {t('Field responders')}</h4>
+      {tasks.map((a) => (
+        <div key={a.id} className="row between">
+          <span>{userName(s, a.responderId)}</span>
+          <Badge tone={a.status === 'reported' ? 'green' : a.status === 'on_scene' ? 'cyan' : 'amber'}>{label[a.status]}</Badge>
+        </div>
+      ))}
+      {tasks.some((a) => a.note) && <p className="muted">“{tasks.find((a) => a.note)?.note}”</p>}
+      {open && can(me.role, 'incident.assign') && responders.length > 0 && (
+        <div className="row gap-s">
+          <select id={`assign-${inc.id}`} className="grow" value={pick} onChange={(e) => setPick(e.target.value)}>
+            <option value="">{t('Send a field responder…')}</option>
+            {responders.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.title}</option>)}
+          </select>
+          <button className="btn-secondary" disabled={!pick || s.replay.active} onClick={() => { dispatch({ type: 'assignResponder', incidentId: inc.id, responderId: pick }); setPick(''); }}>{t('Assign')}</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Reopen({ inc }: { inc: Incident }) {
+  const { s, dispatch, mode } = useStore();
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  if (mode !== 'remote' || !can(currentUser(s).role, 'incident.reopen')) return null;
+  return (
+    <>
+      <button className="btn-secondary wide" disabled={s.replay.active} onClick={() => setOpen(true)}><RotateCcw size={16} /> {t('Reopen')}</button>
+      {open && (
+        <ReasonDialog
+          title={t('Reopen {id}', { id: inc.id })}
+          hint={t('e.g. Sensor triggered again; needs another look.')}
+          confirmLabel={t('Reopen')}
+          onClose={() => setOpen(false)}
+          onConfirm={(r) => { dispatch({ type: 'reopenIncident', incidentId: inc.id, reason: r }); setOpen(false); }}
+        />
+      )}
+    </>
   );
 }

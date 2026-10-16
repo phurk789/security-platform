@@ -1,3 +1,4 @@
+import { useT } from '../i18n';
 import type { CommandStatus, Freshness, IncidentStatus, IntegrationStatus, MissionStatus } from '@13store/shared';
 
 type Tone = 'cyan' | 'amber' | 'red' | 'green' | 'grey' | 'violet';
@@ -22,8 +23,9 @@ export const INCIDENT_LABEL: Record<IncidentStatus, [string, Tone]> = {
 };
 
 export function IncidentBadge({ status }: { status: IncidentStatus }) {
+  const tr = useT();
   const [l, t] = INCIDENT_LABEL[status];
-  return <Badge tone={t}>{l}</Badge>;
+  return <Badge tone={t}>{tr(l)}</Badge>;
 }
 
 export const MISSION_LABEL: Record<MissionStatus, [string, Tone]> = {
@@ -40,8 +42,9 @@ export const MISSION_LABEL: Record<MissionStatus, [string, Tone]> = {
 };
 
 export function MissionBadge({ status }: { status: MissionStatus }) {
+  const tr = useT();
   const [l, t] = MISSION_LABEL[status];
-  return <Badge tone={t}>{l}</Badge>;
+  return <Badge tone={t}>{tr(l)}</Badge>;
 }
 
 export const COMMAND_LABEL: Record<CommandStatus, [string, Tone]> = {
@@ -58,18 +61,21 @@ export const COMMAND_LABEL: Record<CommandStatus, [string, Tone]> = {
 };
 
 export function CommandBadge({ status }: { status: CommandStatus }) {
+  const tr = useT();
   const [l, t] = COMMAND_LABEL[status];
-  return <Badge tone={t}>{l}</Badge>;
+  return <Badge tone={t}>{tr(l)}</Badge>;
 }
 
 export function FreshBadge({ f, age }: { f: Freshness; age?: string }) {
-  if (f === 'live') return <Badge tone="green">LIVE{age ? ` · ${age}` : ''}</Badge>;
-  if (f === 'stale') return <Badge tone="amber" solid>STALE{age ? ` · ${age}` : ''}</Badge>;
-  return <Badge tone="red" solid>OFFLINE{age ? ` · last seen ${age}` : ''}</Badge>;
+  const t = useT();
+  if (f === 'live') return <Badge tone="green" title={t('Data is fresh')}>LIVE{age ? ` · ${age}` : ''}</Badge>;
+  if (f === 'stale') return <Badge tone="amber" solid title={t('Data is late. New commands are held.')}>STALE{age ? ` · ${age}` : ''}</Badge>;
+  return <Badge tone="red" solid title={t('No data from this device')}>OFFLINE{age ? ` · ${t('last seen {age}', { age })}` : ''}</Badge>;
 }
 
 export function IntegrationBadge({ i }: { i: IntegrationStatus }) {
-  if (i === 'verified') return <Badge tone="green">VERIFIED</Badge>;
-  if (i === 'testing') return <Badge tone="amber">TESTING</Badge>;
-  return <Badge tone="violet" solid title="Simulated adapter — not a real integration">SIMULATED</Badge>;
+  const t = useT();
+  if (i === 'verified') return <Badge tone="green" title={t('Integration tested and verified')}>VERIFIED</Badge>;
+  if (i === 'testing') return <Badge tone="amber" title={t('Integration still being tested')}>TESTING</Badge>;
+  return <Badge tone="violet" solid title={t('Simulated adapter — not a real integration')}>SIMULATED</Badge>;
 }

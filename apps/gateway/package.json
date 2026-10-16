@@ -6,8 +6,10 @@
   "description": "Edge Gateway: runs device adapters on site and connects them to the platform server",
   "main": "./src/index.ts",
   "scripts": {
-    "start": "tsx src/index.ts",
-    "dev": "tsx src/index.ts"
+    "start": "tsx src/cli.ts",
+    "dev": "tsx src/cli.ts",
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --external:ws",
+    "start:prod": "node dist/index.js"
   },
   "dependencies": {
     "@13store/shared": "*",

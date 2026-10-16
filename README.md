@@ -1,76 +1,92 @@
-# 13STORE — Digital Twin for Public Security (UX prototype)
+# 13STORE — Digital Twin for Public Security
 
-Interactive prototype of the command-centre UI described in
-[`docs/13STORE_Public_Security_PRD_R1.md`](docs/13STORE_Public_Security_PRD_R1.md) and
-[`docs/13STORE_Public_Security_UXUI_Concept_R1.md`](docs/13STORE_Public_Security_UXUI_Concept_R1.md),
-laid out after the concept mockup in [`docs/reference-mockup.png`](docs/reference-mockup.png).
+A command-centre platform for checking alerts, approving and running UGV missions, and keeping
+an auditable record, built from [`docs/13STORE_Public_Security_PRD_R1.md`](docs/13STORE_Public_Security_PRD_R1.md)
+and [`docs/13STORE_Public_Security_UXUI_Concept_R1.md`](docs/13STORE_Public_Security_UXUI_Concept_R1.md).
 
-This is **PRD step 2 (UX Prototype)**: every device, video feed and event is simulated in the browser.
-There is no backend and no connection to real cameras, UGVs or UAVs. All devices are labelled
-`SIMULATED`, and nothing here claims an integration is ready.
+It runs today end to end against **simulated devices** through a real edge-gateway protocol.
+Real cameras, UGVs and UAVs connect by writing an adapter
+([`docs/ADAPTER_CONTRACT.md`](docs/ADAPTER_CONTRACT.md)). Nothing in this repository claims a
+hardware integration is ready.
 
-## Run
+## What's in it
+
+| Part | What it does |
+|---|---|
+| **Command centre** (`apps/web`) | Situation map 2D/3D, incident queue and workflow, mission planner with constraint checks, live mission with command status, evidence and replay, reports, search, administration. Thai and English. |
+| **Field app** (`apps/field`) | Mobile web app for responders: accept, on scene, report with photos. Works offline and syncs without duplicates. Thai and English. |
+| **Platform server** (`apps/server`) | REST API and WebSockets on SQLite. Sign-in, roles, org and site isolation, approvals, command certainty, evidence with checksums, hash-chained audit log, backups, signed media URLs, OpenAPI. |
+| **Edge gateway** (`apps/gateway`) | Runs device adapters on site and connects them to the server. Includes simulated UGV, UAV and CCTV adapters and an SDK for your own. |
+| **Shared rules** (`packages/shared`) | Roles, state machines, freshness thresholds and the wire protocol used by all of the above. |
+
+## Quick start
 
 ```bash
-npm install
-npm run dev          # http://localhost:5173
-npm test             # domain rules (PRD §11 acceptance checks)
-npm run build        # production build → dist/
-npm run build:single # one self-contained HTML file → dist-single/index.html
+docker compose up --build        # server + separate simulated edge gateway
+# or, from source (Node 22):
+npm ci && npm run build && npm start
 ```
+
+Open http://localhost:8080. Demo accounts, all with password `demo1234`:
+
+| User | Role | Can |
+|---|---|---|
+| `alex` | Dispatcher | Verify alerts, prepare missions, assign field responders, resolve |
+| `nida` | Supervisor | Approve missions, hand over control, export evidence |
+| `somchai` | Operator | Accept missions, command the UGV it controls |
+| `kitti` | Field responder | Field app at `/field/` |
+| `priya` | Auditor | Read history, reports and audit, export evidence (no video, no control) |
+| `ploy` | Administrator | Users, API keys, devices, backups (no incident data, no control) |
+
+In the demo environment you can switch between these users from the user menu.
+
+No server? `npm run build:demo` produces `apps/web/dist-single/index.html`, a single file that
+runs the whole scenario in the browser. It's the booth fallback, labelled SIMULATION · OFFLINE.
 
 ## Booth script (~3 min, UXUI §9)
 
-Switch roles from the user menu (top right). Presenter tools are under **Demo controls** (bottom right).
-
-| Time | Who | Do this | Shows |
+| Time | Who | Do | Shows |
 |---|---|---|---|
-| 0:00 | Dispatcher (Alex) | Point at the map, KPIs, and SIM tags | One view of the site and devices that are actually ready |
-| 0:30 | Dispatcher | INC-024 → **Open camera & start review** → **Confirm** | Alert stays *unverified* until a person checks it |
-| 1:00 | Dispatcher | **Prepare mission** → pick UGV-01, route, operator → **Save draft** → **Submit for approval** | Device chosen from real readiness. Draft route is dashed |
-| 1:20 | Supervisor (Nida) | Review constraint checks → **Approve** | Only a supervisor can approve |
-| 1:40 | Operator (Somchai) | **Accept mission & take control** → **Send start request** | Command shows *Sent → Acknowledged → Confirmed*; the vehicle only moves after confirmation |
-| 2:10 | Presenter | Demo controls → **Cut UGV-01 network**, wait ~6 s, then **Restore** | STALE badge, start/resume blocked, vehicle stops by failsafe, nothing replays on reconnect |
-| 2:30 | Operator | **Resume** → UGV reaches the gate, snapshot attached | Evidence linked to the incident |
-| 2:45 | Dispatcher | Record outcome → **Resolve** → **Close** → Reports / Evidence → **Replay** | Full timeline, audit log, report export; replay disables control |
+| 0:00 | alex | Map, KPIs, SIM tags | One view of the site and devices that are actually ready |
+| 0:30 | alex | INC-024 → Open camera → Confirm | An alert stays unverified until a person checks it |
+| 1:00 | alex | Prepare mission → UGV-01, route, operator → Submit for approval | Device chosen from real readiness; draft route dashed |
+| 1:20 | nida | Check constraints → Approve | Only a supervisor can approve (password re-check after 15 min) |
+| 1:40 | somchai | Accept mission → Send start request | Sent → acknowledged → confirmed; the vehicle moves only after confirmation |
+| 2:10 | presenter | Demo controls → Cut UGV-01 network, wait ~6 s, Restore | STALE, start/resume held, failsafe stop, nothing replayed on reconnect |
+| 2:30 | somchai | Resume → UGV reaches the gate, snapshot attached | Evidence linked to the incident with a checksum |
+| 2:45 | alex / priya | Resolve → Close → Reports → Export; Evidence → Replay | Timeline, audit log, report export, replay with control off |
 
-Use **Reset demo dataset** before each run. Optional extras: **Inject duplicate gate alert** and merge it into
-INC-024; edit the route after approval to force re-approval; switch to Auditor to show read-only.
+Reset before each run: Demo controls → Reset demo dataset. Optional: assign INC-022 to `kitti`
+and show the field app on a phone; inject a duplicate alert and merge it.
 
-## What the prototype enforces
+## Documentation
 
-The rules live in [`src/domain/reducer.ts`](src/domain/reducer.ts), which stands in for the server:
-every action is re-checked there even when the UI already hid the button.
-
-| PRD | Where |
+| Doc | For |
 |---|---|
-| F01 2D/3D map keeps selection | `TwinMap` — one site model, two projections |
-| F03 Incident queue, merge, dismiss with reason | `IncidentPanel` → `confirmIncident` / `mergeIncident` / `dismissIncident` |
-| F04 LIVE / STALE / OFFLINE / REPLAY / SIMULATED | `FreshBadge`, `CameraFeed` (frozen frames never say LIVE) |
-| F05 Approval, re-approval after edit | `approveMission`, `editRoute` |
-| F06 Commands only if the adapter supports them | `Device.commands`, `issueCommand` |
-| F07 Command ID, idempotency key, expiry | `Command`, duplicate keys ignored |
-| F08 One control holder, logged handover | `controlOwner`, `acceptMission`, `handover` |
-| F09 Stale data blocks new commands; no replay after reconnect | `freshness`, `demoRestoreLink`, failsafe pause |
-| F10 Timeline with source and received time | `TimelineEvent`, Log tab |
-| F11 Report and audit, export logged | `ReportsPage`, `exportReport` |
-| F12 Demo vs real separated; replay can't command | SIMULATION/REPLAY badges, `guard()` blocks in replay |
+| [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) | Every PRD requirement and acceptance check, where it's implemented and tested, and what still needs input before a pilot |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Components, data model, server-side rules, command lifecycle, environments |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Configuration, deployment, pilot checklist, backup and restore, security notes |
+| [`docs/API.md`](docs/API.md) | API guide, developer sandbox, examples; full reference at `/api/v1/openapi.json` |
+| [`docs/ADAPTER_CONTRACT.md`](docs/ADAPTER_CONTRACT.md) | How to connect a real device (BUILD YOUR OWN) |
 
-Tests in [`src/domain/reducer.test.ts`](src/domain/reducer.test.ts) cover the PRD §11 checks that apply to a
-front-end prototype (permissions, re-approval, idempotency, timeouts, reconnect, replay, full run).
+## Develop
 
-## Not in this prototype
-
-- Real device adapters, video, maps or 3D models. Site geometry is placeholder.
-- Backend, authentication, multi-org scoping (F13), backup/restore, field mobile app (F14), developer API (F16).
-- Thai UI strings. Fonts already support Thai (Noto Sans Thai); copy is English to match the mockup.
-
-## Layout
-
+```bash
+npm ci
+npm run dev                          # server on :8080 with the embedded simulated gateway
+npm run dev -w @13store/web          # command centre on :5173 (proxies /api)
+npm run dev -w @13store/field        # field app on :5174
+npx tsc -b && npx vitest run         # typecheck and all tests
 ```
-src/
-  domain/      types, scenario data, role/freshness policy, reducer (+ tests)
-  components/  TwinMap, IncidentPanel, CameraFeed, Shell (top bar, nav, queue, timeline), Badges, Dialog
-  views/       Incidents, Missions, Devices, Evidence & replay, Reports
-docs/          PRD, UX/UI concept, reference mockup
-```
+
+Tests cover the PRD §11 acceptance checks end to end against the real server and gateway:
+permissions through the API, re-approval after route changes, idempotent retries, link loss with
+failsafe and no replay, replay mode, organisation isolation (API, media URLs, WebSocket), field
+responder scoping and offline dedupe, audit tamper detection, and backup/restore.
+
+## Before a pilot
+
+See the last section of [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md). In short: real device
+adapters and hardware tests (including the physical emergency stop), the surveyed site model,
+a video streaming server, the customer's identity and data-retention policy, TLS hosting, and
+load and security testing.

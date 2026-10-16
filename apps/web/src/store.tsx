@@ -1,12 +1,37 @@
-import { createContext, useContext, useEffect, useReducer, type Dispatch, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react';
+import type { AppState, Meta, SessionUser } from '@13store/shared';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
-import type { AppState } from '@13store/shared';
+import type { Api } from './api';
 
-const Ctx = createContext<{ s: AppState; dispatch: Dispatch<Msg> } | null>(null);
+/** Extra capabilities available when connected to a platform server. */
+export interface Session {
+  api: Api;
+  user: SessionUser;
+  meta: Meta;
+  logout(): void;
+  /** Demo environment only: sign in as another seeded user (role switch at the booth). */
+  switchUser?(username: string): Promise<void>;
+  demoUsers: { username: string; name: string; role: string }[];
+  /** Open (or download, if allowed) an evidence file. */
+  openEvidence(id: string, download?: boolean): Promise<void>;
+  /** Ask the media gateway for a signed stream URL. Rejects if the role cannot view video. */
+  mediaUrl(deviceId: string): Promise<string>;
+  reload(): Promise<void>;
+}
+
+export interface StoreValue {
+  s: AppState;
+  dispatch: (m: Msg) => void;
+  mode: 'standalone' | 'remote';
+  session?: Session;
+}
+
+export const StoreCtx = createContext<StoreValue | null>(null);
 
 const TICK_MS = 250;
 
-export function StoreProvider({ children }: { children: ReactNode }) {
+/** Offline demo: the whole scenario runs in the browser (booth fallback, UXUI §9). */
+export function StandaloneProvider({ children }: { children: ReactNode }) {
   const [s, dispatch] = useReducer(reducer, undefined, makeInitialState);
 
   useEffect(() => {
@@ -19,14 +44,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(t);
   }, []);
 
-  // Auto-dismiss toasts.
-  // Keyed on the oldest toast id: state is cloned every tick, so the array itself always changes.
-  const firstToast = s.toasts[0]?.id;
-  useEffect(() => {
-    if (!firstToast) return;
-    const t = window.setTimeout(() => dispatch({ type: 'dismissToast', id: firstToast }), 5000);
-    return () => window.clearTimeout(t);
-  }, [firstToast]);
+  useToastTimer(s, dispatch);
 
   // SHA-256 for evidence integrity display (checksum ≠ legal admissibility, PRD §8).
   const missingKey = s.evidence.filter((e) => !e.checksum).map((e) => e.id).join(',');
@@ -42,11 +60,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [missingKey]);
 
-  return <Ctx.Provider value={{ s, dispatch }}>{children}</Ctx.Provider>;
+  return <StoreCtx.Provider value={{ s, dispatch, mode: 'standalone' }}>{children}</StoreCtx.Provider>;
+}
+
+/** Auto-dismiss the oldest toast. Keyed on its id because state is replaced every tick. */
+export function useToastTimer(s: AppState, dispatch: (m: Msg) => void) {
+  const firstToast = s.toasts[0]?.id;
+  useEffect(() => {
+    if (!firstToast) return;
+    const t = window.setTimeout(() => dispatch({ type: 'dismissToast', id: firstToast }), 5000);
+    return () => window.clearTimeout(t);
+  }, [firstToast]);
 }
 
 export function useStore() {
-  const v = useContext(Ctx);
+  const v = useContext(StoreCtx);
   if (!v) throw new Error('useStore outside provider');
   return v;
 }

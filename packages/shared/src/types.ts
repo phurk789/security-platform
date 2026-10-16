@@ -23,6 +23,10 @@ export interface Assignment {
   createdAt: number;
   updatedAt: number;
   note?: string;
+  /** Copied from the incident so a phone can render the task without another request. */
+  incidentTitle?: string;
+  place?: string;
+  zone?: string;
 }
 
 export type IncidentStatus =
@@ -209,7 +213,7 @@ export interface Toast {
   at: number;
 }
 
-export type View = 'overview' | 'incidents' | 'missions' | 'devices' | 'evidence' | 'reports';
+export type View = 'overview' | 'incidents' | 'missions' | 'devices' | 'evidence' | 'reports' | 'admin';
 
 export interface Layers {
   cctv: boolean;
@@ -241,6 +245,10 @@ export interface AppState {
   /** Sim time at which a device last reported a link-loss failsafe stop. */
   failsafeAt: Record<string, number | undefined>;
   replay: { active: boolean; at: number };
+  /** Field responder tasks. */
+  assignments: Assignment[];
+  /** Page-level data label from the server (SIMULATION / MIXED DEMO / LIVE). */
+  dataLabel: 'SIMULATION' | 'MIXED DEMO' | 'LIVE' | 'OFFLINE DEMO';
   toasts: Toast[];
   presentation: boolean;
   seq: number;

@@ -63,7 +63,12 @@ export type Msg =
   | { type: 'seekReplay'; at: number }
   | { type: 'exitReplay' }
   | { type: 'dismissToast'; id: string }
-  | { type: 'togglePresentation' };
+  | { type: 'togglePresentation' }
+  // Server-only actions (no-ops with a notice in the offline demo).
+  | { type: 'assignResponder'; incidentId: string; responderId: string }
+  | { type: 'reopenIncident'; incidentId: string; reason: string }
+  | { type: 'editIncident'; incidentId: string; severity?: Incident['severity']; incidentType?: string }
+  | { type: 'toast'; tone: 'info' | 'warn' | 'error' | 'ok'; text: string };
 
 export function makeInitialState(): AppState {
   const s = initialState();
@@ -347,6 +352,14 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       return s;
     case 'togglePresentation':
       s.presentation = !s.presentation;
+      return s;
+    case 'toast':
+      toast(s, msg.tone, msg.text);
+      return s;
+    case 'assignResponder':
+    case 'reopenIncident':
+    case 'editIncident':
+      toast(s, 'info', 'Available when connected to the platform server.');
       return s;
 
     // -- incidents ----------------------------------------------------------

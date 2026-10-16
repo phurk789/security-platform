@@ -1,0 +1,28 @@
+# Demo stack: platform server + a separate simulated edge gateway, as on site.
+#   docker compose up --build      → http://localhost:8080
+services:
+  server:
+    build: .
+    environment:
+      ENV_MODE: demo
+      EMBED_GATEWAY: "0"
+      # Pilot: ENV_MODE=pilot, set MEDIA_SECRET and ADMIN_PASSWORD, and use a real TLS proxy in front.
+    ports:
+      - "8080:8080"
+    volumes:
+      - platform-data:/data
+    restart: unless-stopped
+
+  edge-gateway:
+    build: .
+    command: ["node", "apps/gateway/dist/index.js"]
+    environment:
+      SERVER_URL: ws://server:8080
+      GATEWAY_KEY: gw_demo_local_key
+      GATEWAY_ID: edge-civic-01
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  platform-data:

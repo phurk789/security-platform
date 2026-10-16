@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npx vitest run
+      - run: npm run build -w @13store/web
+      - run: npm run build:single -w @13store/web
+      - run: npm run build -w @13store/field
+      - run: npm run build -w @13store/server
+      - run: npm run build -w @13store/gateway
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t ps-twin:ci .

@@ -11,7 +11,7 @@ export function initialState(): AppState {
   return {
     now,
     userId: 'u-alex',
-    users: SEED_USERS,
+    users: SEED_USERS.filter((u) => ['dispatcher', 'supervisor', 'operator', 'auditor'].includes(u.role)),
     view: 'overview',
     mapMode: '3d',
     layers: { cctv: true, ugv: true, uav: true, zones: true, accuracy: true },
@@ -28,6 +28,8 @@ export function initialState(): AppState {
     linkCut: {},
     failsafeAt: {},
     replay: { active: false, at: now },
+    assignments: [],
+    dataLabel: 'OFFLINE DEMO',
     toasts: [],
     presentation: false,
     seq: 1,

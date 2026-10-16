@@ -152,6 +152,27 @@ describe('edge gateway channel', () => {
   });
 });
 
+describe('developer sandbox', () => {
+  it('accepts a home-built adapter that the demo organisation would refuse', async () => {
+    const ws = new WebSocket(`${srv.wsUrl}/api/v1/gateway`, { headers: { authorization: 'Bearer gw_sandbox_demo_key' } });
+    await new Promise((r) => ws.on('open', r));
+    const welcome = new Promise<any>((r) => ws.on('message', (m) => r(JSON.parse(String(m)))));
+    ws.send(
+      JSON.stringify({
+        t: 'hello',
+        protocol: GATEWAY_PROTOCOL,
+        gatewayId: 'diy',
+        adapters: [{ deviceId: 'SBX-ROVER-01', kind: 'ugv', model: 'DIY', integration: 'testing', capabilities: ['ground_patrol'], commands: ['start', 'stop'], rateMs: 1000, limitations: '', linkLossBehavior: 'stop' }],
+      }),
+    );
+    expect((await welcome).accepted).toEqual(['SBX-ROVER-01']);
+    ws.close();
+    const devop = await Client.login(srv.url, 'devop');
+    expect((await devop.get('/devices/SBX-ROVER-01')).body.commands).toEqual(['start', 'stop']);
+    expect((await devop.get('/devices/UGV-01')).status).toBe(404);
+  });
+});
+
 describe('audit and backup', () => {
   it('detects tampering with the audit log', async () => {
     const copyDir = mkdtempSync(join(tmpdir(), 'ps-audit-'));

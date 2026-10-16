@@ -1,5 +1,7 @@
 node_modules
 dist
 dist-single
+data
 *.tsbuildinfo
 .DS_Store
+.proxy-ca.crt

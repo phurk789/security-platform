@@ -1,0 +1,23 @@
+{
+  "name": "@13store/field",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Field Responder mobile web app (PRD F14)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@13store/shared": "*",
+    "lucide-react": "^1.58.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.4"
+  }
+}

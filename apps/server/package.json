@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --packages=external",
+    "build": "esbuild src/index.ts src/cli/restore.ts src/cli/seed.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist --external:fastify --external:@fastify/* --external:ws --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\"",
     "restore": "tsx src/cli/restore.ts",
-    "seed": "tsx src/cli/seed.ts"
+    "seed": "tsx src/cli/seed.ts",
+    "start:prod": "node dist/index.js"
   },
   "dependencies": {
     "@13store/shared": "*",

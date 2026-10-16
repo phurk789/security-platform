@@ -3,14 +3,14 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "13STORE Digital Twin for Public Security — command centre, API server, edge gateway and field app",
+  "description": "13STORE Digital Twin for Public Security \u2014 command centre, API server, edge gateway and field app",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
   "scripts": {
     "dev": "npm run dev -w @13store/server",
-    "build": "npm run build -w @13store/web && npm run build -w @13store/field && npm run build -w @13store/server",
+    "build": "npm run build -w @13store/web && npm run build -w @13store/field && npm run build -w @13store/server && npm run build -w @13store/gateway",
     "build:demo": "npm run build:single -w @13store/web",
     "start": "npm run start -w @13store/server",
     "typecheck": "tsc -b",

@@ -436,7 +436,17 @@ export class Platform {
     const inc = this.getIncident(a, incidentId);
     const r = this.db.prepare("SELECT id, name, role FROM users WHERE id = ? AND org_id = ? AND active = 1").get(responderId, a.orgId) as { id: string; name: string; role: Role } | undefined;
     if (!r || r.role !== 'responder') fail(400, 'invalid', 'Choose an active field responder.');
-    const x: Assignment = { id: `${this.prefix(a.orgId)}ASG-${nextNumber(this.db, a.orgId, 'asg')}`, incidentId, responderId, status: 'assigned', createdAt: this.now(), updatedAt: this.now() };
+    const x: Assignment = {
+      id: `${this.prefix(a.orgId)}ASG-${nextNumber(this.db, a.orgId, 'asg')}`,
+      incidentId,
+      responderId,
+      status: 'assigned',
+      createdAt: this.now(),
+      updatedAt: this.now(),
+      incidentTitle: inc.title,
+      place: inc.place,
+      zone: inc.zone,
+    };
     tx(this.db, () => {
       this.saveAssignment(a.orgId, inc.siteId, x);
       if (!inc.owner) inc.owner = r!.name;
@@ -449,7 +459,15 @@ export class Platform {
 
   listAssignments(a: Actor): Assignment[] {
     const rows = this.db.prepare('SELECT data FROM assignments WHERE org_id = ?').all(a.orgId) as { data: string }[];
-    return rows.map((r) => JSON.parse(r.data) as Assignment).filter((x) => a.role !== 'responder' || x.responderId === a.userId);
+    return rows
+      .map((r) => JSON.parse(r.data) as Assignment)
+      .filter((x) => a.role !== 'responder' || x.responderId === a.userId)
+      .map((x) => {
+        if (x.incidentTitle) return x;
+        const r = this.incRow(x.incidentId);
+        const inc = r ? (JSON.parse(r.data) as Incident) : undefined;
+        return inc ? { ...x, incidentTitle: inc.title, place: inc.place, zone: inc.zone } : x;
+      });
   }
 
   updateAssignment(a: Actor, id: string, action: 'accept' | 'arrive' | 'report', body: { note?: string; idempotencyKey?: string } = {}) {
@@ -891,14 +909,15 @@ export class Platform {
     const accepted: string[] = [];
     const rejected: { deviceId: string; reason: string }[] = [];
     const sys = this.systemActor(orgId, 'gateway', gatewayId);
+    const orgEnv = (this.db.prepare('SELECT env FROM orgs WHERE id = ?').get(orgId) as { env: string } | undefined)?.env ?? this.cfg.env;
     for (const decl of decls) {
       const d = this.devices.get(decl.deviceId);
       if (!d || d.orgId !== orgId || (siteIds.length && !siteIds.includes(d.siteId))) {
         rejected.push({ deviceId: decl.deviceId, reason: 'Device is not registered for this gateway. Register it under Administration first.' });
         continue;
       }
-      if (this.cfg.env === 'demo' && decl.integration !== 'simulated') {
-        rejected.push({ deviceId: decl.deviceId, reason: 'Demo environment accepts simulated adapters only.' });
+      if (orgEnv === 'demo' && decl.integration !== 'simulated') {
+        rejected.push({ deviceId: decl.deviceId, reason: 'The demo organisation accepts simulated adapters only. Use the developer sandbox or a pilot environment.' });
         continue;
       }
       Object.assign(d, {
@@ -1124,7 +1143,8 @@ export class Platform {
       retentionClass: x.retentionClass ?? 'standard',
     };
     this.db.prepare('INSERT INTO evidence (id, org_id, incident_id, sha256, path, idempotency_key, data) VALUES (?,?,?,?,?,?,?)').run(id, orgId, incidentId, checksum, path, x.idempotencyKey ?? null, JSON.stringify(ev));
-    this.event(null, orgId, siteId, incidentId, x.kind === 'note' ? 'Note attached' : `${x.kind === 'snapshot' ? 'Snapshot' : 'File'} attached`, { actor: x.recordedBy, detail: x.kind === 'note' ? x.text : ev.title });
+    const what = { note: 'Note', snapshot: 'Snapshot', photo: 'Photo', clip: 'Video clip', file: 'File' }[x.kind];
+    this.event(null, orgId, siteId, incidentId, `${what} attached`, { actor: x.recordedBy, detail: x.kind === 'note' ? x.text : ev.title });
     this.publish({ orgId, siteId, incidentId, event: { type: 'evidence', evidence: ev } });
     return ev;
   }
