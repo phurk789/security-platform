@@ -1,29 +1,24 @@
 {
   "name": "13store-public-security-twin",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "13STORE Digital Twin for Public Security — interactive UX prototype (simulated data only)",
+  "description": "13STORE Digital Twin for Public Security — command centre, API server, edge gateway and field app",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "build:single": "tsc -b && vite build --mode single",
-    "preview": "vite preview",
+    "dev": "npm run dev -w @13store/server",
+    "build": "npm run build -w @13store/web && npm run build -w @13store/field && npm run build -w @13store/server",
+    "build:demo": "npm run build:single -w @13store/web",
+    "start": "npm run start -w @13store/server",
     "typecheck": "tsc -b",
     "test": "vitest run"
   },
-  "dependencies": {
-    "lucide-react": "^1.58.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
-  },
   "devDependencies": {
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@types/node": "^26.6.5",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4",
-    "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^5.0.5"
   }
 }

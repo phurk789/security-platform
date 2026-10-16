@@ -1,0 +1,230 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_ROUTE, seedDevices } from '@13store/shared';
+import { SimCctv, SimUav, SimUgv, defaultAdapters } from '../src/adapters';
+import { cmd, fakeCtx, statuses } from './helpers';
+
+const seed = seedDevices(0);
+
+beforeEach(() => vi.useFakeTimers({ now: 1_800_000_000_000 }));
+afterEach(() => vi.useRealTimers());
+
+function ugv() {
+  const a = new SimUgv(seed['UGV-01']);
+  const { ctx, got } = fakeCtx();
+  a.start(ctx);
+  return { a, got };
+}
+
+describe('declarations', () => {
+  it('builds the six seed devices, all simulated, CCTV-04 offline by default', () => {
+    const list = defaultAdapters();
+    expect(list.map((a) => a.declaration.deviceId).sort()).toEqual(['CCTV-01', 'CCTV-02', 'CCTV-03', 'CCTV-04', 'UAV-02', 'UGV-01']);
+    expect(list.every((a) => a.declaration.integration === 'simulated')).toBe(true);
+    const ugvDecl = list.find((a) => a.declaration.deviceId === 'UGV-01')!.declaration;
+    expect(ugvDecl.commands).toEqual(['start', 'pause', 'resume', 'stop']);
+    expect(ugvDecl.linkLossBehavior).toMatch(/Stops in place/);
+    const cam4 = list.find((a) => a.declaration.deviceId === 'CCTV-04')! as SimCctv;
+    const { ctx, got } = fakeCtx();
+    cam4.start(ctx);
+    vi.advanceTimersByTime(3000);
+    expect(got.telemetry).toHaveLength(0);
+    cam4.stop();
+  });
+});
+
+describe('SimUgv', () => {
+  it('sends 1 Hz telemetry with increasing seq and source time', () => {
+    const { a, got } = ugv();
+    vi.advanceTimersByTime(3000);
+    expect(got.telemetry.map((t) => t.seq)).toEqual([1, 2, 3]);
+    expect(got.telemetry[2].sourceTime - got.telemetry[0].sourceTime).toBe(2000);
+    expect(got.telemetry[0]).toMatchObject({ pos: seed['UGV-01'].pos, speed: 0, battery: 82 });
+    a.stop();
+  });
+
+  it('start: acknowledged → executing → succeeded, then the vehicle moves along the route', () => {
+    const { a, got } = ugv();
+    const c = cmd('start', { route: DEFAULT_ROUTE });
+    a.onCommand(c);
+    expect(statuses(got, c.commandId)).toEqual([]);
+    vi.advanceTimersByTime(1000);
+    expect(statuses(got, c.commandId)).toEqual(['acknowledged', 'executing', 'succeeded']);
+    vi.advanceTimersByTime(3000);
+    const last = got.telemetry[got.telemetry.length - 1];
+    expect(last.pos.x).toBeGreaterThan(seed['UGV-01'].pos.x);
+    expect(last.speed).toBeGreaterThan(0);
+    expect(last.nextCp).toBe(0);
+    a.stop();
+  });
+
+  it('reaches the end of the route: checkpoint events, route_complete and a snapshot', () => {
+    const { a, got } = ugv();
+    a.onCommand(cmd('start', { route: DEFAULT_ROUTE }));
+    vi.advanceTimersByTime(40_000);
+    expect(got.events.filter((e) => e.kind === 'checkpoint').map((e) => e.checkpoint)).toEqual([0, 1, 2]);
+    expect(got.events.some((e) => e.kind === 'route_complete')).toBe(true);
+    const snap = got.events.find((e) => e.kind === 'snapshot')!;
+    expect(snap.frame?.mime).toBe('image/svg+xml');
+    expect(Buffer.from(snap.frame!.base64, 'base64').toString()).toContain('SIMULATED');
+    expect(a.pos).toEqual(DEFAULT_ROUTE[DEFAULT_ROUTE.length - 1]);
+    expect(got.telemetry[got.telemetry.length - 1].speed).toBe(0);
+    a.stop();
+  });
+
+  it('never executes the same idempotency key twice and re-reports its status', () => {
+    const { a, got } = ugv();
+    const c = cmd('start', { route: DEFAULT_ROUTE });
+    a.onCommand(c);
+    vi.advanceTimersByTime(1000);
+    a.onCommand({ ...c, commandId: 'CMD-retry' });
+    a.onCommand(c);
+    vi.advanceTimersByTime(1000);
+    // Only one lifecycle; duplicates only echo the final status.
+    expect(statuses(got, c.commandId)).toEqual(['acknowledged', 'executing', 'succeeded', 'succeeded', 'succeeded']);
+    expect(got.updates.some((u) => u.commandId === 'CMD-retry')).toBe(false);
+    a.stop();
+  });
+
+  it('rejects an expired command without executing it', () => {
+    const { a, got } = ugv();
+    const c = cmd('start', { route: DEFAULT_ROUTE, expiresAt: Date.now() - 1 });
+    a.onCommand(c);
+    vi.advanceTimersByTime(3000);
+    expect(statuses(got, c.commandId)).toEqual(['rejected']);
+    expect(got.updates[0].detail).toMatch(/expired/);
+    expect(a.mode).toBe('idle');
+    a.stop();
+  });
+
+  it('rejects commands that do not fit the current state', () => {
+    const { a, got } = ugv();
+    const p = cmd('pause');
+    a.onCommand(p);
+    const s = cmd('start');
+    a.onCommand(s);
+    expect(statuses(got, p.commandId)).toEqual(['rejected']);
+    expect(statuses(got, s.commandId)).toEqual(['rejected']);
+    a.stop();
+  });
+
+  it('pause holds position, resume continues, stop ends the route', () => {
+    const { a, got } = ugv();
+    a.onCommand(cmd('start', { route: DEFAULT_ROUTE }));
+    vi.advanceTimersByTime(3000);
+    const pause = cmd('pause');
+    a.onCommand(pause);
+    vi.advanceTimersByTime(1000);
+    expect(statuses(got, pause.commandId)).toEqual(['acknowledged', 'executing', 'succeeded']);
+    const held = { ...a.pos };
+    vi.advanceTimersByTime(3000);
+    expect(a.pos).toEqual(held);
+    a.onCommand(cmd('resume'));
+    vi.advanceTimersByTime(3000);
+    expect(a.pos).not.toEqual(held);
+    const stop = cmd('stop');
+    a.onCommand(stop);
+    vi.advanceTimersByTime(1000);
+    expect(statuses(got, stop.commandId)).toEqual(['acknowledged', 'executing', 'succeeded']);
+    expect(a.mode).toBe('idle');
+    expect(a.route).toBeNull();
+    a.stop();
+  });
+
+  it('cut link: telemetry stops, commands are lost, the vehicle stops by failsafe', () => {
+    const { a, got } = ugv();
+    a.onCommand(cmd('start', { route: DEFAULT_ROUTE }));
+    vi.advanceTimersByTime(2000);
+    a.onDemo('cut_link');
+    const cutAt = Date.now();
+    const n = got.telemetry.length;
+    const lost = cmd('stop');
+    a.onCommand(lost);
+    vi.advanceTimersByTime(5000);
+    expect(got.telemetry.length).toBe(n);
+    expect(statuses(got, lost.commandId)).toEqual([]);
+    expect(a.speed).toBe(0);
+    expect(a.mode).toBe('paused');
+    expect(a.failsafeAt).toBe(cutAt + 1500);
+    a.stop();
+  });
+
+  it('restore: reports failsafe_stop, does not move by itself, never runs commands lost during the cut', () => {
+    const { a, got } = ugv();
+    a.onCommand(cmd('start', { route: DEFAULT_ROUTE }));
+    vi.advanceTimersByTime(2000);
+    a.onDemo('cut_link');
+    const lost = cmd('resume');
+    a.onCommand(lost);
+    vi.advanceTimersByTime(4000);
+    const stoppedAt = { ...a.pos };
+    a.onDemo('restore_link');
+    const fs = got.events.find((e) => e.kind === 'failsafe_stop')!;
+    expect(fs).toBeTruthy();
+    expect(fs.at).toBeLessThan(Date.now());
+    vi.advanceTimersByTime(5000);
+    expect(a.pos).toEqual(stoppedAt);
+    expect(got.telemetry[got.telemetry.length - 1].speed).toBe(0);
+    expect(statuses(got, lost.commandId)).toEqual([]);
+    // The same key re-sent after reconnect is a new delivery and now runs (operator chose to resume).
+    a.onCommand(lost);
+    vi.advanceTimersByTime(3000);
+    expect(statuses(got, lost.commandId)).toEqual(['acknowledged', 'executing', 'succeeded']);
+    expect(a.pos).not.toEqual(stoppedAt);
+    a.stop();
+  });
+
+  it('a short blip under the failsafe time does not stop the vehicle', () => {
+    const { a, got } = ugv();
+    a.onCommand(cmd('start', { route: DEFAULT_ROUTE }));
+    vi.advanceTimersByTime(1500);
+    a.onDemo('cut_link');
+    vi.advanceTimersByTime(800);
+    a.onDemo('restore_link');
+    vi.advanceTimersByTime(2000);
+    expect(a.mode).toBe('moving');
+    expect(got.events.some((e) => e.kind === 'failsafe_stop')).toBe(false);
+    a.stop();
+  });
+
+  it('reset returns to the seed state', () => {
+    const { a } = ugv();
+    a.onCommand(cmd('start', { route: DEFAULT_ROUTE }));
+    vi.advanceTimersByTime(4000);
+    a.onDemo('reset');
+    expect(a.pos).toEqual(seed['UGV-01'].pos);
+    expect(a.mode).toBe('idle');
+    expect(a.battery).toBe(82);
+    a.stop();
+  });
+});
+
+describe('SimUav and SimCctv', () => {
+  it('UAV orbits at 40 m and rejects commands', () => {
+    const a = new SimUav(seed['UAV-02']);
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    vi.advanceTimersByTime(3000);
+    expect(got.telemetry).toHaveLength(3);
+    expect(got.telemetry[0].alt).toBe(40);
+    expect(got.telemetry[0].pos).not.toEqual(got.telemetry[2].pos);
+    const c = cmd('start', { deviceId: 'UAV-02' });
+    a.onCommand(c);
+    expect(statuses(got, c.commandId)).toEqual(['rejected']);
+    a.stop();
+  });
+
+  it('CCTV heartbeats at a fixed position and can be cut and restored', () => {
+    const a = new SimCctv(seed['CCTV-02']);
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    vi.advanceTimersByTime(2000);
+    expect(got.telemetry.every((t) => t.pos.x === 376 && t.pos.y === 212)).toBe(true);
+    a.onDemo('cut_link');
+    vi.advanceTimersByTime(3000);
+    expect(got.telemetry).toHaveLength(2);
+    a.onDemo('restore_link');
+    vi.advanceTimersByTime(1000);
+    expect(got.telemetry).toHaveLength(3);
+    a.stop();
+  });
+});

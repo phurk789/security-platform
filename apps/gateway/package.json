@@ -1,0 +1,20 @@
+{
+  "name": "@13store/gateway",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Edge Gateway: runs device adapters on site and connects them to the platform server",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@13store/shared": "*",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15"
+  }
+}

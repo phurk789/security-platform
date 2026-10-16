@@ -1,0 +1,107 @@
+// OpenAPI 3.1 description of the public API (F16). Kept next to the routes; update both together.
+import type { Config } from './config';
+
+type Op = [method: string, path: string, summary: string, tag: string, body?: Record<string, unknown>];
+
+const ROUTES: Op[] = [
+  ['post', '/auth/login', 'Sign in; returns a bearer session token', 'Auth', { username: 'alex', password: '…' }],
+  ['post', '/auth/logout', 'End the session', 'Auth'],
+  ['get', '/auth/me', 'Current user', 'Auth'],
+  ['post', '/auth/step-up', 'Confirm password for sensitive actions (approve, export, handover, admin)', 'Auth', { password: '…' }],
+  ['get', '/meta', 'Environment and data label (SIMULATION / MIXED DEMO / LIVE)', 'System'],
+  ['get', '/health', 'Liveness', 'System'],
+  ['get', '/sites', 'Sites you are authorised for', 'Sites'],
+  ['get', '/sites/{id}', 'Site geometry and coordinate reference', 'Sites'],
+  ['get', '/snapshot', 'Everything a console needs for one site', 'Sites'],
+  ['get', '/incidents', 'Search incidents (status, zone, from, to, q, deviceId)', 'Incidents'],
+  ['post', '/incidents', 'Create an incident', 'Incidents', { title: 'Gate open after hours', place: 'Service gate', zone: 'Zone B' }],
+  ['post', '/alerts', 'Push an alert from an integration (integration API key)', 'Incidents', { title: 'Motion detected', source: 'Sensor SG-2', place: 'Service gate', cameraId: 'CCTV-02' }],
+  ['get', '/incidents/{id}', 'Get one incident', 'Incidents'],
+  ['patch', '/incidents/{id}', 'Change type, severity or title', 'Incidents', { type: 'Intrusion', severity: 'high' }],
+  ['post', '/incidents/{id}/triage', 'Start review (opens camera)', 'Incidents'],
+  ['post', '/incidents/{id}/confirm', 'Confirm — action required', 'Incidents'],
+  ['post', '/incidents/{id}/dismiss', 'Dismiss as false alarm (reason required)', 'Incidents', { reason: '…' }],
+  ['post', '/incidents/{id}/merge', 'Merge into another incident (reason required)', 'Incidents', { intoId: 'INC-024', reason: '…' }],
+  ['post', '/incidents/{id}/resolve', 'Record outcome', 'Incidents', { outcome: '…' }],
+  ['post', '/incidents/{id}/close', 'Close a resolved incident', 'Incidents'],
+  ['post', '/incidents/{id}/reopen', 'Reopen (reason required)', 'Incidents', { reason: '…' }],
+  ['get', '/incidents/{id}/timeline', 'Timeline with source and received time', 'Incidents'],
+  ['get', '/incidents/{id}/evidence', 'Evidence list (includes merged duplicates)', 'Evidence'],
+  ['post', '/incidents/{id}/evidence', 'Attach a note or file (base64, ≤ 8 MB). idempotencyKey prevents duplicates', 'Evidence', { kind: 'photo', mime: 'image/jpeg', contentBase64: '…', idempotencyKey: 'phone-123' }],
+  ['get', '/evidence/{id}/content', 'View (evidence.view) or download=1 (evidence.export). Audited', 'Evidence'],
+  ['get', '/incidents/{id}/report', 'Report as markdown, or format=json. download=1 is an audited export', 'Reports'],
+  ['post', '/incidents/{id}/assignments', 'Assign a field responder', 'Field', { responderId: 'u-kitti' }],
+  ['get', '/assignments', 'My field tasks (responders) or all (others)', 'Field'],
+  ['post', '/assignments/{id}/accept', 'Accept task', 'Field'],
+  ['post', '/assignments/{id}/arrive', 'Arrived on scene', 'Field'],
+  ['post', '/assignments/{id}/report', 'Report result', 'Field', { note: '…', idempotencyKey: '…' }],
+  ['get', '/missions', 'Missions', 'Missions'],
+  ['post', '/missions', 'Draft a mission', 'Missions', { incidentId: 'INC-024', deviceId: 'UGV-01', operatorId: 'u-somchai', checkpoints: [{ x: 262, y: 218 }] }],
+  ['get', '/missions/{id}', 'Get one mission', 'Missions'],
+  ['get', '/missions/{id}/checks', 'Pre-approval constraint checks', 'Missions'],
+  ['patch', '/missions/{id}/route', 'Change route (forces re-approval if approved)', 'Missions', { checkpoints: [{ x: 262, y: 218 }] }],
+  ['post', '/missions/{id}/submit', 'Request approval', 'Missions'],
+  ['post', '/missions/{id}/approve', 'Approve (supervisor, step-up)', 'Missions'],
+  ['post', '/missions/{id}/reject', 'Reject (reason required)', 'Missions', { reason: '…' }],
+  ['post', '/missions/{id}/cancel', 'Cancel before execution', 'Missions'],
+  ['post', '/missions/{id}/accept', 'Operator accepts and takes control', 'Missions'],
+  ['get', '/commands', 'Commands (missionId filter)', 'Commands'],
+  ['post', '/commands', 'Send start/pause/resume/stop. Same idempotencyKey never runs twice', 'Commands', { missionId: 'MSN-0001', type: 'start', idempotencyKey: 'MSN-0001:start:0' }],
+  ['get', '/devices', 'Devices with capabilities, health and control holder', 'Devices'],
+  ['get', '/devices/{id}', 'One device', 'Devices'],
+  ['post', '/devices', 'Register a device (admin)', 'Devices', { id: 'UGV-02', kind: 'ugv', model: '…' }],
+  ['post', '/devices/{id}/handover', 'Hand over control (supervisor, step-up)', 'Devices', { toUserId: 'u-somchai' }],
+  ['post', '/devices/{id}/release', 'Release control you hold', 'Devices'],
+  ['get', '/devices/{id}/telemetry', 'Telemetry history for playback (from, to)', 'Devices'],
+  ['post', '/media/{id}/session', 'Get a signed, 60-second media URL', 'Media'],
+  ['get', '/audit', 'Audit log (audit.view)', 'Audit'],
+  ['get', '/audit/verify', 'Verify the audit hash chain', 'Audit'],
+  ['get', '/admin/users', 'Users (admin)', 'Admin'],
+  ['post', '/admin/users', 'Create user (admin, step-up)', 'Admin'],
+  ['patch', '/admin/users/{id}', 'Change role, sites, status or password', 'Admin'],
+  ['get', '/admin/keys', 'API keys', 'Admin'],
+  ['post', '/admin/keys', 'Create API key; secret is shown once', 'Admin', { label: 'Gate sensors', kind: 'integration' }],
+  ['delete', '/admin/keys/{id}', 'Revoke API key', 'Admin'],
+  ['get', '/admin/gateways', 'Connected edge gateways', 'Admin'],
+  ['get', '/admin/backups', 'Backups', 'Admin'],
+  ['post', '/admin/backups', 'Create backup', 'Admin'],
+  ['post', '/admin/backups/{id}/verify', 'Verify backup checksums and audit chain', 'Admin'],
+  ['post', '/demo/link', 'Demo only: cut or restore a simulated device link', 'Demo', { deviceId: 'UGV-01', cut: true }],
+  ['post', '/demo/inject-alert', 'Demo only: inject a simulated alert', 'Demo'],
+  ['post', '/demo/reset', 'Demo only: reset the scenario', 'Demo'],
+];
+
+export function openapi(cfg: Config) {
+  const paths: Record<string, Record<string, unknown>> = {};
+  for (const [method, path, summary, tag, example] of ROUTES) {
+    const params = [...path.matchAll(/\{(\w+)\}/g)].map((m) => ({ name: m[1], in: 'path', required: true, schema: { type: 'string' } }));
+    (paths[path] ??= {})[method] = {
+      summary,
+      tags: [tag],
+      parameters: params.length ? params : undefined,
+      requestBody: example ? { content: { 'application/json': { example } } } : undefined,
+      responses: { '200': { description: 'OK' }, '4XX': { $ref: '#/components/responses/Error' } },
+    };
+  }
+  return {
+    openapi: '3.1.0',
+    info: {
+      title: '13STORE Public Security Twin API',
+      version: cfg.version,
+      description:
+        'Bearer auth: a session token from /auth/login, or an API key. Keys are per environment (sandbox / demo / pilot). Send `X-Console-Mode: replay` from replay views; the server then refuses every change. Real-time events: WebSocket /api/v1/ws (send {"type":"auth","token":"…"} first). Edge gateways: WebSocket /api/v1/gateway with a gateway key — see docs/ADAPTER_CONTRACT.md.',
+    },
+    servers: [{ url: '/api/v1' }],
+    components: {
+      securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } },
+      responses: {
+        Error: {
+          description: 'Error',
+          content: { 'application/json': { schema: { type: 'object', properties: { error: { type: 'string' }, code: { type: 'string', enum: ['unauthenticated', 'forbidden', 'step_up_required', 'not_found', 'invalid', 'conflict', 'replay_mode', 'stale_telemetry', 'control_held'] } } } } },
+        },
+      },
+    },
+    security: [{ bearer: [] }],
+    paths,
+  };
+}

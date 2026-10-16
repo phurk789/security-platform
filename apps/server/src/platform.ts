@@ -1,0 +1,1335 @@
+// The platform's business rules. Every mutating call takes an Actor and is checked here
+// (role, org/site scope, state machine, control ownership, freshness, replay) — PRD §3–§5, §11.
+import { EventEmitter } from 'node:events';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  ASSIGNMENT_FLOW,
+  COMMAND_ACK_TIMEOUT_MS,
+  COMMAND_FLOW,
+  COMMAND_TTL_MS,
+  INCIDENT_FLOW,
+  MISSION_FLOW,
+  STEP_UP_ACTIONS,
+  can,
+  canMove,
+  constraintChecksAt,
+  fmtDate,
+  fmtTime,
+  freshnessAt,
+  isReadyAt,
+  isTerminalCommand,
+  type Action,
+  type AdapterDeclaration,
+  type Assignment,
+  type AuditEvent,
+  type Command,
+  type CommandStatus,
+  type CommandType,
+  type ConsoleEvent,
+  type Device,
+  type Evidence,
+  type Freshness,
+  type GwCommandUpdate,
+  type GwDeviceEvent,
+  type GwTelemetry,
+  type Incident,
+  type IncidentStatus,
+  type Meta,
+  type Mission,
+  type MissionStatus,
+  type Point,
+  type Role,
+  type SessionUser,
+  type SiteGeometry,
+  type Snapshot,
+  type SrvCommand,
+  type SrvDemo,
+  type TimelineEvent,
+  type User,
+} from '@13store/shared';
+import { appendAudit } from './audit';
+import type { Config } from './config';
+import { nextNumber, tx, type DB } from './db';
+import { hmac, safeEqual, sha256 } from './security';
+
+// ---------------------------------------------------------------------------
+// Actors and errors
+// ---------------------------------------------------------------------------
+
+export type ActorRole = Role | 'integration' | 'gateway' | 'system';
+
+export interface Actor {
+  kind: 'user' | 'apikey' | 'system';
+  orgId: string;
+  /** Empty = every site in the org. */
+  siteIds: string[];
+  userId?: string;
+  name: string;
+  role: ActorRole;
+  stepUpUntil?: number;
+  requestId?: string;
+  consoleMode?: 'live' | 'replay';
+}
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+const fail = (status: number, code: string, msg: string): never => {
+  throw new ApiError(status, code, msg);
+};
+
+export interface BusMessage {
+  orgId: string;
+  siteId?: string;
+  /** For responder filtering. */
+  incidentId?: string;
+  event: ConsoleEvent;
+}
+
+/** Transport to edge gateways, implemented by the gateway hub. */
+export interface GatewayLink {
+  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo): boolean;
+}
+
+const INTEGRATION_ACTIONS: Action[] = ['incident.create'];
+
+// ---------------------------------------------------------------------------
+// Platform
+// ---------------------------------------------------------------------------
+
+export class Platform {
+  readonly bus = new EventEmitter();
+  gateways: GatewayLink = { send: () => false };
+  private devices = new Map<string, Device & { orgId: string; siteId: string }>();
+  private lastFresh = new Map<string, Freshness>();
+  private lastSeq = new Map<string, number>();
+  private sweepTimer?: NodeJS.Timeout;
+  now: () => number = () => Date.now();
+
+  constructor(
+    readonly db: DB,
+    readonly cfg: Config,
+  ) {
+    this.bus.setMaxListeners(500);
+    this.loadDevices();
+  }
+
+  start() {
+    this.sweepTimer = setInterval(() => this.sweep(), 250);
+    this.sweepTimer.unref?.();
+  }
+
+  stop() {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+  }
+
+  loadDevices() {
+    this.devices.clear();
+    this.lastSeq.clear();
+    this.lastFresh.clear();
+    const rows = this.db.prepare('SELECT org_id, site_id, data FROM devices').all() as { org_id: string; site_id: string; data: string }[];
+    for (const r of rows) this.devices.set((JSON.parse(r.data) as Device).id, { ...JSON.parse(r.data), orgId: r.org_id, siteId: r.site_id });
+  }
+
+  // ---- helpers -------------------------------------------------------------
+
+  publish(m: BusMessage) {
+    this.bus.emit('event', m);
+  }
+
+  audit(a: Actor, action: string, object: string, result: 'ok' | 'denied' | 'error' = 'ok', detail?: string): AuditEvent {
+    const ev = appendAudit(this.db, {
+      orgId: a.orgId,
+      actorId: a.userId,
+      actor: a.name,
+      role: a.role,
+      action,
+      object,
+      result,
+      detail,
+      requestId: a.requestId,
+      at: this.now(),
+    });
+    this.publish({ orgId: a.orgId, event: { type: 'audit', audit: ev } });
+    return ev;
+  }
+
+  /** Role check + step-up + replay guard. Denials are audited. */
+  require(a: Actor, action: Action, object: string, opts: { mutating?: boolean } = { mutating: true }) {
+    const allowed = a.role === 'integration' ? INTEGRATION_ACTIONS.includes(action) : a.role === 'system' || (a.role !== 'gateway' && can(a.role, action));
+    if (!allowed) {
+      this.audit(a, action, object, 'denied', `role ${a.role} lacks ${action}`);
+      fail(403, 'forbidden', `Your role (${a.role}) cannot do this: ${action}.`);
+    }
+    if (opts.mutating !== false && a.consoleMode === 'replay') {
+      this.audit(a, action, object, 'denied', 'replay mode');
+      fail(409, 'replay_mode', 'You are viewing replay. Device control and changes are off.');
+    }
+    if (a.kind === 'user' && STEP_UP_ACTIONS.includes(action) && (a.stepUpUntil ?? 0) < this.now()) {
+      fail(401, 'step_up_required', 'Confirm your password to continue.');
+    }
+  }
+
+  private inScope(a: Actor, orgId: string, siteId: string) {
+    return a.orgId === orgId && (a.siteIds.length === 0 || a.siteIds.includes(siteId));
+  }
+
+  private event(a: Actor | null, orgId: string, siteId: string, incidentId: string, title: string, opts: Partial<TimelineEvent> = {}) {
+    const n = nextNumber(this.db, orgId, 'evt');
+    const ev: TimelineEvent = {
+      id: `EVT-${n}`,
+      incidentId,
+      at: opts.at ?? this.now(),
+      receivedAt: opts.receivedAt ?? this.now(),
+      actor: opts.actor ?? a?.name ?? 'System',
+      title,
+      detail: opts.detail,
+      tone: opts.tone,
+    };
+    this.db.prepare('INSERT INTO timeline (id, org_id, incident_id, at, received_at, data) VALUES (?,?,?,?,?,?)').run(`${orgId}:${ev.id}`, orgId, incidentId, ev.at, ev.receivedAt, JSON.stringify(ev));
+    this.publish({ orgId, siteId, incidentId, event: { type: 'timeline', event: ev } });
+    return ev;
+  }
+
+  private prefix(orgId: string) {
+    return (this.db.prepare('SELECT id_prefix FROM orgs WHERE id = ?').get(orgId) as { id_prefix: string } | undefined)?.id_prefix ?? '';
+  }
+
+  private userName(orgId: string, id?: string) {
+    if (!id) return '—';
+    const r = this.db.prepare('SELECT name FROM users WHERE id = ? AND org_id = ?').get(id, orgId) as { name: string } | undefined;
+    return r?.name ?? id;
+  }
+
+  // ---- incidents ----------------------------------------------------------
+
+  private incRow(id: string) {
+    return this.db.prepare('SELECT org_id, site_id, data FROM incidents WHERE id = ?').get(id) as { org_id: string; site_id: string; data: string } | undefined;
+  }
+
+  /** Load an incident the actor may see; 404 otherwise (no existence leak across orgs/sites). */
+  getIncident(a: Actor, id: string): Incident & { siteId: string } {
+    const r = this.incRow(id);
+    if (!r || !this.inScope(a, r.org_id, r.site_id)) return fail(404, 'not_found', `Incident ${id} not found.`);
+    const inc = JSON.parse(r.data) as Incident;
+    if (a.role === 'responder' && !this.hasAssignment(a, id)) return fail(404, 'not_found', `Incident ${id} not found.`);
+    return { ...inc, siteId: r.site_id };
+  }
+
+  private saveIncident(orgId: string, siteId: string, inc: Incident) {
+    const { siteId: _s, ...clean } = inc as Incident & { siteId?: string };
+    this.db
+      .prepare('INSERT INTO incidents (id, org_id, site_id, status, created_at, data) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data')
+      .run(clean.id, orgId, siteId, clean.status, clean.createdAt, JSON.stringify(clean));
+    this.publish({ orgId, siteId, incidentId: clean.id, event: { type: 'incident', incident: clean } });
+  }
+
+  private moveIncident(_a: Actor, inc: Incident & { siteId: string }, to: IncidentStatus) {
+    if (!canMove(INCIDENT_FLOW, inc.status, to)) fail(409, 'conflict', `Incident is ${inc.status}; it cannot become ${to}.`);
+    inc.status = to;
+  }
+
+  listIncidents(
+    a: Actor,
+    f: { siteId?: string; status?: string; zone?: string; from?: number; to?: number; q?: string; deviceId?: string; limit?: number } = {},
+  ): Incident[] {
+    if (a.role === 'admin') fail(403, 'forbidden', 'Administrators manage the system but do not see incident data.');
+    const rows = this.db
+      .prepare('SELECT site_id, data FROM incidents WHERE org_id = ? AND created_at BETWEEN ? AND ? ORDER BY created_at DESC LIMIT ?')
+      .all(a.orgId, f.from ?? 0, f.to ?? Number.MAX_SAFE_INTEGER, Math.min(f.limit ?? 500, 2000)) as { site_id: string; data: string }[];
+    const q = f.q?.toLowerCase();
+    return rows
+      .filter((r) => this.inScope(a, a.orgId, r.site_id) && (!f.siteId || r.site_id === f.siteId))
+      .map((r) => JSON.parse(r.data) as Incident)
+      .filter((i) => a.role !== 'responder' || this.hasAssignment(a, i.id))
+      .filter((i) => !f.status || f.status.split(',').includes(i.status))
+      .filter((i) => !f.zone || i.zone === f.zone)
+      .filter((i) => !q || `${i.id} ${i.title} ${i.place} ${i.type} ${i.source}`.toLowerCase().includes(q))
+      .filter((i) => !f.deviceId || i.cameraId === f.deviceId || this.missionsFor(i.id).some((m) => m.deviceId === f.deviceId));
+  }
+
+  createIncident(
+    a: Actor,
+    input: { siteId?: string; title: string; type?: string; severity?: Incident['severity']; zone?: string; place?: string; pos?: Point; source?: string; cameraId?: string; at?: number },
+  ) {
+    this.require(a, 'incident.create', 'incident');
+    const siteId = input.siteId ?? this.defaultSite(a);
+    if (!this.inScope(a, a.orgId, siteId)) fail(404, 'not_found', 'Site not found.');
+    if (!input.title?.trim()) fail(400, 'invalid', 'Title is required.');
+    const n = nextNumber(this.db, a.orgId, 'incident', 1);
+    const inc: Incident = {
+      id: `${this.prefix(a.orgId)}INC-${String(n).padStart(3, '0')}`,
+      title: input.title.trim().slice(0, 120),
+      type: input.type ?? (a.role === 'integration' ? 'Sensor alert' : 'Report'),
+      severity: input.severity ?? 'medium',
+      status: 'new',
+      zone: input.zone ?? 'Zone B',
+      place: input.place ?? 'Unspecified',
+      pos: input.pos ?? { x: 210, y: 140 },
+      source: input.source ?? a.name,
+      createdAt: input.at ?? this.now(),
+      cameraId: input.cameraId,
+      thumb: input.cameraId === 'CCTV-02' ? 'gate' : 'lot',
+    };
+    tx(this.db, () => {
+      this.saveIncident(a.orgId, siteId, inc);
+      this.event(a, a.orgId, siteId, inc.id, 'Alert received', { actor: inc.source, tone: 'alert', at: inc.createdAt, detail: input.type ? `${input.type} reported.` : undefined });
+      this.audit(a, 'incident.create', inc.id);
+    });
+    // Hint at likely duplicates: same place within 10 minutes.
+    const dupe = this.listIncidents({ ...a, role: a.role === 'integration' ? 'dispatcher' : a.role, kind: 'system' }, { siteId, from: inc.createdAt - 10 * 60_000 }).find(
+      (i) => i.id !== inc.id && i.place === inc.place && !['closed', 'duplicate', 'dismissed'].includes(i.status),
+    );
+    if (dupe) this.event(null, a.orgId, siteId, inc.id, `Possible duplicate of ${dupe.id}`, { tone: 'warn', detail: 'Same place within 10 minutes. Review before acting.' });
+    return inc;
+  }
+
+  private defaultSite(a: Actor) {
+    if (a.siteIds.length) return a.siteIds[0];
+    const r = this.db.prepare('SELECT id FROM sites WHERE org_id = ? ORDER BY id LIMIT 1').get(a.orgId) as { id: string } | undefined;
+    return r?.id ?? fail(404, 'not_found', 'No site configured.');
+  }
+
+  triage(a: Actor, id: string) {
+    this.require(a, 'incident.triage', id);
+    const inc = this.getIncident(a, id);
+    if (inc.status !== 'new') return inc;
+    tx(this.db, () => {
+      this.moveIncident(a, inc, 'triaging');
+      inc.owner = a.name;
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, id, 'Camera opened', { detail: `${inc.cameraId ?? 'Camera'} stream available for review.` });
+      this.event(a, a.orgId, inc.siteId, id, 'Operator reviewing', { detail: 'Monitoring feed and verifying the situation.' });
+      this.audit(a, 'incident.triage', id);
+    });
+    return inc;
+  }
+
+  confirm(a: Actor, id: string) {
+    this.require(a, 'incident.verify', id);
+    const inc = this.getIncident(a, id);
+    if (!['new', 'triaging'].includes(inc.status)) fail(409, 'conflict', 'Incident is not awaiting verification.');
+    tx(this.db, () => {
+      this.moveIncident(a, inc, 'confirmed');
+      inc.owner = a.name;
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, id, 'Verified — action required', { tone: 'ok', detail: 'Verified by operator from camera review.' });
+      this.audit(a, 'incident.confirm', id);
+    });
+    return inc;
+  }
+
+  dismiss(a: Actor, id: string, reason: string) {
+    this.require(a, 'incident.verify', id);
+    if (!reason?.trim()) fail(400, 'invalid', 'A reason is required.');
+    const inc = this.getIncident(a, id);
+    tx(this.db, () => {
+      this.moveIncident(a, inc, 'dismissed');
+      inc.outcome = reason.trim();
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, id, 'Dismissed as false alarm', { detail: reason.trim() });
+      this.audit(a, 'incident.dismiss', id, 'ok', reason.trim());
+    });
+    return inc;
+  }
+
+  merge(a: Actor, id: string, intoId: string, reason: string) {
+    this.require(a, 'incident.verify', id);
+    if (!reason?.trim()) fail(400, 'invalid', 'A reason is required.');
+    if (id === intoId) fail(400, 'invalid', 'Cannot merge an incident into itself.');
+    const inc = this.getIncident(a, id);
+    const into = this.getIncident(a, intoId);
+    if (['duplicate', 'closed', 'dismissed'].includes(into.status)) fail(409, 'conflict', `${intoId} is ${into.status}.`);
+    tx(this.db, () => {
+      this.moveIncident(a, inc, 'duplicate');
+      inc.duplicateOf = intoId;
+      inc.outcome = reason.trim();
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, id, `Merged into ${intoId}`, { detail: reason.trim() });
+      this.event(a, a.orgId, into.siteId, intoId, `${id} merged into this incident`, { detail: `Original evidence retained under ${id}. ${reason.trim()}` });
+      this.audit(a, 'incident.merge', id, 'ok', `into ${intoId}`);
+    });
+    return inc;
+  }
+
+  editIncident(a: Actor, id: string, patch: { type?: string; severity?: Incident['severity']; title?: string }) {
+    this.require(a, 'incident.edit', id);
+    const inc = this.getIncident(a, id);
+    const before = `${inc.type}/${inc.severity}`;
+    if (patch.type) inc.type = patch.type.slice(0, 60);
+    if (patch.severity && ['low', 'medium', 'high'].includes(patch.severity)) inc.severity = patch.severity;
+    if (patch.title?.trim()) inc.title = patch.title.trim().slice(0, 120);
+    tx(this.db, () => {
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, id, 'Incident details changed', { detail: `${before} → ${inc.type}/${inc.severity}` });
+      this.audit(a, 'incident.edit', id, 'ok', `${before} → ${inc.type}/${inc.severity}`);
+    });
+    return inc;
+  }
+
+  resolve(a: Actor, id: string, outcome: string) {
+    this.require(a, 'incident.resolve', id);
+    if (!outcome?.trim()) fail(400, 'invalid', 'Outcome is required.');
+    const inc = this.getIncident(a, id);
+    const active = this.missionsFor(id).find((m) => ['executing', 'paused'].includes(m.status));
+    if (active) fail(409, 'conflict', `Mission ${active.id} is still active. End it first.`);
+    tx(this.db, () => {
+      this.moveIncident(a, inc, 'resolved');
+      inc.outcome = outcome.trim();
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, id, 'Resolved', { tone: 'ok', detail: outcome.trim() });
+      this.audit(a, 'incident.resolve', id, 'ok', outcome.trim());
+    });
+    return inc;
+  }
+
+  close(a: Actor, id: string) {
+    this.require(a, 'incident.close', id);
+    const inc = this.getIncident(a, id);
+    if (inc.status !== 'resolved') fail(409, 'conflict', 'Resolve the incident before closing it.');
+    tx(this.db, () => {
+      this.moveIncident(a, inc, 'closed');
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, id, 'Closed', { tone: 'ok' });
+      this.audit(a, 'incident.close', id);
+    });
+    return inc;
+  }
+
+  reopen(a: Actor, id: string, reason: string) {
+    this.require(a, 'incident.reopen', id);
+    if (!reason?.trim()) fail(400, 'invalid', 'A reason is required to reopen.');
+    const inc = this.getIncident(a, id);
+    tx(this.db, () => {
+      this.moveIncident(a, inc, 'triaging');
+      inc.duplicateOf = undefined;
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, id, 'Reopened', { tone: 'warn', detail: reason.trim() });
+      this.audit(a, 'incident.reopen', id, 'ok', reason.trim());
+    });
+    return inc;
+  }
+
+  // ---- field assignments (F14) ------------------------------------------
+
+  private hasAssignment(a: Actor, incidentId: string) {
+    return !!this.db.prepare("SELECT 1 FROM assignments WHERE incident_id = ? AND responder_id = ? AND status != 'cancelled'").get(incidentId, a.userId ?? '');
+  }
+
+  private saveAssignment(orgId: string, siteId: string, x: Assignment) {
+    this.db
+      .prepare('INSERT INTO assignments (id, org_id, incident_id, responder_id, status, data) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data')
+      .run(x.id, orgId, x.incidentId, x.responderId, x.status, JSON.stringify(x));
+    this.publish({ orgId, siteId, incidentId: x.incidentId, event: { type: 'assignment', assignment: x } });
+  }
+
+  assign(a: Actor, incidentId: string, responderId: string) {
+    this.require(a, 'incident.assign', incidentId);
+    const inc = this.getIncident(a, incidentId);
+    const r = this.db.prepare("SELECT id, name, role FROM users WHERE id = ? AND org_id = ? AND active = 1").get(responderId, a.orgId) as { id: string; name: string; role: Role } | undefined;
+    if (!r || r.role !== 'responder') fail(400, 'invalid', 'Choose an active field responder.');
+    const x: Assignment = { id: `${this.prefix(a.orgId)}ASG-${nextNumber(this.db, a.orgId, 'asg')}`, incidentId, responderId, status: 'assigned', createdAt: this.now(), updatedAt: this.now() };
+    tx(this.db, () => {
+      this.saveAssignment(a.orgId, inc.siteId, x);
+      if (!inc.owner) inc.owner = r!.name;
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, incidentId, `Assigned to ${r!.name}`, { detail: 'Waiting for the responder to accept.' });
+      this.audit(a, 'incident.assign', incidentId, 'ok', r!.name);
+    });
+    return x;
+  }
+
+  listAssignments(a: Actor): Assignment[] {
+    const rows = this.db.prepare('SELECT data FROM assignments WHERE org_id = ?').all(a.orgId) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as Assignment).filter((x) => a.role !== 'responder' || x.responderId === a.userId);
+  }
+
+  updateAssignment(a: Actor, id: string, action: 'accept' | 'arrive' | 'report', body: { note?: string; idempotencyKey?: string } = {}) {
+    this.require(a, 'field.update', id);
+    const row = this.db.prepare('SELECT data FROM assignments WHERE id = ? AND org_id = ?').get(id, a.orgId) as { data: string } | undefined;
+    const x = row ? (JSON.parse(row.data) as Assignment) : fail(404, 'not_found', 'Assignment not found.');
+    if (x.responderId !== a.userId) fail(404, 'not_found', 'Assignment not found.');
+    const inc = this.getIncident(a, x.incidentId);
+    if (body.idempotencyKey) {
+      const seen = this.db.prepare('SELECT result FROM idempotency WHERE org_id = ? AND key = ?').get(a.orgId, `asg:${body.idempotencyKey}`) as { result: string } | undefined;
+      if (seen) return JSON.parse(seen.result) as Assignment;
+    }
+    const to = ({ accept: 'accepted', arrive: 'on_scene', report: 'reported' } as const)[action];
+    if (!canMove(ASSIGNMENT_FLOW, x.status, to)) fail(409, 'conflict', `Task is ${x.status}; cannot ${action}.`);
+    x.status = to;
+    x.updatedAt = this.now();
+    if (body.note) x.note = body.note.slice(0, 2000);
+    const title = { accept: 'Responder accepted task', arrive: 'Responder on scene', report: 'Responder report received' }[action];
+    tx(this.db, () => {
+      this.saveAssignment(a.orgId, inc.siteId, x);
+      this.event(a, a.orgId, inc.siteId, inc.id, title, { detail: body.note, tone: action === 'report' ? 'ok' : undefined });
+      this.audit(a, `field.${action}`, id);
+      if (body.idempotencyKey) this.db.prepare('INSERT INTO idempotency (org_id, key, result, created_at) VALUES (?,?,?,?)').run(a.orgId, `asg:${body.idempotencyKey}`, JSON.stringify(x), this.now());
+    });
+    return x;
+  }
+
+  // ---- devices ------------------------------------------------------------
+
+  getDevice(a: Actor, id: string) {
+    const d = this.devices.get(id);
+    if (!d || !this.inScope(a, d.orgId, d.siteId)) return fail(404, 'not_found', `Device ${id} not found.`);
+    return d;
+  }
+
+  private publicDevice(d: Device & { orgId?: string; siteId?: string }): Device {
+    const { orgId: _o, siteId: _s, ...rest } = d;
+    return rest;
+  }
+
+  listDevices(a: Actor, siteId?: string): Device[] {
+    if (a.role === 'responder') return [];
+    return [...this.devices.values()].filter((d) => this.inScope(a, d.orgId, d.siteId) && (!siteId || d.siteId === siteId)).map((d) => this.publicDevice(d));
+  }
+
+  private saveDevice(d: Device & { orgId: string; siteId: string }, publish = true) {
+    this.devices.set(d.id, d);
+    this.db.prepare('UPDATE devices SET data = ? WHERE id = ?').run(JSON.stringify(this.publicDevice(d)), d.id);
+    if (publish) this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'device', device: this.publicDevice(d) } });
+  }
+
+  registerDevice(a: Actor, input: Partial<Device> & { id: string; kind: Device['kind']; siteId?: string }) {
+    this.require(a, 'admin.devices', input.id);
+    if (!/^[A-Z0-9-]{3,32}$/.test(input.id)) fail(400, 'invalid', 'Device id must be 3–32 characters: A–Z, 0–9, dash.');
+    if (this.devices.has(input.id)) fail(409, 'conflict', 'Device id already registered.');
+    const siteId = input.siteId ?? this.defaultSite(a);
+    if (!this.inScope(a, a.orgId, siteId)) fail(404, 'not_found', 'Site not found.');
+    const d: Device = {
+      id: input.id,
+      kind: input.kind,
+      model: input.model ?? 'Unspecified',
+      adapterVersion: '—',
+      firmwareTested: input.firmwareTested ?? 'not tested',
+      integration: 'testing',
+      capabilities: input.capabilities ?? [],
+      commands: [],
+      limitations: input.limitations ?? 'Not yet declared by an adapter.',
+      zone: input.zone ?? 'Zone A',
+      pos: input.pos ?? { x: 210, y: 140 },
+      accuracyM: 5,
+      lastSeen: 0,
+      rateMs: 1000,
+      speed: 0,
+    };
+    tx(this.db, () => {
+      this.db.prepare('INSERT INTO devices (id, org_id, site_id, data, registered_at) VALUES (?,?,?,?,?)').run(d.id, a.orgId, siteId, JSON.stringify(d), this.now());
+      this.audit(a, 'device.register', d.id);
+    });
+    this.devices.set(d.id, { ...d, orgId: a.orgId, siteId });
+    this.publish({ orgId: a.orgId, siteId, event: { type: 'device', device: d } });
+    return d;
+  }
+
+  handover(a: Actor, deviceId: string, toUserId: string) {
+    this.require(a, 'control.handover', deviceId);
+    const d = this.getDevice(a, deviceId);
+    const to = this.db.prepare('SELECT id, name, role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(toUserId, a.orgId) as { id: string; name: string; role: Role } | undefined;
+    if (!to || !can(to.role, 'device.command') && to.role !== 'supervisor') fail(400, 'invalid', 'Control can only go to an operator or supervisor.');
+    const from = d.controlOwner;
+    tx(this.db, () => {
+      d.controlOwner = toUserId;
+      this.saveDevice(d);
+      const m = this.activeMission(deviceId);
+      if (m) {
+        m.operatorId = toUserId;
+        this.saveMission(d.orgId, d.siteId, m);
+        this.event(a, d.orgId, d.siteId, m.incidentId, `Control of ${d.id} handed over`, { detail: `${this.userName(a.orgId, from)} → ${to!.name}` });
+      }
+      this.audit(a, 'control.handover', d.id, 'ok', `${this.userName(a.orgId, from)} → ${to!.name}`);
+    });
+    return this.publicDevice(d);
+  }
+
+  /** The holder gives up control (e.g. at shift end). */
+  release(a: Actor, deviceId: string) {
+    const d = this.getDevice(a, deviceId);
+    if (d.controlOwner !== a.userId) fail(409, 'control_held', 'You do not hold control of this device.');
+    if (this.activeMission(deviceId)?.status === 'executing') fail(409, 'conflict', 'Pause or stop the mission before releasing control.');
+    d.controlOwner = undefined;
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, 'control.release', d.id);
+    });
+    return this.publicDevice(d);
+  }
+
+  telemetryHistory(a: Actor, deviceId: string, from: number, to: number) {
+    this.getDevice(a, deviceId);
+    return this.db
+      .prepare('SELECT seq, source_time AS sourceTime, received_time AS receivedTime, x, y, alt, accuracy, battery, speed FROM telemetry WHERE device_id = ? AND received_time BETWEEN ? AND ? ORDER BY received_time LIMIT 20000')
+      .all(deviceId, from, to);
+  }
+
+  // ---- missions -----------------------------------------------------------
+
+  private missionsFor(incidentId: string): Mission[] {
+    return (this.db.prepare('SELECT data FROM missions WHERE incident_id = ? ORDER BY id').all(incidentId) as { data: string }[]).map((r) => JSON.parse(r.data));
+  }
+
+  private activeMission(deviceId: string): Mission | undefined {
+    const r = this.db.prepare("SELECT data FROM missions WHERE device_id = ? AND status IN ('approved','assigned','executing','paused','pending_approval') ORDER BY rowid DESC LIMIT 1").get(deviceId) as
+      | { data: string }
+      | undefined;
+    return r ? JSON.parse(r.data) : undefined;
+  }
+
+  private allMissions(orgId: string): Mission[] {
+    return (this.db.prepare('SELECT data FROM missions WHERE org_id = ?').all(orgId) as { data: string }[]).map((r) => JSON.parse(r.data));
+  }
+
+  getMission(a: Actor, id: string) {
+    const r = this.db.prepare('SELECT org_id, site_id, data FROM missions WHERE id = ?').get(id) as { org_id: string; site_id: string; data: string } | undefined;
+    if (!r || !this.inScope(a, r.org_id, r.site_id) || a.role === 'responder') return fail(404, 'not_found', `Mission ${id} not found.`);
+    return { m: JSON.parse(r.data) as Mission, siteId: r.site_id };
+  }
+
+  private saveMission(orgId: string, siteId: string, m: Mission) {
+    this.db
+      .prepare('INSERT INTO missions (id, org_id, site_id, incident_id, device_id, status, data) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data')
+      .run(m.id, orgId, siteId, m.incidentId, m.deviceId, m.status, JSON.stringify(m));
+    this.publish({ orgId, siteId, event: { type: 'mission', mission: m } });
+  }
+
+  private moveMission(m: Mission, to: MissionStatus) {
+    if (!canMove(MISSION_FLOW, m.status, to)) fail(409, 'conflict', `Mission is ${m.status.replace('_', ' ')}; it cannot become ${to.replace('_', ' ')}.`);
+    m.status = to;
+  }
+
+  private validRoute(pts: Point[]) {
+    if (!Array.isArray(pts) || pts.length < 1 || pts.length > 50) fail(400, 'invalid', 'Route needs 1–50 checkpoints.');
+    for (const p of pts) if (typeof p?.x !== 'number' || typeof p?.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y)) fail(400, 'invalid', 'Checkpoints must be {x, y} numbers.');
+    return pts.map((p) => ({ x: p.x, y: p.y }));
+  }
+
+  createMission(a: Actor, input: { incidentId: string; deviceId: string; operatorId: string; checkpoints: Point[] }) {
+    this.require(a, 'mission.prepare', input.incidentId);
+    const inc = this.getIncident(a, input.incidentId);
+    if (inc.status !== 'confirmed') fail(409, 'conflict', 'Verify the incident before preparing a mission.');
+    const d = this.getDevice(a, input.deviceId);
+    if (!isReadyAt(this.now(), d, this.allMissions(a.orgId))) fail(409, 'conflict', `${d.id} is not ready.`);
+    const op = this.db.prepare('SELECT role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(input.operatorId, a.orgId) as { role: Role } | undefined;
+    if (!op || op.role !== 'operator') fail(400, 'invalid', 'Choose an active operator.');
+    const m: Mission = {
+      id: `${this.prefix(a.orgId)}MSN-${String(nextNumber(this.db, a.orgId, 'mission')).padStart(4, '0')}`,
+      incidentId: inc.id,
+      deviceId: d.id,
+      operatorId: input.operatorId,
+      checkpoints: this.validRoute(input.checkpoints),
+      planVersion: 1,
+      status: 'draft',
+      nextCp: 0,
+      createdAt: this.now(),
+    };
+    tx(this.db, () => {
+      this.saveMission(a.orgId, inc.siteId, m);
+      this.event(a, a.orgId, inc.siteId, inc.id, `Mission ${m.id} drafted`, { detail: `${d.id}, ${m.checkpoints.length} checkpoints, operator ${this.userName(a.orgId, m.operatorId)}.` });
+      this.audit(a, 'mission.create', m.id);
+    });
+    return m;
+  }
+
+  editRoute(a: Actor, id: string, checkpoints: Point[]) {
+    this.require(a, 'mission.prepare', id);
+    const { m, siteId } = this.getMission(a, id);
+    if (!['draft', 'pending_approval', 'approved', 'assigned', 'rejected'].includes(m.status)) fail(409, 'conflict', 'Route cannot be changed while the mission is running.');
+    m.checkpoints = this.validRoute(checkpoints);
+    m.planVersion += 1;
+    tx(this.db, () => {
+      if (m.status === 'approved' || m.status === 'assigned') {
+        m.status = 'pending_approval';
+        this.event(a, a.orgId, siteId, m.incidentId, 'Route changed after approval — re-approval required', { tone: 'warn', detail: `Plan v${m.planVersion}; approved plan was v${m.approvedVersion}.` });
+        this.publish({ orgId: a.orgId, siteId, event: { type: 'notice', tone: 'warn', text: `Route of ${m.id} changed. Re-approval required.` } });
+      } else {
+        this.event(a, a.orgId, siteId, m.incidentId, `Route updated (plan v${m.planVersion})`);
+      }
+      this.saveMission(a.orgId, siteId, m);
+      this.audit(a, 'mission.edit', m.id, 'ok', `plan v${m.planVersion}`);
+    });
+    return m;
+  }
+
+  submitMission(a: Actor, id: string) {
+    this.require(a, 'mission.prepare', id);
+    const { m, siteId } = this.getMission(a, id);
+    if (!['draft', 'rejected'].includes(m.status)) fail(409, 'conflict', 'Mission is not a draft.');
+    tx(this.db, () => {
+      this.moveMission(m, 'pending_approval');
+      m.note = undefined;
+      this.saveMission(a.orgId, siteId, m);
+      this.event(a, a.orgId, siteId, m.incidentId, 'Approval requested', { detail: `Mission ${m.id} plan v${m.planVersion} sent to supervisor.` });
+      this.audit(a, 'mission.submit', m.id);
+    });
+    return m;
+  }
+
+  checks(a: Actor, id: string) {
+    const { m } = this.getMission(a, id);
+    const d = this.getDevice(a, m.deviceId);
+    return constraintChecksAt(this.now(), d, m, (u) => this.userName(a.orgId, u));
+  }
+
+  approveMission(a: Actor, id: string) {
+    this.require(a, 'mission.approve', id);
+    const { m, siteId } = this.getMission(a, id);
+    if (m.status !== 'pending_approval') fail(409, 'conflict', 'Mission is not awaiting approval.');
+    const failed = this.checks(a, id).filter((c) => c.hard && !c.ok);
+    if (failed.length) fail(409, 'conflict', `Cannot approve: ${failed.map((f) => f.label).join(', ')}.`);
+    tx(this.db, () => {
+      this.moveMission(m, 'approved');
+      m.approvedVersion = m.planVersion;
+      m.approvedBy = a.userId;
+      this.saveMission(a.orgId, siteId, m);
+      this.event(a, a.orgId, siteId, m.incidentId, 'Mission approved', { tone: 'ok', detail: `Plan v${m.planVersion} approved by ${a.name}. Waiting for operator to accept.` });
+      this.audit(a, 'mission.approve', m.id, 'ok', `plan v${m.planVersion}`);
+    });
+    return m;
+  }
+
+  rejectMission(a: Actor, id: string, reason: string) {
+    this.require(a, 'mission.approve', id);
+    if (!reason?.trim()) fail(400, 'invalid', 'A reason is required.');
+    const { m, siteId } = this.getMission(a, id);
+    if (m.status !== 'pending_approval') fail(409, 'conflict', 'Mission is not awaiting approval.');
+    tx(this.db, () => {
+      this.moveMission(m, 'rejected');
+      m.note = reason.trim();
+      this.saveMission(a.orgId, siteId, m);
+      this.event(a, a.orgId, siteId, m.incidentId, 'Mission rejected', { tone: 'warn', detail: reason.trim() });
+      this.audit(a, 'mission.reject', m.id, 'ok', reason.trim());
+    });
+    return m;
+  }
+
+  cancelMission(a: Actor, id: string) {
+    this.require(a, 'mission.prepare', id);
+    const { m, siteId } = this.getMission(a, id);
+    if (!['draft', 'pending_approval', 'approved', 'assigned', 'rejected'].includes(m.status)) fail(409, 'conflict', 'A running mission must be stopped by its operator.');
+    tx(this.db, () => {
+      this.moveMission(m, 'cancelled');
+      const d = this.devices.get(m.deviceId);
+      if (d && d.controlOwner === m.operatorId) {
+        d.controlOwner = undefined;
+        this.saveDevice(d);
+      }
+      this.saveMission(a.orgId, siteId, m);
+      this.event(a, a.orgId, siteId, m.incidentId, `Mission ${m.id} cancelled`);
+      this.audit(a, 'mission.cancel', m.id);
+    });
+    return m;
+  }
+
+  acceptMission(a: Actor, id: string) {
+    this.require(a, 'mission.accept', id);
+    const { m, siteId } = this.getMission(a, id);
+    if (m.operatorId !== a.userId) fail(403, 'forbidden', 'This mission is assigned to another operator.');
+    if (m.status !== 'approved' || m.approvedVersion !== m.planVersion) fail(409, 'conflict', 'Mission needs an approved plan first.');
+    const d = this.getDevice(a, m.deviceId);
+    if (d.controlOwner && d.controlOwner !== a.userId) fail(409, 'control_held', `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`);
+    tx(this.db, () => {
+      d.controlOwner = a.userId;
+      this.saveDevice(d);
+      this.moveMission(m, 'assigned');
+      this.saveMission(a.orgId, siteId, m);
+      this.event(a, a.orgId, siteId, m.incidentId, 'Operator accepted mission', { detail: `${a.name} confirmed readiness and holds control of ${d.id}.` });
+      this.audit(a, 'mission.accept', m.id);
+      this.audit(a, 'control.acquire', d.id);
+    });
+    return m;
+  }
+
+  // ---- commands -----------------------------------------------------------
+
+  private saveCommand(orgId: string, siteId: string, c: Command) {
+    this.db
+      .prepare('INSERT INTO commands (id, org_id, site_id, mission_id, device_id, idempotency_key, status, data) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data')
+      .run(c.id, orgId, siteId, c.missionId, c.deviceId, c.idempotencyKey, c.status, JSON.stringify(c));
+    this.publish({ orgId, siteId, event: { type: 'command', command: c } });
+  }
+
+  private setCmd(c: Command, status: CommandStatus, detail?: string) {
+    if (!canMove(COMMAND_FLOW, c.status, status)) return false;
+    c.status = status;
+    c.history.push({ status, at: this.now() });
+    if (detail) c.detail = detail;
+    return true;
+  }
+
+  listCommands(a: Actor, missionId?: string): Command[] {
+    if (a.role === 'responder') return [];
+    const rows = this.db.prepare('SELECT site_id, data FROM commands WHERE org_id = ? ORDER BY rowid').all(a.orgId) as { site_id: string; data: string }[];
+    return rows.filter((r) => this.inScope(a, a.orgId, r.site_id)).map((r) => JSON.parse(r.data) as Command).filter((c) => !missionId || c.missionId === missionId);
+  }
+
+  issueCommand(a: Actor, missionId: string, type: CommandType, idempotencyKey: string): Command {
+    this.require(a, 'device.command', `${missionId}:${type}`);
+    if (!idempotencyKey || idempotencyKey.length > 120) fail(400, 'invalid', 'An idempotency key is required.');
+    if (!['start', 'pause', 'resume', 'stop'].includes(type)) fail(400, 'invalid', 'Unknown command.');
+    const { m, siteId } = this.getMission(a, missionId);
+    const dupe = this.db.prepare('SELECT data FROM commands WHERE org_id = ? AND idempotency_key = ?').get(a.orgId, idempotencyKey) as { data: string } | undefined;
+    if (dupe) {
+      this.audit(a, 'device.command', `${missionId}:${type}`, 'ok', `duplicate key ${idempotencyKey} ignored`);
+      return JSON.parse(dupe.data) as Command;
+    }
+    const d = this.getDevice(a, m.deviceId);
+    const now = this.now();
+    const c: Command = {
+      id: `${this.prefix(a.orgId)}CMD-${String(nextNumber(this.db, a.orgId, 'command')).padStart(4, '0')}`,
+      idempotencyKey,
+      missionId,
+      deviceId: d.id,
+      type,
+      issuer: a.userId ?? a.name,
+      issuedAt: now,
+      expiresAt: now + COMMAND_TTL_MS,
+      status: 'requested',
+      history: [{ status: 'requested', at: now }],
+      delivered: false,
+    };
+    const deny = (code: string, why: string): never => {
+      this.setCmd(c, 'rejected', why);
+      tx(this.db, () => {
+        this.saveCommand(a.orgId, siteId, c);
+        this.audit(a, 'device.command', `${missionId}:${type}`, 'error', why);
+      });
+      throw new ApiError(409, code, why);
+    };
+    if (!d.commands.includes(type)) deny('invalid', `${d.id} adapter does not support ${type}.`);
+    if (d.controlOwner !== a.userId) deny('control_held', d.controlOwner ? `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.` : `You do not hold control of ${d.id}. Accept the mission first.`);
+    const valid: Record<CommandType, MissionStatus[]> = { start: ['assigned'], pause: ['executing'], resume: ['paused'], stop: ['executing', 'paused'] };
+    if (!valid[type].includes(m.status)) deny('conflict', `Cannot ${type} while mission is ${m.status.replace('_', ' ')}.`);
+    if (type === 'start' && m.approvedVersion !== m.planVersion) deny('conflict', 'Plan changed since approval. Re-approval required.');
+    const fresh = freshnessAt(now, d);
+    if ((type === 'start' || type === 'resume') && fresh !== 'live') deny('stale_telemetry', `Telemetry is ${fresh}. New ${type} commands are held until data is fresh.`);
+    const pending = this.listCommands(a, missionId).find((x) => !isTerminalCommand(x.status));
+    if (pending && type !== 'stop') deny('conflict', `Waiting for ${pending.type} (${pending.id}) to finish.`);
+
+    this.setCmd(c, 'authorized');
+    const sent = this.gateways.send(d.orgId, d.id, { t: 'command', commandId: c.id, idempotencyKey, deviceId: d.id, type, expiresAt: c.expiresAt, route: type === 'start' ? m.checkpoints : undefined, missionId });
+    if (sent) this.setCmd(c, 'sent');
+    tx(this.db, () => {
+      this.saveCommand(a.orgId, siteId, c);
+      this.event(a, a.orgId, siteId, m.incidentId, `${type.toUpperCase()} requested`, { detail: `${c.id} ${sent ? 'sent to' : 'queued for'} ${d.id}. Waiting for device response.` });
+      this.audit(a, 'device.command', `${missionId}:${type}`, 'ok', c.id);
+    });
+    if (fresh !== 'live') this.publish({ orgId: a.orgId, siteId, event: { type: 'notice', tone: 'warn', text: `Telemetry is ${fresh}. The ${type} request was sent but the result may be unknown.` } });
+    return c;
+  }
+
+  private findCommand(id: string) {
+    const r = this.db.prepare('SELECT org_id, site_id, data FROM commands WHERE id = ?').get(id) as { org_id: string; site_id: string; data: string } | undefined;
+    return r ? { c: JSON.parse(r.data) as Command, orgId: r.org_id, siteId: r.site_id } : undefined;
+  }
+
+  private missionById(id: string) {
+    const r = this.db.prepare('SELECT org_id, site_id, data FROM missions WHERE id = ?').get(id) as { org_id: string; site_id: string; data: string } | undefined;
+    return r ? { m: JSON.parse(r.data) as Mission, orgId: r.org_id, siteId: r.site_id } : undefined;
+  }
+
+  private applyCommand(c: Command, orgId: string, siteId: string) {
+    const found = this.missionById(c.missionId);
+    if (!found) return;
+    const { m } = found;
+    const d = this.devices.get(c.deviceId);
+    const sys = { actor: c.deviceId };
+    switch (c.type) {
+      case 'start': {
+        if (!canMove(MISSION_FLOW, m.status, 'executing')) return;
+        m.status = 'executing';
+        m.note = undefined;
+        const r = this.incRow(m.incidentId);
+        if (r) {
+          const inc = JSON.parse(r.data) as Incident;
+          if (inc.status === 'confirmed') {
+            inc.status = 'responding';
+            this.saveIncident(orgId, siteId, inc);
+          }
+        }
+        this.event(null, orgId, siteId, m.incidentId, `Mission ${m.id} started`, { ...sys, tone: 'ok', detail: 'Start confirmed by the vehicle.' });
+        break;
+      }
+      case 'pause':
+        if (!canMove(MISSION_FLOW, m.status, 'paused')) return;
+        m.status = 'paused';
+        this.event(null, orgId, siteId, m.incidentId, `${c.deviceId} paused`, { ...sys, detail: 'Hold confirmed by vehicle telemetry (speed 0).' });
+        break;
+      case 'resume':
+        if (!canMove(MISSION_FLOW, m.status, 'executing')) return;
+        m.status = 'executing';
+        m.note = undefined;
+        this.event(null, orgId, siteId, m.incidentId, `${c.deviceId} resumed`, sys);
+        break;
+      case 'stop':
+        if (!canMove(MISSION_FLOW, m.status, 'cancelled')) return;
+        m.status = 'cancelled';
+        this.event(null, orgId, siteId, m.incidentId, `${c.deviceId} stopped`, { ...sys, tone: 'warn', detail: 'Stop confirmed by vehicle telemetry (speed 0). Mission ended.' });
+        break;
+    }
+    if (d && (c.type === 'pause' || c.type === 'stop')) {
+      d.speed = 0;
+      this.saveDevice(d);
+    }
+    this.saveMission(orgId, siteId, m);
+  }
+
+  // ---- gateway ingest -----------------------------------------------------
+
+  /** Called when a gateway says hello. Returns accepted/rejected device ids. */
+  gatewayHello(orgId: string, siteIds: string[], gatewayId: string, decls: AdapterDeclaration[]) {
+    const accepted: string[] = [];
+    const rejected: { deviceId: string; reason: string }[] = [];
+    const sys = this.systemActor(orgId, 'gateway', gatewayId);
+    for (const decl of decls) {
+      const d = this.devices.get(decl.deviceId);
+      if (!d || d.orgId !== orgId || (siteIds.length && !siteIds.includes(d.siteId))) {
+        rejected.push({ deviceId: decl.deviceId, reason: 'Device is not registered for this gateway. Register it under Administration first.' });
+        continue;
+      }
+      if (this.cfg.env === 'demo' && decl.integration !== 'simulated') {
+        rejected.push({ deviceId: decl.deviceId, reason: 'Demo environment accepts simulated adapters only.' });
+        continue;
+      }
+      Object.assign(d, {
+        model: decl.model,
+        adapterVersion: decl.adapterVersion,
+        firmwareTested: decl.firmwareTested,
+        integration: decl.integration,
+        capabilities: decl.capabilities,
+        commands: decl.commands,
+        limitations: `${decl.limitations} Link loss: ${decl.linkLossBehavior}`,
+        rateMs: decl.rateMs,
+        view: decl.view ?? d.view,
+      });
+      this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
+      this.lastSeq.delete(d.id); // a new connection may restart sequence numbers
+      this.saveDevice(d);
+      accepted.push(d.id);
+    }
+    // Anything never delivered before this (re)connect is dropped, never replayed (F09).
+    for (const id of accepted) this.expireUndelivered(id, 'Not delivered before the gateway reconnected. Not replayed.');
+    this.audit(sys, 'gateway.connect', gatewayId, 'ok', `accepted ${accepted.join(', ') || 'none'}${rejected.length ? `; rejected ${rejected.map((r) => r.deviceId).join(', ')}` : ''}`);
+    return { accepted, rejected };
+  }
+
+  gatewayClosed(orgId: string, gatewayId: string) {
+    this.audit(this.systemActor(orgId, 'gateway', gatewayId), 'gateway.disconnect', gatewayId);
+  }
+
+  private expireUndelivered(deviceId: string, why: string) {
+    const rows = this.db.prepare("SELECT org_id, site_id, data FROM commands WHERE device_id = ? AND status IN ('requested','authorized','sent')").all(deviceId) as { org_id: string; site_id: string; data: string }[];
+    for (const r of rows) {
+      const c = JSON.parse(r.data) as Command;
+      if (this.setCmd(c, 'timed_out', why)) this.saveCommand(r.org_id, r.site_id, c);
+    }
+  }
+
+  telemetry(orgId: string, t: GwTelemetry) {
+    const d = this.devices.get(t.deviceId);
+    if (!d || d.orgId !== orgId) return;
+    const last = this.lastSeq.get(d.id) ?? -1;
+    if (t.seq <= last) return; // duplicate or out of order
+    this.lastSeq.set(d.id, t.seq);
+    const now = this.now();
+    d.pos = { x: t.pos.x, y: t.pos.y };
+    if (t.alt !== undefined) d.alt = t.alt;
+    d.accuracyM = t.accuracyM;
+    if (t.battery !== undefined) d.battery = t.battery;
+    d.speed = t.speed;
+    d.lastSeen = now;
+    this.devices.set(d.id, d);
+    this.db.prepare('UPDATE devices SET data = ? WHERE id = ?').run(JSON.stringify(this.publicDevice(d)), d.id);
+    this.db
+      .prepare('INSERT INTO telemetry (device_id, seq, source_time, received_time, x, y, alt, accuracy, battery, speed, quality) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(d.id, t.seq, t.sourceTime, now, t.pos.x, t.pos.y, t.alt ?? null, t.accuracyM, t.battery ?? null, t.speed, t.quality);
+    if (t.nextCp !== undefined) {
+      const m = this.activeMission(d.id);
+      if (m && m.nextCp !== t.nextCp && ['executing', 'paused'].includes(m.status)) {
+        m.nextCp = t.nextCp;
+        this.saveMission(d.orgId, d.siteId, m);
+      }
+    }
+    this.publish({ orgId, siteId: d.siteId, event: { type: 'telemetry', deviceId: d.id, at: t.sourceTime, pos: d.pos, alt: d.alt, battery: d.battery, speed: d.speed, accuracyM: d.accuracyM, lastSeen: now } });
+  }
+
+  commandUpdate(orgId: string, u: GwCommandUpdate) {
+    const found = this.findCommand(u.commandId);
+    if (!found || found.orgId !== orgId) return;
+    const { c, siteId } = found;
+    if (isTerminalCommand(c.status)) return;
+    if (u.status === 'acknowledged') c.delivered = true;
+    // Gateways may skip intermediate states; walk forward through them.
+    const path: CommandStatus[] = u.status === 'succeeded' ? ['acknowledged', 'executing', 'succeeded'] : u.status === 'executing' ? ['acknowledged', 'executing'] : [u.status];
+    let moved = false;
+    for (const s of path) if (c.status !== s && this.setCmd(c, s, s === u.status ? u.detail : undefined)) moved = true;
+    if (!moved) return;
+    tx(this.db, () => {
+      if (u.status === 'succeeded') this.applyCommand(c, orgId, siteId);
+      if (u.status === 'rejected' || u.status === 'failed') {
+        const mm = this.missionById(c.missionId);
+        if (mm) this.event(null, orgId, siteId, mm.m.incidentId, `${c.type.toUpperCase()} ${u.status} by device`, { actor: c.deviceId, tone: 'warn', detail: u.detail });
+      }
+      this.saveCommand(orgId, siteId, c);
+    });
+  }
+
+  deviceEvent(orgId: string, e: GwDeviceEvent) {
+    const d = this.devices.get(e.deviceId);
+    if (!d || d.orgId !== orgId) return;
+    const m = this.activeMission(d.id);
+    tx(this.db, () => {
+      switch (e.kind) {
+        case 'route_complete':
+          // Events can overtake the start confirmation (e.g. vehicle already at the target):
+          // a finished route proves the start command ran.
+          if (m && m.status === 'assigned') {
+            for (const r of this.db.prepare("SELECT org_id, site_id, data FROM commands WHERE mission_id = ? AND status IN ('sent','acknowledged','executing')").all(m.id) as { org_id: string; site_id: string; data: string }[]) {
+              const c = JSON.parse(r.data) as Command;
+              if (c.type !== 'start') continue;
+              c.delivered = true;
+              for (const s of ['acknowledged', 'executing', 'succeeded'] as CommandStatus[]) if (c.status !== s) this.setCmd(c, s);
+              this.applyCommand(c, r.org_id, r.site_id);
+              this.saveCommand(r.org_id, r.site_id, c);
+              Object.assign(m, this.missionById(m.id)!.m);
+            }
+          }
+          if (m && m.status === 'executing') {
+            m.status = 'completed';
+            m.nextCp = m.checkpoints.length;
+            this.saveMission(orgId, d.siteId, m);
+            this.event(null, orgId, d.siteId, m.incidentId, `${d.id} reached final checkpoint`, { actor: d.id, tone: 'ok', at: e.at, detail: 'Arrival confirmed by vehicle telemetry.' });
+          }
+          break;
+        case 'checkpoint':
+          if (m) this.event(null, orgId, d.siteId, m.incidentId, `${d.id} passed checkpoint ${(e.checkpoint ?? 0) + 1}`, { actor: d.id, at: e.at });
+          break;
+        case 'failsafe_stop':
+          if (m && (m.status === 'executing' || m.status === 'paused')) {
+            m.status = 'paused';
+            m.note = 'Vehicle stopped by link-loss failsafe. Operator must resume.';
+            this.saveMission(orgId, d.siteId, m);
+            this.event(null, orgId, d.siteId, m.incidentId, `${d.id} reconnected — stopped by link-loss failsafe`, {
+              actor: d.id,
+              tone: 'warn',
+              at: e.at,
+              detail: 'No queued commands were replayed. Mission paused until the operator resumes.',
+            });
+          }
+          break;
+        case 'fault':
+          if (m) this.event(null, orgId, d.siteId, m.incidentId, `${d.id} fault`, { actor: d.id, tone: 'warn', at: e.at, detail: e.detail });
+          break;
+        case 'snapshot': {
+          const incidentId = m?.incidentId ?? this.lastMissionIncident(d.id);
+          if (incidentId && e.frame) this.storeEvidence(orgId, d.siteId, incidentId, { kind: 'snapshot', title: `${d.id} onboard camera`, source: d.id, recordedBy: d.id, capturedAt: e.at, mime: e.frame.mime, bytes: Buffer.from(e.frame.base64, 'base64'), simulated: d.integration === 'simulated' });
+          break;
+        }
+      }
+    });
+  }
+
+  private lastMissionIncident(deviceId: string) {
+    const r = this.db.prepare('SELECT incident_id FROM missions WHERE device_id = ? ORDER BY rowid DESC LIMIT 1').get(deviceId) as { incident_id: string } | undefined;
+    return r?.incident_id;
+  }
+
+  // ---- timers -------------------------------------------------------------
+
+  sweep() {
+    const now = this.now();
+    const rows = this.db.prepare("SELECT org_id, site_id, data FROM commands WHERE status IN ('requested','authorized','sent','acknowledged','executing')").all() as { org_id: string; site_id: string; data: string }[];
+    for (const r of rows) {
+      const c = JSON.parse(r.data) as Command;
+      const age = now - c.issuedAt;
+      const d = this.devices.get(c.deviceId);
+      let changed = false;
+      if ((c.status === 'authorized' || c.status === 'sent' || c.status === 'requested') && (age >= COMMAND_ACK_TIMEOUT_MS || now > c.expiresAt)) {
+        changed = this.setCmd(c, 'timed_out', c.status === 'authorized' ? 'Edge gateway not connected. Command was not delivered.' : 'No acknowledgement from the device. Result unknown — check with the field operator.');
+      } else if ((c.status === 'acknowledged' || c.status === 'executing') && ((d && freshnessAt(now, d) !== 'live' && age >= COMMAND_ACK_TIMEOUT_MS + 1000) || age > 60_000)) {
+        changed = this.setCmd(c, 'unknown', 'Device stopped reporting before confirming. Outcome unknown.');
+      }
+      if (changed) {
+        tx(this.db, () => {
+          this.saveCommand(r.org_id, r.site_id, c);
+          const mm = this.missionById(c.missionId);
+          if (mm) this.event(null, r.org_id, r.site_id, mm.m.incidentId, `${c.type.toUpperCase()} request ${c.status === 'unknown' ? 'outcome unknown' : 'timed out'}`, { actor: 'Platform', tone: 'warn', detail: c.detail });
+        });
+      }
+    }
+    for (const d of this.devices.values()) {
+      const f = freshnessAt(now, d);
+      const before = this.lastFresh.get(d.id);
+      this.lastFresh.set(d.id, f);
+      if (before === undefined || before === f) continue;
+      this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'device', device: this.publicDevice(d) } });
+      const m = this.activeMission(d.id);
+      if (m && ['executing', 'paused', 'assigned'].includes(m.status)) {
+        this.event(null, d.orgId, d.siteId, m.incidentId, f === 'live' ? `${d.id} telemetry restored` : `${d.id} telemetry ${f}`, {
+          actor: 'Platform',
+          tone: f === 'live' ? 'ok' : 'warn',
+          detail: f === 'live' ? undefined : 'Position uncertain. New start/resume commands are held.',
+        });
+      }
+    }
+  }
+
+  // ---- evidence -----------------------------------------------------------
+
+  private evidenceDir(orgId: string) {
+    const dir = join(this.cfg.dataDir, 'evidence', orgId);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  storeEvidence(
+    orgId: string,
+    siteId: string,
+    incidentId: string,
+    x: { kind: Evidence['kind']; title: string; source: string; recordedBy: string; capturedAt: number; mime?: string; bytes?: Buffer; text?: string; simulated: boolean; idempotencyKey?: string; retentionClass?: string },
+  ) {
+    const id = `${this.prefix(orgId)}EV-${String(nextNumber(this.db, orgId, 'evidence', 102)).padStart(4, '0')}`;
+    const body = x.bytes ?? Buffer.from(x.text ?? x.title, 'utf8');
+    const checksum = sha256(body);
+    let path: string | null = null;
+    if (x.bytes) {
+      const ext = (x.mime ?? 'application/octet-stream').split('/')[1]?.replace('svg+xml', 'svg').replace(/[^a-z0-9]/g, '') || 'bin';
+      path = join('evidence', orgId, `${id}.${ext}`);
+      this.evidenceDir(orgId);
+      writeFileSync(join(this.cfg.dataDir, path), x.bytes);
+    }
+    const ev: Evidence = {
+      id,
+      incidentId,
+      kind: x.kind,
+      title: x.title.slice(0, 200),
+      source: x.source,
+      capturedAt: x.capturedAt,
+      receivedAt: this.now(),
+      recordedBy: x.recordedBy,
+      checksum,
+      simulated: x.simulated,
+      mime: x.mime ?? (x.bytes ? 'application/octet-stream' : 'text/plain'),
+      size: body.length,
+      retentionClass: x.retentionClass ?? 'standard',
+    };
+    this.db.prepare('INSERT INTO evidence (id, org_id, incident_id, sha256, path, idempotency_key, data) VALUES (?,?,?,?,?,?,?)').run(id, orgId, incidentId, checksum, path, x.idempotencyKey ?? null, JSON.stringify(ev));
+    this.event(null, orgId, siteId, incidentId, x.kind === 'note' ? 'Note attached' : `${x.kind === 'snapshot' ? 'Snapshot' : 'File'} attached`, { actor: x.recordedBy, detail: x.kind === 'note' ? x.text : ev.title });
+    this.publish({ orgId, siteId, incidentId, event: { type: 'evidence', evidence: ev } });
+    return ev;
+  }
+
+  addEvidence(a: Actor, incidentId: string, input: { kind?: 'note' | 'photo' | 'file'; title?: string; text?: string; mime?: string; contentBase64?: string; capturedAt?: number; idempotencyKey?: string }) {
+    this.require(a, 'evidence.add', incidentId);
+    const inc = this.getIncident(a, incidentId);
+    if (input.idempotencyKey) {
+      const seen = this.db.prepare('SELECT data FROM evidence WHERE org_id = ? AND idempotency_key = ?').get(a.orgId, input.idempotencyKey) as { data: string } | undefined;
+      if (seen) return JSON.parse(seen.data) as Evidence; // re-upload from a flaky phone link
+    }
+    const kind = input.kind ?? (input.contentBase64 ? 'photo' : 'note');
+    let bytes: Buffer | undefined;
+    if (input.contentBase64) {
+      bytes = Buffer.from(input.contentBase64, 'base64');
+      if (bytes.length === 0 || bytes.length > 8 * 1024 * 1024) fail(400, 'invalid', 'File must be between 1 byte and 8 MB.');
+      if (!/^(image\/(jpeg|png|webp|svg\+xml)|application\/pdf|text\/plain|video\/mp4)$/.test(input.mime ?? '')) fail(400, 'invalid', 'File type not allowed.');
+    } else if (!input.text?.trim()) fail(400, 'invalid', 'Add a note or a file.');
+    let ev!: Evidence;
+    tx(this.db, () => {
+      ev = this.storeEvidence(a.orgId, inc.siteId, incidentId, {
+        kind,
+        title: input.title?.trim() || (kind === 'note' ? input.text!.trim().slice(0, 200) : 'Attachment'),
+        text: input.text?.trim(),
+        source: a.role === 'responder' ? 'Field responder' : 'Operator',
+        recordedBy: a.name,
+        capturedAt: input.capturedAt ?? this.now(),
+        mime: input.mime,
+        bytes,
+        simulated: false,
+        idempotencyKey: input.idempotencyKey,
+      });
+      this.audit(a, 'evidence.add', incidentId, 'ok', ev.id);
+    });
+    return ev;
+  }
+
+  private evidenceFor(a: Actor, incidentIds: Set<string>): Evidence[] {
+    const rows = this.db.prepare('SELECT data FROM evidence WHERE org_id = ?').all(a.orgId) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as Evidence).filter((e) => incidentIds.has(e.incidentId));
+  }
+
+  listEvidence(a: Actor, incidentId: string): Evidence[] {
+    this.require(a, 'evidence.view', incidentId, { mutating: false });
+    this.getIncident(a, incidentId);
+    const merged = this.listIncidents({ ...a, role: a.role === 'responder' ? 'dispatcher' : a.role }, {}).filter((i) => i.duplicateOf === incidentId).map((i) => i.id);
+    return this.evidenceFor(a, new Set([incidentId, ...merged]));
+  }
+
+  /** Returns file bytes for viewing or exporting. Both are permission-checked and audited. */
+  evidenceContent(a: Actor, id: string, exportFile: boolean) {
+    this.require(a, exportFile ? 'evidence.export' : 'evidence.view', id, { mutating: false });
+    const r = this.db.prepare('SELECT org_id, incident_id, path, data FROM evidence WHERE id = ?').get(id) as { org_id: string; incident_id: string; path: string | null; data: string } | undefined;
+    if (!r || r.org_id !== a.orgId) return fail(404, 'not_found', 'Evidence not found.');
+    this.getIncident(a, r.incident_id);
+    const ev = JSON.parse(r.data) as Evidence;
+    const bytes = r.path ? readFileSync(join(this.cfg.dataDir, r.path)) : Buffer.from(ev.title, 'utf8');
+    const intact = sha256(bytes) === ev.checksum;
+    this.audit(a, exportFile ? 'evidence.export' : 'evidence.view', id, 'ok', intact ? 'checksum ok' : 'CHECKSUM MISMATCH');
+    return { ev, bytes, intact };
+  }
+
+  // ---- reports ------------------------------------------------------------
+
+  report(a: Actor, incidentId: string, exportFile: boolean) {
+    this.require(a, exportFile ? 'evidence.export' : 'report.view', incidentId, { mutating: false });
+    const inc = this.getIncident(a, incidentId);
+    const missions = this.missionsFor(incidentId);
+    const cmds = missions.flatMap((m) => this.listCommands(a, m.id));
+    const events = (this.db.prepare('SELECT data FROM timeline WHERE incident_id = ? AND org_id = ? ORDER BY at').all(incidentId, a.orgId) as { data: string }[]).map((r) => JSON.parse(r.data) as TimelineEvent);
+    const files = this.listEvidence({ ...a, role: a.role === 'auditor' || a.role === 'supervisor' ? a.role : 'dispatcher' }, incidentId);
+    const name = (id?: string) => this.userName(a.orgId, id);
+    const meta = this.meta(a.orgId);
+    const lines = [
+      `# Incident report ${inc.id} — ${inc.title}`,
+      '',
+      meta.dataLabel !== 'LIVE' ? `> ${meta.dataLabel} DATA — generated by the 13STORE Public Security Twin (${this.cfg.env} environment). Not an operational record.` : `> Generated by the 13STORE Public Security Twin.`,
+      '',
+      `- Report generated: ${fmtDate(this.now())} ${fmtTime(this.now(), true)} (Asia/Bangkok) by ${a.name}`,
+      `- Zone / place: ${inc.zone} · ${inc.place}`,
+      `- Type / severity: ${inc.type} · ${inc.severity}`,
+      `- Status: ${inc.status}${inc.duplicateOf ? ` (duplicate of ${inc.duplicateOf})` : ''}`,
+      `- Source: ${inc.source}`,
+      `- Received: ${fmtDate(inc.createdAt)} ${fmtTime(inc.createdAt, true)}`,
+      `- Owner: ${inc.owner ?? '—'}`,
+      `- Outcome: ${inc.outcome ?? '—'}`,
+      '',
+      '## Missions',
+      ...(missions.length
+        ? missions.map((m) => `- ${m.id} · ${m.deviceId} · operator ${name(m.operatorId)} · plan v${m.planVersion} · approved ${m.approvedVersion ? `v${m.approvedVersion} by ${name(m.approvedBy)}` : 'no'} · ${m.status}`)
+        : ['- None']),
+      '',
+      '## Commands',
+      ...(cmds.length ? cmds.map((c) => `- ${c.id} ${c.type} by ${name(c.issuer)} at ${fmtTime(c.issuedAt, true)} → ${c.status}${c.detail ? ` (${c.detail})` : ''}`) : ['- None']),
+      '',
+      '## Timeline (source time · received time)',
+      ...events.map((e) => `- ${fmtTime(e.at, true)} · ${fmtTime(e.receivedAt, true)} — ${e.title} (${e.actor})${e.detail ? `: ${e.detail}` : ''}`),
+      '',
+      '## Evidence',
+      ...(files.length ? files.map((f) => `- ${f.id} ${f.title} · ${f.source} · ${fmtTime(f.capturedAt, true)} · sha-256 ${f.checksum}${f.simulated ? ' · SIMULATED' : ''}`) : ['- None']),
+      '',
+      'Checksums show a file has not changed since it was stored. They are not, on their own, proof of admissibility.',
+    ];
+    this.audit(a, exportFile ? 'report.export' : 'report.view', incidentId);
+    return { markdown: lines.join('\n'), incident: inc, missions, commands: cmds, timeline: events, evidence: files };
+  }
+
+  // ---- media (simulated media gateway) -------------------------------------
+
+  mediaSession(a: Actor, deviceId: string) {
+    this.require(a, 'media.view', deviceId, { mutating: false });
+    const d = this.getDevice(a, deviceId);
+    if (!d.capabilities.includes('video') && !d.capabilities.includes('camera')) fail(400, 'invalid', `${d.id} has no camera.`);
+    const exp = this.now() + 60_000;
+    const sig = hmac(this.cfg.mediaSecret, `${a.orgId}|${d.id}|${a.userId}|${exp}`);
+    this.audit(a, 'media.session', d.id);
+    return { url: `/api/v1/media/${encodeURIComponent(d.id)}/frame.svg?u=${encodeURIComponent(a.userId ?? '')}&exp=${exp}&sig=${sig}`, expiresAt: exp, label: d.integration === 'simulated' ? 'SIMULATED' : 'LIVE' };
+  }
+
+  /** Verifies a signed media URL. No session needed, so <img> tags work; scope is bound into the signature. */
+  mediaFrame(deviceId: string, userId: string, exp: number, sig: string) {
+    if (!(exp > this.now())) fail(410, 'forbidden', 'Media link expired.');
+    const d = this.devices.get(deviceId);
+    const u = this.db.prepare('SELECT org_id FROM users WHERE id = ? AND active = 1').get(userId) as { org_id: string } | undefined;
+    if (!d || !u || u.org_id !== d.orgId) return fail(403, 'forbidden', 'Invalid media link.');
+    if (!safeEqual(sig, hmac(this.cfg.mediaSecret, `${d.orgId}|${d.id}|${userId}|${exp}`))) return fail(403, 'forbidden', 'Invalid media link.');
+    const f = freshnessAt(this.now(), d);
+    const t = f === 'live' ? this.now() : d.lastSeen;
+    const banner = f === 'live' ? (d.integration === 'simulated' ? 'SIMULATED FEED' : 'LIVE') : f === 'stale' ? 'FEED DELAYED' : 'NO SIGNAL';
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="#101b2b"/><polygon points="0,180 120,96 200,96 320,180" fill="#2a3442"/><rect x="120" y="110" width="96" height="6" fill="#e8edf2"/><text x="10" y="20" fill="#f1f5f9" font-family="sans-serif" font-size="12">${d.id}</text><text x="310" y="20" fill="#fbbf24" font-family="sans-serif" font-size="10" text-anchor="end">${banner}</text><text x="10" y="170" fill="#f1f5f9" font-family="monospace" font-size="11">${fmtDate(t)} ${fmtTime(t, true)}</text></svg>`;
+  }
+
+  // ---- snapshot -----------------------------------------------------------
+
+  meta(orgId: string): Meta {
+    const anySim = [...this.devices.values()].some((d) => d.orgId === orgId && d.integration === 'simulated');
+    return {
+      env: this.cfg.env,
+      version: this.cfg.version,
+      serverTime: this.now(),
+      dataLabel: this.cfg.env === 'demo' ? 'SIMULATION' : anySim ? 'MIXED DEMO' : 'LIVE',
+    };
+  }
+
+  site(a: Actor, siteId?: string) {
+    const id = siteId ?? this.defaultSite(a);
+    const r = this.db.prepare('SELECT id, org_id, name, geometry FROM sites WHERE id = ?').get(id) as { id: string; org_id: string; name: string; geometry: string } | undefined;
+    if (!r || !this.inScope(a, r.org_id, r.id)) return fail(404, 'not_found', 'Site not found.');
+    return { id: r.id, name: r.name, geometry: JSON.parse(r.geometry) as SiteGeometry };
+  }
+
+  listSites(a: Actor) {
+    const rows = this.db.prepare('SELECT id, org_id, name FROM sites WHERE org_id = ?').all(a.orgId) as { id: string; org_id: string; name: string }[];
+    return rows.filter((r) => this.inScope(a, r.org_id, r.id)).map((r) => ({ id: r.id, name: r.name }));
+  }
+
+  orgUsers(a: Actor): User[] {
+    const rows = this.db.prepare('SELECT id, name, role, title FROM users WHERE org_id = ? AND active = 1').all(a.orgId) as unknown as User[];
+    return rows.map((u) => ({ id: u.id, name: u.name, role: u.role, title: u.title }));
+  }
+
+  snapshot(a: Actor, siteId?: string): Snapshot {
+    const site = this.site(a, siteId);
+    const incidents = a.role === 'admin' ? [] : this.listIncidents(a, { siteId: site.id });
+    const ids = new Set(incidents.map((i) => i.id));
+    const timeline = (this.db.prepare('SELECT data FROM timeline WHERE org_id = ? ORDER BY at').all(a.orgId) as { data: string }[])
+      .map((r) => JSON.parse(r.data) as TimelineEvent)
+      .filter((e) => ids.has(e.incidentId));
+    const missions = a.role === 'responder' || a.role === 'admin' ? [] : this.allMissions(a.orgId).filter((m) => ids.has(m.incidentId));
+    return {
+      serverTime: this.now(),
+      meta: this.meta(a.orgId),
+      site,
+      users: this.orgUsers(a),
+      incidents,
+      devices: this.listDevices(a, site.id),
+      missions,
+      commands: a.role === 'admin' ? [] : this.listCommands(a).filter((c) => missions.some((m) => m.id === c.missionId)),
+      timeline,
+      evidence: can(a.role as Role, 'evidence.view') ? this.evidenceFor(a, ids) : [],
+      assignments: this.listAssignments(a).filter((x) => ids.has(x.incidentId)),
+    };
+  }
+
+  /** Can this console connection receive the event? Mirrors read scoping. */
+  visible(a: Actor, m: BusMessage) {
+    if (m.orgId !== a.orgId) return false;
+    if (m.siteId && a.siteIds.length && !a.siteIds.includes(m.siteId)) return false;
+    const e = m.event;
+    if (e.type === 'resync' || e.type === 'notice') return true;
+    if (a.role === 'admin') return e.type === 'audit' || e.type === 'device';
+    if (e.type === 'audit') return can(a.role as Role, 'audit.view');
+    if (a.role === 'responder') {
+      if (['device', 'telemetry', 'mission', 'command'].includes(e.type)) return false;
+      return !!m.incidentId && this.hasAssignment(a, m.incidentId);
+    }
+    if (e.type === 'evidence') return can(a.role as Role, 'evidence.view');
+    return true;
+  }
+
+  systemActor(orgId: string, role: ActorRole = 'system', name = 'System'): Actor {
+    return { kind: 'system', orgId, siteIds: [], name, role };
+  }
+
+  userActor(u: SessionUser, extra: Partial<Actor> = {}): Actor {
+    return { kind: 'user', orgId: u.orgId, siteIds: u.siteIds, userId: u.id, name: u.name, role: u.role, stepUpUntil: u.stepUpUntil, ...extra };
+  }
+}
