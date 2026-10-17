@@ -2,7 +2,7 @@
 // leader line to the object (CityOS-style). Rendered through a portal into the world's callout
 // element; CSS2DRenderer keeps the anchor on the object every frame.
 import { Building2, Cctv, Drone, TriangleAlert, Truck } from 'lucide-react';
-import { BUILDINGS, VEHICLE_CATALOG, atBuilding, type Building, type Device, type Incident } from '@13store/shared';
+import { BUILDINGS, VEHICLE_CATALOG, atBuilding, fmtSitePoint, type Building, type Device, type Incident } from '@13store/shared';
 import { ageMs, freshness } from '../domain/policy';
 import { age, useT } from '../i18n';
 import { useStore } from '../store';
@@ -136,6 +136,7 @@ function DeviceCallout({ d }: { d: Device }) {
               ? `${t(BUILDINGS.find((b) => b.id === d.indoor!.buildingId)?.name ?? d.indoor.buildingId)} L${d.indoor.level}`
               : `${d.pos.x.toFixed(0)}, ${d.pos.y.toFixed(0)} m`,
           ],
+          ...(d.indoor ? [] : [[t('Lat / Lon'), fmtSitePoint(s.geo, d.pos, 4)] as [string, string]]),
         ];
   return (
     <Card

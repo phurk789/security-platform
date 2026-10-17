@@ -28,6 +28,7 @@ import { Badge, CommandBadge, FreshBadge, IntegrationBadge, MissionBadge } from 
 import { CameraFeed } from './CameraFeed';
 import { LiveMission } from './IncidentPanel';
 import { TelemetryPanel } from './TelemetryPanel';
+import { LatLon } from './LatLon';
 import './device.css';
 
 type Tab = 'feed' | 'telemetry' | 'equipment' | 'mission';
@@ -181,6 +182,8 @@ function TelemetryTab({ d }: { d: Device }) {
           <dt>{t('Position')}</dt>
           <dd>
             {d.pos.x.toFixed(0)}, {d.pos.y.toFixed(0)} m ± {d.accuracyM} m
+            <br />
+            <LatLon p={d.pos} />
           </dd>
         </div>
         {d.indoor && (

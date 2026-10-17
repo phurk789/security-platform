@@ -37,6 +37,11 @@ and the API description at `/api/v1/openapi.json`.
 | `BACKUP_INTERVAL_H`                                                                                | `24` in pilot, `0` in demo                   | Scheduled backup interval in hours; `0` disables                                                                                               |
 | `BACKUP_KEEP`                                                                                      | `14`                                         | Scheduled backups kept before the oldest are pruned                                                                                            |
 | `PURGE_INTERVAL_MS`                                                                                | 1 h                                          | How often the retention policy is applied                                                                                                      |
+| `SECRETS_KEY`                                                                                      | generated into `$DATA_DIR/secrets.key`       | 32-byte key (hex or base64) that seals notification secrets at rest. Keep it with the backups                                                  |
+| `RATE_LIMIT_AUTH_PER_MIN`, `RATE_LIMIT_PER_MIN`                                                    | `60`, `0`                                    | Sign-in/step-up attempts and API requests allowed per client address per minute (`0` = unlimited)                                              |
+| `HSTS`                                                                                             | `1` in pilot                                 | Send `Strict-Transport-Security` on HTTPS responses (behind the TLS proxy)                                                                     |
+| `CSP_CONNECT_SRC`                                                                                  | `https: wss:`                                | Media-server origins the console may connect to (WHEP, playback), space separated                                                              |
+| `ALLOWED_ORIGINS`                                                                                  | any                                          | Browser origins allowed to open the console WebSocket                                                                                          |
 
 ## First run
 
@@ -187,12 +192,20 @@ not altered; delete the evidence item or shorten `evidenceDays` for that.
 
 ## Security notes
 
-- Passwords are hashed with scrypt; repeated failures lock a username for one minute.
+See `SECURITY.md` for the full picture and the deployment hardening checklist. In short:
+
+- Passwords are hashed with scrypt; repeated failures lock a username for one minute; sign-in and
+  step-up are rate limited per client address (`429`).
 - Session tokens and API keys are stored only as SHA-256 hashes. Secrets are shown once.
+  Notification secrets (webhook signing keys, LINE tokens, SMS headers) are sealed with
+  AES-256-GCM before they reach the database (`SECRETS_KEY` / `secrets.key`).
 - Changing a user's role, password or disabling them ends their sessions.
-- Responses carry `nosniff`, `no-referrer` and `X-Frame-Options: DENY`. SVG evidence is served
-  with a restrictive CSP.
+- Responses carry `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`,
+  `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, HSTS on HTTPS, and the hosted
+  console gets a Content-Security-Policy (scripts from this origin only). SVG evidence is served
+  with a restrictive CSP. `ALLOWED_ORIGINS` limits which browser origins may open the WebSocket.
 - Uploads are limited to 8 MB and to JPEG, PNG, WebP, SVG, PDF, MP4 and plain text.
+- `npm audit --omit=dev` is clean; it runs with the tests before a release.
 
 ## Demo operations (booth)
 

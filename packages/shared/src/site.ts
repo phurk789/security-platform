@@ -1,3 +1,4 @@
+import type { GeoAnchor } from './geo';
 /** 17 Oct 2026 05:27:00 Asia/Bangkok — the scenario start time from the concept mockup. */
 export const SCENARIO_START = Date.UTC(2026, 9, 16, 22, 27, 0);
 
@@ -5,12 +6,18 @@ export const SCENARIO_START = Date.UTC(2026, 9, 16, 22, 27, 0);
 // Site geometry (metres, local site grid; origin = north-west corner, +y = south)
 // ---------------------------------------------------------------------------
 
+/** WGS 84 position of the demo site's grid origin (north-west corner). Placeholder in central
+ *  Bangkok; a real site gets its anchor from a survey (Administration → Site & GIS). */
+export const DEMO_GEO: GeoAnchor = { originLat: 13.7563, originLon: 100.5018, rotationDeg: 0 };
+
 export const SITE = {
   name: 'Civic Center',
   org: '13STORE Demo Org',
   width: 420,
   height: 290,
-  crs: 'Local site grid (m) → WGS 84 via 2-point transform (placeholder)',
+  crs: 'Local site grid (m, origin NW corner, +x east, +y south) anchored to WGS 84',
+  /** WGS 84 anchor of the grid origin and its rotation. */
+  geo: DEMO_GEO,
 };
 
 export interface Entrance {
@@ -80,11 +87,51 @@ const info = (b: Omit<Building, 'bim'>, extra: Partial<BuildingInfo> & Pick<Buil
 };
 
 export const BUILDINGS: Building[] = [
-  info({ id: 'B1', name: 'Building 1', use: 'Administration', x: 50, y: 52, w: 92, d: 56, h: 22, zone: 'Zone A' }, { occupancy: 420, yearBuilt: 2009, structure: 'Reinforced concrete frame, curtain wall', assets: ['Fire alarm panel, lobby L1', 'Server room L3 (east wing)', '2 lifts, 2 stair cores'] }),
-  info({ id: 'B2', name: 'Building 2', use: 'Public Services', x: 178, y: 26, w: 82, d: 62, h: 34, zone: 'Zone A' }, { occupancy: 900, yearBuilt: 2015, basementLevels: 1, structure: 'Reinforced concrete, glass façade', assets: ['Fire alarm panel, security desk L1', 'Backup generator, basement', 'Public counters L1–L2', '3 lifts, 2 stair cores'] }),
-  info({ id: 'B3', name: 'Building 3', use: 'Civic Hall', x: 284, y: 40, w: 62, d: 72, h: 26, zone: 'Zone B' }, { levels: 3, levelHeightM: 8, occupancy: 1200, yearBuilt: 1998, structure: 'Steel long-span roof on concrete frame', assets: ['Auditorium 800 seats', 'Fire alarm panel, foyer', 'Sprinklered'] }),
-  info({ id: 'B4', name: 'Building 4', use: 'Operations', x: 300, y: 128, w: 74, d: 58, h: 24, zone: 'Zone B' }, { occupancy: 260, yearBuilt: 2012, structure: 'Reinforced concrete frame', assets: ['Security control room L2', 'Backup generator, roof', 'Vehicle bay, east side'] }),
-  info({ id: 'B5', name: 'Building 5', use: 'Logistics', x: 78, y: 140, w: 84, d: 60, h: 18, zone: 'Zone A' }, { levels: 2, levelHeightM: 7.5, occupancy: 80, yearBuilt: 2004, structure: 'Steel portal frame, metal cladding', assets: ['Loading dock, south side', 'Fuel store (diesel 2000 L), west', 'Forklift charging area'] }),
+  info(
+    { id: 'B1', name: 'Building 1', use: 'Administration', x: 50, y: 52, w: 92, d: 56, h: 22, zone: 'Zone A' },
+    {
+      occupancy: 420,
+      yearBuilt: 2009,
+      structure: 'Reinforced concrete frame, curtain wall',
+      assets: ['Fire alarm panel, lobby L1', 'Server room L3 (east wing)', '2 lifts, 2 stair cores'],
+    },
+  ),
+  info(
+    { id: 'B2', name: 'Building 2', use: 'Public Services', x: 178, y: 26, w: 82, d: 62, h: 34, zone: 'Zone A' },
+    {
+      occupancy: 900,
+      yearBuilt: 2015,
+      basementLevels: 1,
+      structure: 'Reinforced concrete, glass façade',
+      assets: ['Fire alarm panel, security desk L1', 'Backup generator, basement', 'Public counters L1–L2', '3 lifts, 2 stair cores'],
+    },
+  ),
+  info(
+    { id: 'B3', name: 'Building 3', use: 'Civic Hall', x: 284, y: 40, w: 62, d: 72, h: 26, zone: 'Zone B' },
+    {
+      levels: 3,
+      levelHeightM: 8,
+      occupancy: 1200,
+      yearBuilt: 1998,
+      structure: 'Steel long-span roof on concrete frame',
+      assets: ['Auditorium 800 seats', 'Fire alarm panel, foyer', 'Sprinklered'],
+    },
+  ),
+  info(
+    { id: 'B4', name: 'Building 4', use: 'Operations', x: 300, y: 128, w: 74, d: 58, h: 24, zone: 'Zone B' },
+    { occupancy: 260, yearBuilt: 2012, structure: 'Reinforced concrete frame', assets: ['Security control room L2', 'Backup generator, roof', 'Vehicle bay, east side'] },
+  ),
+  info(
+    { id: 'B5', name: 'Building 5', use: 'Logistics', x: 78, y: 140, w: 84, d: 60, h: 18, zone: 'Zone A' },
+    {
+      levels: 2,
+      levelHeightM: 7.5,
+      occupancy: 80,
+      yearBuilt: 2004,
+      structure: 'Steel portal frame, metal cladding',
+      assets: ['Loading dock, south side', 'Fuel store (diesel 2000 L), west', 'Forklift charging area'],
+    },
+  ),
 ];
 
 /** Nearest entrance of a building to a point (for pointing cameras and routing responders). */
@@ -105,8 +152,28 @@ export interface Zone {
 }
 
 export const ZONES: Zone[] = [
-  { id: 'A', name: 'Zone A', poly: [[20, 16], [244, 16], [244, 232], [20, 232]], label: [96, 30] },
-  { id: 'B', name: 'Zone B', poly: [[244, 16], [400, 16], [400, 232], [244, 232]], label: [376, 30] },
+  {
+    id: 'A',
+    name: 'Zone A',
+    poly: [
+      [20, 16],
+      [244, 16],
+      [244, 232],
+      [20, 232],
+    ],
+    label: [96, 30],
+  },
+  {
+    id: 'B',
+    name: 'Zone B',
+    poly: [
+      [244, 16],
+      [400, 16],
+      [400, 232],
+      [244, 232],
+    ],
+    label: [376, 30],
+  },
 ];
 
 export const PARKING = { x: 178, y: 196, w: 104, d: 30 };

@@ -21,6 +21,7 @@ import type {
   User,
   DeviceStats,
 } from './types';
+import type { GeoAnchor } from './geo';
 import type { SiteGeometry } from './site';
 import type { GimbalState, GwCameraResult, SrvCamera, StreamInfo } from './camera';
 import type { Geofence } from './routing';
@@ -75,6 +76,8 @@ export interface GwHello {
   protocol: string;
   gatewayId: string;
   adapters: AdapterDeclaration[];
+  /** WGS 84 anchor the gateway converts device positions with; the server warns when it differs from the site's. */
+  geo?: GeoAnchor;
 }
 
 export interface GwTelemetry {
@@ -435,6 +438,7 @@ export type ConsoleEvent =
       stats?: DeviceStats;
     }
   | { type: 'geofence'; geofence: Geofence; deleted?: boolean }
+  | { type: 'site'; site: SiteInfo }
   | { type: 'patrol'; patrol: Patrol; deleted?: boolean }
   | { type: 'timeline'; event: TimelineEvent }
   | { type: 'evidence'; evidence: Evidence }

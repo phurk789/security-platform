@@ -42,15 +42,15 @@ flowchart LR
 
 ## What the adapters do
 
-| Device | Adapter | Protocol | Reads | Can do |
-|---|---|---|---|---|
-| UniFC 6 Pico (PX4 / ArduPilot) via UniRC 7 Pro | `mavlink` | MAVLink 2 over UDP to the UniRC datalink server `192.168.144.20:19856` (or the FC's own Ethernet port, `listen` mode) | Position (GLOBAL_POSITION_INT → site grid), heading, ground speed, battery, satellites, GPS accuracy (hAcc/eph), radio RSSI, mission progress, flight mode, armed state, critical STATUSTEXT | Upload the approved route (mission protocol), AUTO + MISSION_START, pause (DO_PAUSE_CONTINUE or HOLD), resume, stop (HOLD) |
-| SIYI gimbal camera | `siyi-camera` | SIYI Gimbal Camera SDK over UDP `192.168.144.25:37260` | Gimbal yaw/pitch/roll, zoom level, recording state, firmware | Pan/tilt by speed or to an angle, centre, zoom in/out or to a level, take a photo, start/stop recording |
+| Device                                         | Adapter       | Protocol                                                                                                              | Reads                                                                                                                                                                                        | Can do                                                                                                                     |
+| ---------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| UniFC 6 Pico (PX4 / ArduPilot) via UniRC 7 Pro | `mavlink`     | MAVLink 2 over UDP to the UniRC datalink server `192.168.144.20:19856` (or the FC's own Ethernet port, `listen` mode) | Position (GLOBAL_POSITION_INT → site grid), heading, ground speed, battery, satellites, GPS accuracy (hAcc/eph), radio RSSI, mission progress, flight mode, armed state, critical STATUSTEXT | Upload the approved route (mission protocol), AUTO + MISSION_START, pause (DO_PAUSE_CONTINUE or HOLD), resume, stop (HOLD) |
+| SIYI gimbal camera                             | `siyi-camera` | SIYI Gimbal Camera SDK over UDP `192.168.144.25:37260`                                                                | Gimbal yaw/pitch/roll, zoom level, recording state, firmware                                                                                                                                 | Pan/tilt by speed or to an angle, centre, zoom in/out or to a level, take a photo, start/stop recording                    |
 
 **Equipment tab.** Each adapter declares the parts it talks to (`components` in the hello:
 flight controller, GNSS, radio, battery, 4-in-1 module for the vehicle; camera, gimbal and media
 stream for the SIYI camera; Nav2, SLAM and battery for the ROS 2 vehicle). Every part starts as
-*Interface verification pending* and turns OK the first time the adapter actually hears from it
+_Interface verification pending_ and turns OK the first time the adapter actually hears from it
 (heartbeat, GPS_RAW_INT, RADIO_STATUS, SYS_STATUS, a relay acknowledgement, an SDK firmware
 reply, a SLAM pose…), with the version it read where the protocol gives one. Status changes
 ride in telemetry (`components: [{id, status, version?, detail?}]`), so the device panel shows
@@ -84,6 +84,7 @@ telemetry shows the effect (moving after start; speed 0 after pause/stop). Camer
 **confirmed** only when the camera answers; otherwise "sent, not confirmed".
 
 **Safety defaults**
+
 - No remote arming. If the vehicle is disarmed, start is refused with "Arm it on the remote
   after the safety check". Set `allowRemoteArm: true` only after a written risk assessment.
 - If the flight controller stops sending heartbeats for 3 s, telemetry stops. The platform shows
@@ -98,14 +99,14 @@ Wire a TELEM UART to the SIYI air unit's datalink port.
 
 **ArduPilot (Rover / Copter)**
 
-| Parameter | Value | Why |
-|---|---|---|
-| `SERIALn_PROTOCOL` | `2` (MAVLink 2) | on the UART wired to the air unit |
-| `SERIALn_BAUD` | `115` | must match the UniRC datalink baud (115200 by default in the SIYI app) |
-| `FS_GCS_ENABLE` | `1` | act when the ground station link is lost |
-| `FS_ACTION` (Rover) | `2` Hold | stop in place on link loss (Rover) |
-| `FS_GCS_ENABLE` action (Copter) | RTL or Land per site plan | |
-| `SRn_*` stream rates | ≥ 1 Hz for position, extended status, extra | the adapter also requests 1 Hz with SET_MESSAGE_INTERVAL |
+| Parameter                       | Value                                       | Why                                                                    |
+| ------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------- |
+| `SERIALn_PROTOCOL`              | `2` (MAVLink 2)                             | on the UART wired to the air unit                                      |
+| `SERIALn_BAUD`                  | `115`                                       | must match the UniRC datalink baud (115200 by default in the SIYI app) |
+| `FS_GCS_ENABLE`                 | `1`                                         | act when the ground station link is lost                               |
+| `FS_ACTION` (Rover)             | `2` Hold                                    | stop in place on link loss (Rover)                                     |
+| `FS_GCS_ENABLE` action (Copter) | RTL or Land per site plan                   |                                                                        |
+| `SRn_*` stream rates            | ≥ 1 Hz for position, extended status, extra | the adapter also requests 1 Hz with SET_MESSAGE_INTERVAL               |
 
 **PX4**: set `MAV_n_CONFIG` to the TELEM port, `NAV_DLL_ACT` (data-link loss action) per the
 site safety plan, and check `COM_DL_LOSS_T`.
@@ -156,34 +157,34 @@ registered in their unarmed configuration; weapon stations are not integrated.
 The **4-in-1 module** (two-way loudspeaker, searchlight, warning light, HD camera) connects in
 three parts:
 
-| Function | Path | Config |
-|---|---|---|
-| Searchlight, warning light | Flight-controller relay outputs → `MAV_CMD_DO_SET_RELAY` (ArduPilot `RELAYn_PIN`, `RELAYn_DEFAULT`) | `payload: { module: 'loudhailer-4in1', spotlightRelay: 0, beaconRelay: 1 }` |
-| Camera | RTSP to MediaMTX like any camera, or use the SIYI gimbal camera instead | `stream` |
-| Loudspeaker | The module's own audio link (not MAVLink). Preset announcements from the console are supported on the simulated units; for hardware, wire the module's audio input to the UniRC 7 Pro's audio or a separate intercom | — |
+| Function                   | Path                                                                                                                                                                                                                 | Config                                                                      |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Searchlight, warning light | Flight-controller relay outputs → `MAV_CMD_DO_SET_RELAY` (ArduPilot `RELAYn_PIN`, `RELAYn_DEFAULT`)                                                                                                                  | `payload: { module: 'loudhailer-4in1', spotlightRelay: 0, beaconRelay: 1 }` |
+| Camera                     | RTSP to MediaMTX like any camera, or use the SIYI gimbal camera instead                                                                                                                                              | `stream`                                                                    |
+| Loudspeaker                | The module's own audio link (not MAVLink). Preset announcements from the console are supported on the simulated units; for hardware, wire the module's audio input to the UniRC 7 Pro's audio or a separate intercom | —                                                                           |
 
 ## Hardware test checklist (before marking VERIFIED)
 
 Run on the real vehicle in a closed area, with the pilot holding the UniRC 7 Pro and the vehicle's
 physical E-stop in reach. Record firmware versions in the device's "firmware tested" field.
 
-| # | Check | Pass when |
-|---|---|---|
-| 1 | Position on the map | Vehicle stands on a surveyed point; map position within GNSS accuracy shown |
-| 2 | Heading | Turning the vehicle turns the icon the same way |
-| 3 | Start refused when disarmed | Clear message; no mission uploaded |
-| 4 | Route upload and start | Vehicle drives the approved route; command shows succeeded only once moving |
-| 5 | Pause / resume | Vehicle stops; "succeeded" only at speed 0; resumes on resume |
-| 6 | Stop request | Vehicle holds; mission ends |
-| 7 | Route changed after approval | Start refused until re-approved |
-| 8 | Pilot override | Mode switch on the remote is reported; platform does not switch back |
-| 9 | Link loss | Unplug the edge PC from the UniRC: STALE ≤ 5 s, vehicle follows its failsafe; re-plug: failsafe reported, nothing replayed, mission paused |
-| 10 | Physical E-stop | Works with the platform disconnected |
-| 11a | Point at alert | Inject or trigger an alert at a surveyed point: camera centres on it (record the error in degrees); correct `bearingDeg` if needed |
-| 10a | 4-in-1 module | Searchlight and warning light switch from the console and the state shows on the unit card; relays confirmed by the flight controller |
-| 11 | Camera control | Pan/tilt/zoom/photo/record each confirmed by the camera; "pan right" turns right (else set `yawSign: -1`); pitch limits respected |
-| 12 | Video | Browser shows live video; an expired link is refused; another org cannot view |
-| 13 | Latency | Measure command → acknowledgement and glass-to-glass video delay; record both |
+| #   | Check                        | Pass when                                                                                                                                  |
+| --- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Position on the map          | Vehicle stands on a surveyed point; map position within GNSS accuracy shown                                                                |
+| 2   | Heading                      | Turning the vehicle turns the icon the same way                                                                                            |
+| 3   | Start refused when disarmed  | Clear message; no mission uploaded                                                                                                         |
+| 4   | Route upload and start       | Vehicle drives the approved route; command shows succeeded only once moving                                                                |
+| 5   | Pause / resume               | Vehicle stops; "succeeded" only at speed 0; resumes on resume                                                                              |
+| 6   | Stop request                 | Vehicle holds; mission ends                                                                                                                |
+| 7   | Route changed after approval | Start refused until re-approved                                                                                                            |
+| 8   | Pilot override               | Mode switch on the remote is reported; platform does not switch back                                                                       |
+| 9   | Link loss                    | Unplug the edge PC from the UniRC: STALE ≤ 5 s, vehicle follows its failsafe; re-plug: failsafe reported, nothing replayed, mission paused |
+| 10  | Physical E-stop              | Works with the platform disconnected                                                                                                       |
+| 11a | Point at alert               | Inject or trigger an alert at a surveyed point: camera centres on it (record the error in degrees); correct `bearingDeg` if needed         |
+| 10a | 4-in-1 module                | Searchlight and warning light switch from the console and the state shows on the unit card; relays confirmed by the flight controller      |
+| 11  | Camera control               | Pan/tilt/zoom/photo/record each confirmed by the camera; "pan right" turns right (else set `yawSign: -1`); pitch limits respected          |
+| 12  | Video                        | Browser shows live video; an expired link is refused; another org cannot view                                                              |
+| 13  | Latency                      | Measure command → acknowledgement and glass-to-glass video delay; record both                                                              |
 
 ## Not covered yet
 

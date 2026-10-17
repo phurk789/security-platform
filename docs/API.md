@@ -164,6 +164,21 @@ autoStart, enabled }`. Each run raises an incident of type `Scheduled patrol` an
 - `GET /kpi?from&to` → the period's KPIs (`computeKpi` in `packages/shared/src/ops.ts`);
   `GET /kpi/report?from&to&download=1` → the Markdown period report (`evidence.export`, audited).
 
+## GIS: anchor and GeoJSON
+
+- `GET /sites/{id}` (`default` = your site) → `{ id, name, geometry }`; `geometry.geo` is the WGS 84 anchor
+  `{ originLat, originLon, rotationDeg }`. `PATCH /sites/{id}/geo` sets it (admin, step-up; audited `site.geo`).
+- `GET /sites/{id}/geojson?layers=buildings,zones,entrances,hydrants,geofences,devices,incidents&download=1` →
+  RFC 7946 FeatureCollection in `[lon, lat]`; `download=1` is audited (`site.export`).
+- `POST /geofences/import` (supervisor/admin) with a FeatureCollection of polygons → `{ imported, geofences, errors }`.
+  Properties: `name`, `kind`, `appliesTo`, `reason`, `active`. See GIS.md.
+
+## Limits and errors
+
+- Sign-in and step-up are rate limited per client address (`429 rate_limited` with `Retry-After`); the whole API can
+  be too (`RATE_LIMIT_PER_MIN`). Repeated wrong passwords lock the username for a minute.
+- Request bodies up to 12 MB; uploads 8 MB. Errors are `{ code, message }` with the HTTP status.
+
 ## Replay
 
 Clients showing past data send `X-Console-Mode: replay`. The server then refuses every change

@@ -39,13 +39,13 @@ flowchart LR
   W -. img .-> MG
 ```
 
-| Part | Responsibility | Where |
-|---|---|---|
-| Shared domain | Types, role matrix, freshness thresholds, state machines, wire protocol, site geometry | `packages/shared` |
-| Platform server | Identity, org/site scoping, incidents, missions, approvals, commands, evidence, reports, audit, backups, media URLs, events | `apps/server` |
-| Edge gateway | Runs device adapters on site, holds the vehicle-side safety behaviour, speaks `ps-gw/1` to the server | `apps/gateway` |
-| Command centre | Situation map (2D/3D), incident workflow, mission planner, live mission, evidence & replay, reports, admin | `apps/web` |
-| Field app | Responder tasks, on-scene and report, photos, offline outbox | `apps/field` |
+| Part            | Responsibility                                                                                                              | Where             |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| Shared domain   | Types, role matrix, freshness thresholds, state machines, wire protocol, site geometry                                      | `packages/shared` |
+| Platform server | Identity, org/site scoping, incidents, missions, approvals, commands, evidence, reports, audit, backups, media URLs, events | `apps/server`     |
+| Edge gateway    | Runs device adapters on site, holds the vehicle-side safety behaviour, speaks `ps-gw/1` to the server                       | `apps/gateway`    |
+| Command centre  | Situation map (2D/3D), incident workflow, mission planner, live mission, evidence & replay, reports, admin                  | `apps/web`        |
+| Field app       | Responder tasks, on-scene and report, photos, offline outbox                                                                | `apps/field`      |
 
 The server is one process. Telemetry ingest and the console event stream run inside it but on
 separate code paths (gateway hub → in-memory device cache → event bus), so a burst of telemetry
@@ -59,16 +59,16 @@ the same protocol without client changes.
 (`sites.crs`) so a transform to WGS 84 can be added per site. Altitudes are labelled with their
 datum (`m-site-datum`).
 
-| Table | Holds | Notes |
-|---|---|---|
-| `orgs`, `sites`, `users`, `sessions`, `api_keys` | Identity and tenancy | Passwords: scrypt. Tokens and keys stored as SHA-256 hashes only |
-| `devices` | Registered devices and their latest declared capabilities | Adapters can only update registered devices |
-| `telemetry` | Every sample with `source_time` and `received_time` | Used for playback (F15) |
-| `incidents`, `missions`, `commands`, `assignments` | Workflow state | JSON document + indexed columns |
-| `timeline` | Events with source and received time (F10) | |
-| `evidence` | Metadata, SHA-256, relative file path, retention class | Files under `DATA_DIR/evidence/<org>/` |
-| `audit` | Append-only, per-org hash chain | `prev_hash` + `hash`; `/audit/verify` recomputes |
-| `idempotency` | Results of retried field actions | |
+| Table                                              | Holds                                                     | Notes                                                            |
+| -------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| `orgs`, `sites`, `users`, `sessions`, `api_keys`   | Identity and tenancy                                      | Passwords: scrypt. Tokens and keys stored as SHA-256 hashes only |
+| `devices`                                          | Registered devices and their latest declared capabilities | Adapters can only update registered devices                      |
+| `telemetry`                                        | Every sample with `source_time` and `received_time`       | Used for playback (F15)                                          |
+| `incidents`, `missions`, `commands`, `assignments` | Workflow state                                            | JSON document + indexed columns                                  |
+| `timeline`                                         | Events with source and received time (F10)                |                                                                  |
+| `evidence`                                         | Metadata, SHA-256, relative file path, retention class    | Files under `DATA_DIR/evidence/<org>/`                           |
+| `audit`                                            | Append-only, per-org hash chain                           | `prev_hash` + `hash`; `/audit/verify` recomputes                 |
+| `idempotency`                                      | Results of retried field actions                          |                                                                  |
 
 ## Rules live on the server
 
@@ -123,10 +123,10 @@ a streaming server (e.g. WebRTC/HLS gateway) and keeps the signing scheme.
 
 ## Environments (F12)
 
-| `ENV_MODE` | Data label | Devices | Demo controls |
-|---|---|---|---|
-| `demo` | SIMULATION | Simulated adapters only (others are refused) | Enabled |
-| `pilot` | LIVE, or MIXED DEMO if any simulated device is registered | Any registered device | Disabled (404) |
+| `ENV_MODE` | Data label                                                | Devices                                      | Demo controls  |
+| ---------- | --------------------------------------------------------- | -------------------------------------------- | -------------- |
+| `demo`     | SIMULATION                                                | Simulated adapters only (others are refused) | Enabled        |
+| `pilot`    | LIVE, or MIXED DEMO if any simulated device is registered | Any registered device                        | Disabled (404) |
 
 API keys are created per environment (`sk_demo_…`, `sk_sandbox_…`, `sk_pilot_…`). The seeded
 developer sandbox is a separate organisation with its own keys.

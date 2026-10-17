@@ -22,7 +22,7 @@ const gatewayId = process.env.GATEWAY_ID ?? site?.gatewayId ?? 'edge-civic-01';
 const offline = process.env.OFFLINE !== undefined ? process.env.OFFLINE.split(',').filter(Boolean) : undefined;
 const adapters = site ? adaptersFromConfig(site) : defaultAdapters({ offline });
 console.log(`[gw] ${site ? `site config ${configPath}` : 'simulated devices'}: ${adapters.map((a) => `${a.declaration.deviceId} (${a.declaration.adapterVersion})`).join(', ')}`);
-const gw = startGateway({ serverUrl, key, gatewayId, adapters });
+const gw = startGateway({ serverUrl, key, gatewayId, adapters, geo: site?.geo });
 const shutdown = async () => {
   console.log('[gw] shutting down');
   await gw.stop();

@@ -1,5 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BadgeCheck, DatabaseBackup, Eraser, KeyRound, Octagon, Plus, RefreshCw, Router, ScanEye, Search, ShieldCheck, Timer, Trash2, UserPlus } from 'lucide-react';
+import {
+  BadgeCheck,
+  DatabaseBackup,
+  Download,
+  Eraser,
+  Globe2,
+  KeyRound,
+  Octagon,
+  Plus,
+  RefreshCw,
+  Router,
+  ScanEye,
+  Search,
+  ShieldCheck,
+  Timer,
+  Trash2,
+  Upload,
+  UserPlus,
+} from 'lucide-react';
 import {
   GEOFENCE_KIND_LABEL,
   DEFAULT_DETECTION_RULES,
@@ -7,15 +25,17 @@ import {
   DETECTION_LABEL,
   DETECTION_TYPES,
   fmtDate,
+  fmtLatLon,
   fmtTime,
   type ApiKeyView,
+  type GeoAnchor,
   type DetectionRule,
   type LicenseStatus,
   type OrgSettings,
   type Role,
   type UserAdminView,
 } from '@13store/shared';
-import { ApiError } from '../api';
+import { ApiError, saveBlob } from '../api';
 import { useStore } from '../store';
 import { roleLabel, useT } from '../i18n';
 import { StepUpDialog } from '../components/StepUp';
@@ -80,6 +100,10 @@ function Admin() {
   const [settings, setSettings] = useState<OrgSettings>(DEFAULT_ORG_SETTINGS);
   const [ret, setRet] = useState<Record<keyof OrgSettings['retention'], string>>({ telemetryDays: '90', closedIncidentDays: '0', evidenceDays: '0', detectionDays: '90' });
   const geofences = useStore().s.geofences;
+  const geo = useStore().s.geo;
+  const [ga, setGa] = useState<{ lat: string; lon: string; rot: string } | null>(null);
+  const gaForm = ga ?? { lat: String(geo.originLat), lon: String(geo.originLon), rot: String(geo.rotationDeg ?? 0) };
+  const [imp, setImp] = useState<{ imported: number; errors: string[] } | null>(null);
   const [ng, setNg] = useState({ name: '', kind: 'keep_out' as 'keep_out' | 'caution' | 'no_fly', x: '200', y: '120', w: '40', d: '30', uav: true, reason: '' });
   const [rules, setRules] = useState<DetectionRule[]>(DEFAULT_DETECTION_RULES);
   const [rulesDirty, setRulesDirty] = useState(false);
@@ -587,6 +611,117 @@ function Admin() {
           )}
         </section>
         <NotificationChannels onStepUp={(retry) => setStepUp(() => retry)} />
+
+        <section className="card">
+          <h3>
+            <Globe2 size={16} /> {t('Site & GIS')}
+          </h3>
+          <p className="fine" style={{ marginTop: 0 }}>
+            {t(
+              'Where the site grid sits on Earth (WGS 84). Positions from real devices are converted with this anchor, every position in the console can be read as latitude/longitude, and the whole site exports as GeoJSON for a city GIS.',
+            )}
+          </p>
+          <p>
+            <b>{t('Anchor')}</b> <span className="mono">{fmtLatLon({ lat: geo.originLat, lon: geo.originLon }, 6)}</span>
+            {geo.rotationDeg ? <span className="muted"> · {t('grid rotated {d}°', { d: geo.rotationDeg })}</span> : null}
+          </p>
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const body: GeoAnchor = { originLat: Number(gaForm.lat), originLon: Number(gaForm.lon), rotationDeg: Number(gaForm.rot || 0) };
+              void act(async () => {
+                await api.patch('/sites/default/geo', body);
+                setGa(null);
+              }, t('Site anchor saved. Positions now map to the new coordinates.'));
+            }}
+          >
+            <input
+              className="num wide"
+              placeholder={t('Latitude of grid origin')}
+              value={gaForm.lat}
+              onChange={(e) => setGa({ ...gaForm, lat: e.target.value })}
+              aria-label={t('Latitude of grid origin')}
+            />
+            <input
+              className="num wide"
+              placeholder={t('Longitude of grid origin')}
+              value={gaForm.lon}
+              onChange={(e) => setGa({ ...gaForm, lon: e.target.value })}
+              aria-label={t('Longitude of grid origin')}
+            />
+            <input
+              className="num"
+              placeholder={t('rotation °')}
+              value={gaForm.rot}
+              onChange={(e) => setGa({ ...gaForm, rot: e.target.value })}
+              aria-label={t('Grid rotation, degrees')}
+            />
+            <button
+              className="btn-primary"
+              disabled={![gaForm.lat, gaForm.lon].every((v) => v !== '' && Number.isFinite(Number(v))) || Math.abs(Number(gaForm.lat)) > 90 || Math.abs(Number(gaForm.lon)) > 180}
+            >
+              {t('Save anchor')}
+            </button>
+          </form>
+          <p className="fine">
+            {t(
+              "The grid origin is the north-west corner of the site drawing; rotation is how far the drawing's east axis turns clockwise from true east. Take both from a survey or by matching two known points in the GIS.",
+            )}
+          </p>
+          <div className="row gap-s wrap">
+            <button
+              className="btn-secondary small"
+              onClick={() =>
+                act(async () => {
+                  const blob = await api.blob('/sites/default/geojson?download=1');
+                  saveBlob(blob, `site-${new Date().toISOString().slice(0, 10)}.geojson`);
+                }, t('GeoJSON exported (buildings, zones, entrances, hydrants, geofences, devices).'))
+              }
+            >
+              <Download size={14} /> {t('Export GeoJSON')}
+            </button>
+            <label className="btn-secondary small file-btn">
+              <Upload size={14} /> {t('Import geofences (GeoJSON)')}
+              <input
+                type="file"
+                accept=".geojson,.json,application/geo+json,application/json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!f) return;
+                  void act(async () => {
+                    let fc: unknown;
+                    try {
+                      fc = JSON.parse(await f.text());
+                    } catch {
+                      throw new Error(t('{name} is not valid JSON.', { name: f.name }));
+                    }
+                    const r = await api.post<{ imported: number; errors: string[] }>('/geofences/import', fc);
+                    setImp(r);
+                    setMsg({
+                      tone: r.imported ? 'ok' : 'warn',
+                      text: t('{n} geofences imported from {name}{err}', {
+                        n: r.imported,
+                        name: f.name,
+                        err: r.errors.length ? ` · ${t('{n} features skipped', { n: r.errors.length })}` : '',
+                      }),
+                    });
+                  });
+                }}
+              />
+            </label>
+          </div>
+          {imp && imp.errors.length > 0 && (
+            <ul className="fine import-errors">
+              {imp.errors.slice(0, 8).map((x, i) => (
+                <li key={i}>{x}</li>
+              ))}
+              {imp.errors.length > 8 && <li>…</li>}
+            </ul>
+          )}
+        </section>
 
         <section className="card">
           <h3>

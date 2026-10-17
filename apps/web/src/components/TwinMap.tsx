@@ -10,6 +10,7 @@ import {
   PLAZA,
   ROAD,
   SITE,
+  fmtLatLon,
   ZONES,
   floorPlan,
   floorPlansOf,
@@ -328,7 +329,8 @@ export function TwinMap() {
       </div>
       <Minimap view={gl ? view : null} zoom={zoom} pan={pan} mode={mode} positions={positions} incidents={visibleIncidents} onGo={goTo} />
       <div className="map-source">
-        {t('Site model: placeholder geometry')} · {SITE.crs}
+        {t('Site model: placeholder geometry')} · {t('WGS 84 anchor')} {fmtLatLon({ lat: s.geo.originLat, lon: s.geo.originLon })}
+        {s.geo.rotationDeg ? ` · ${s.geo.rotationDeg}°` : ''}
       </div>
     </div>
   );

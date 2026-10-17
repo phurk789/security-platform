@@ -7,13 +7,13 @@ needed on the vehicle and the site before an indoor mission is more than a demo.
 
 ## What indoor needs
 
-| Need | Why | Options (in order of practicality) |
-|---|---|---|
-| **Indoor positioning** | No GNSS; the platform must know which floor and where on it | 2D LiDAR SLAM on a companion computer (ROS 2 Nav2, AMCL on the floor map) — proven, ~฿15–40k of hardware per vehicle · UWB beacons (fixed anchors per floor, 10–30 cm) · Visual SLAM (camera-based, cheaper, less robust in dark corridors) · ArduPilot "external navigation" fed by the same SLAM (`VISION_POSITION_ESTIMATE`), so the flight controller keeps driving |
-| **A navigable floor map** | Routes must stay in corridors and rooms, off stairs and lifts | Export each level from the BIM model (IFC → floor plan → occupancy map for Nav2); the twin uses the same plan for the floor-plan view, room names and the wall-crossing check |
-| **A link that goes through walls** | The SIYI image link is line-of-sight; inside it drops within a few rooms | Site Wi-Fi 6 mesh with the edge PC on the same network · Private 5G · **Fibre-optic tether** (the D50/D100 remote supports fibre control; ideal for a single building) · The SIYI link outdoors plus Wi-Fi hand-over indoors |
-| **Indoor safety** | People, glass, narrow doors, no sky view | Speed limit ≤ 1.5 m/s, bumper / ultrasonic stop, person detection on the camera, doors held open or automated, physical E-stop, pilot escort for the first runs. **Stairs are out**; lifts only with a lift-controller integration (not built) |
-| **Indoor video** | Corridors are dark, Wi-Fi bandwidth is shared | The 4-in-1 searchlight; sub-stream for the console; recordings on the camera's SD card |
+| Need                               | Why                                                                      | Options (in order of practicality)                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Indoor positioning**             | No GNSS; the platform must know which floor and where on it              | 2D LiDAR SLAM on a companion computer (ROS 2 Nav2, AMCL on the floor map) — proven, ~฿15–40k of hardware per vehicle · UWB beacons (fixed anchors per floor, 10–30 cm) · Visual SLAM (camera-based, cheaper, less robust in dark corridors) · ArduPilot "external navigation" fed by the same SLAM (`VISION_POSITION_ESTIMATE`), so the flight controller keeps driving |
+| **A navigable floor map**          | Routes must stay in corridors and rooms, off stairs and lifts            | Export each level from the BIM model (IFC → floor plan → occupancy map for Nav2); the twin uses the same plan for the floor-plan view, room names and the wall-crossing check                                                                                                                                                                                           |
+| **A link that goes through walls** | The SIYI image link is line-of-sight; inside it drops within a few rooms | Site Wi-Fi 6 mesh with the edge PC on the same network · Private 5G · **Fibre-optic tether** (the D50/D100 remote supports fibre control; ideal for a single building) · The SIYI link outdoors plus Wi-Fi hand-over indoors                                                                                                                                            |
+| **Indoor safety**                  | People, glass, narrow doors, no sky view                                 | Speed limit ≤ 1.5 m/s, bumper / ultrasonic stop, person detection on the camera, doors held open or automated, physical E-stop, pilot escort for the first runs. **Stairs are out**; lifts only with a lift-controller integration (not built)                                                                                                                          |
+| **Indoor video**                   | Corridors are dark, Wi-Fi bandwidth is shared                            | The 4-in-1 searchlight; sub-stream for the console; recordings on the camera's SD card                                                                                                                                                                                                                                                                                  |
 
 ## What the platform does now
 
@@ -22,7 +22,7 @@ needed on the vehicle and the site before an indoor mission is more than a demo.
   map shows the plan, the 3D twin cuts the building open at that level.
 - **Indoor devices.** A device can be marked indoor (`building`, `level`, positioning source).
   Telemetry carries the level; the device is drawn on the right floor and the panel says
-  *Indoor · Building 2 · Level 1 · LiDAR SLAM* and which room it is in.
+  _Indoor · Building 2 · Level 1 · LiDAR SLAM_ and which room it is in.
 - **Wall-aware missions.** For an indoor vehicle the constraint checks become: route inside the
   building, every checkpoint on the vehicle's floor, no leg through a wall, no checkpoint on
   stairs or in a lift. Approval is refused otherwise, exactly like the outdoor checks.

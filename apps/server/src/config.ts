@@ -40,6 +40,18 @@ export interface Config {
   backupKeep: number;
   /** How often expired data is purged (ms). */
   purgeIntervalMs: number;
+  /** Key for secrets at rest (32 bytes, hex/base64). Unset: generated once into DATA_DIR/secrets.key. */
+  secretsKey?: string;
+  /** Sign-in and step-up attempts allowed per client address per minute (0 = unlimited). */
+  rateLimitAuthPerMin: number;
+  /** API requests allowed per client address per minute (0 = unlimited). */
+  rateLimitPerMin: number;
+  /** Send Strict-Transport-Security on HTTPS responses. */
+  hsts: boolean;
+  /** Extra connect-src / media-src origins for the console's Content-Security-Policy (media servers). */
+  cspConnectSrc: string[];
+  /** Origins allowed to open the console WebSocket (empty = any). */
+  allowedOrigins: string[];
 }
 
 export function loadConfig(over: Partial<Config> = {}): Config {
@@ -65,6 +77,12 @@ export function loadConfig(over: Partial<Config> = {}): Config {
     backupIntervalH: Number(process.env.BACKUP_INTERVAL_H || (env === 'pilot' ? 24 : 0)),
     backupKeep: Number(process.env.BACKUP_KEEP || 14),
     purgeIntervalMs: Number(process.env.PURGE_INTERVAL_MS || 60 * 60_000),
+    secretsKey: process.env.SECRETS_KEY || undefined,
+    rateLimitAuthPerMin: Number(process.env.RATE_LIMIT_AUTH_PER_MIN ?? 60),
+    rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN ?? 0),
+    hsts: (process.env.HSTS ?? (env === 'pilot' ? '1' : '0')) === '1',
+    cspConnectSrc: (process.env.CSP_CONNECT_SRC ?? '').split(/[\s,]+/).filter(Boolean),
+    allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '').split(/[\s,]+/).filter(Boolean),
     ...over,
   };
   if (cfg.env === 'pilot' && !cfg.mediaSecret) throw new Error('MEDIA_SECRET must be set in pilot mode');

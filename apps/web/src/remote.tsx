@@ -75,6 +75,7 @@ function fromSnapshot(prev: AppState, snap: Snapshot, user: SessionUser, offset:
     evidence: snap.evidence,
     assignments: snap.assignments,
     geofences: snap.geofences ?? [],
+    geo: snap.site?.geometry?.geo ?? prev.geo,
     patrols: snap.patrols ?? [],
     playbooks: snap.playbooks ?? prev.playbooks,
     dataLabel: snap.meta.dataLabel,
@@ -175,6 +176,8 @@ export function RemoteProvider({
             return { ...p, geofences: m.deleted ? p.geofences.filter((g) => g.id !== m.geofence.id) : upsert<Geofence>(p.geofences, m.geofence) };
           case 'patrol':
             return { ...p, patrols: m.deleted ? p.patrols.filter((x) => x.id !== m.patrol.id) : upsert<Patrol>(p.patrols, m.patrol) };
+          case 'site':
+            return m.site.geometry?.geo ? { ...p, geo: m.site.geometry.geo } : p;
           case 'telemetry': {
             const d = p.devices[m.deviceId];
             if (!d) return p;

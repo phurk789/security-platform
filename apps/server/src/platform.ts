@@ -93,6 +93,14 @@ import {
   type DeviceComponent,
   type TimelineEvent,
   type User,
+  GEO_LAYERS,
+  geofencesFromGeoJson,
+  siteGeoJson,
+  siteToGeo,
+  type GeoAnchor,
+  type GeoLayer,
+  SITE,
+  type SiteInfo,
 } from '@13store/shared';
 import { appendAudit } from './audit';
 import { createBackup, pruneBackups } from './backup';
@@ -1226,10 +1234,11 @@ export class Platform {
   // ---- gateway ingest -----------------------------------------------------
 
   /** Called when a gateway says hello. Returns accepted/rejected device ids. */
-  gatewayHello(orgId: string, siteIds: string[], gatewayId: string, decls: AdapterDeclaration[]) {
+  gatewayHello(orgId: string, siteIds: string[], gatewayId: string, decls: AdapterDeclaration[], geo?: GeoAnchor) {
     const accepted: string[] = [];
     const rejected: { deviceId: string; reason: string }[] = [];
     const sys = this.systemActor(orgId, 'gateway', gatewayId);
+    if (geo && Number.isFinite(geo.originLat) && Number.isFinite(geo.originLon)) this.checkGatewayAnchor(sys, siteIds, gatewayId, geo);
     const orgEnv = (this.db.prepare('SELECT env FROM orgs WHERE id = ?').get(orgId) as { env: string } | undefined)?.env ?? this.cfg.env;
     for (const decl of decls) {
       const d = this.devices.get(decl.deviceId);
@@ -2971,11 +2980,102 @@ export class Platform {
     };
   }
 
+  // ---- GIS: WGS 84 anchor, GeoJSON ------------------------------------------------------
+
+  /** The site's WGS 84 anchor (grid origin + rotation). Falls back to the demo anchor for old records. */
+  siteAnchor(orgId: string, siteId: string): GeoAnchor {
+    const r = this.db.prepare('SELECT geometry FROM sites WHERE id = ? AND org_id = ?').get(siteId, orgId) as { geometry: string } | undefined;
+    const g = r ? (JSON.parse(r.geometry) as Partial<SiteGeometry>) : undefined;
+    const a = g?.geo;
+    return a && Number.isFinite(a.originLat) && Number.isFinite(a.originLon)
+      ? { originLat: a.originLat, originLon: a.originLon, rotationDeg: a.rotationDeg ?? 0 }
+      : { ...SITE.geo };
+  }
+
+  /** Administrator: set where the site grid sits on Earth. Everything shown in lat/lon follows. */
+  setSiteGeo(a: Actor, siteId: string | undefined, input: Partial<GeoAnchor>) {
+    this.require(a, 'site.manage', siteId ?? 'site');
+    const site = this.site(a, siteId);
+    const lat = Number(input.originLat);
+    const lon = Number(input.originLon);
+    const rot = input.rotationDeg === undefined || input.rotationDeg === null ? 0 : Number(input.rotationDeg);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) return fail(400, 'invalid', 'originLat must be a latitude in degrees (−90…90).');
+    if (!Number.isFinite(lon) || lon < -180 || lon > 180) return fail(400, 'invalid', 'originLon must be a longitude in degrees (−180…180).');
+    if (!Number.isFinite(rot) || rot < -180 || rot > 360) return fail(400, 'invalid', 'rotationDeg must be in degrees (−180…360).');
+    const geo: GeoAnchor = { originLat: Math.round(lat * 1e7) / 1e7, originLon: Math.round(lon * 1e7) / 1e7, rotationDeg: Math.round(rot * 100) / 100 };
+    const geometry = { ...site.geometry, geo };
+    this.db.prepare('UPDATE sites SET geometry = ? WHERE id = ?').run(JSON.stringify(geometry), site.id);
+    this.audit(a, 'site.geo', site.id, 'ok', `anchor ${geo.originLat}, ${geo.originLon} rot ${geo.rotationDeg}°`);
+    const info: SiteInfo = { id: site.id, name: site.name, geometry };
+    this.publish({ orgId: a.orgId, siteId: site.id, event: { type: 'site', site: info } });
+    return info;
+  }
+
+  /** The site as a WGS 84 FeatureCollection. A download is audited like an export. */
+  siteGeoJson(a: Actor, siteId: string | undefined, layers?: string[], download = false) {
+    const site = this.site(a, siteId);
+    const want = (layers ?? []).map((l) => l.trim()).filter((l): l is GeoLayer => (GEO_LAYERS as string[]).includes(l));
+    // Administrators manage the system but do not see incident data (same rule as the API).
+    const incidents = a.role === 'admin' ? [] : this.listIncidents(a, { siteId: site.id }).filter((i) => !['closed', 'duplicate', 'dismissed'].includes(i.status));
+    const fc = siteGeoJson({
+      site,
+      anchor: this.siteAnchor(a.orgId, site.id),
+      geofences: this.geofencesOf(a.orgId, site.id),
+      devices: this.listDevices(a, site.id),
+      incidents,
+      layers: want.length ? want : undefined,
+      dataLabel: this.meta(a.orgId).dataLabel,
+      generatedAt: this.now(),
+    });
+    if (download) this.audit(a, 'site.export', site.id, 'ok', `geojson ${fc.features.length} features`);
+    return fc;
+  }
+
+  /** Geofences drawn in a GIS (GeoJSON polygons) → zones on this site. */
+  importGeofences(a: Actor, input: unknown, siteId?: string) {
+    this.require(a, 'site.geofences', 'geofence');
+    const site = this.site(a, siteId);
+    const anchor = this.siteAnchor(a.orgId, site.id);
+    const res = geofencesFromGeoJson(anchor, { width: site.geometry.width, height: site.geometry.height }, input, { max: 100 });
+    const existing = this.geofencesOf(a.orgId, site.id);
+    if (existing.length + res.geofences.length > 300) return fail(400, 'invalid', 'At most 300 geofences per site.');
+    const created: Geofence[] = [];
+    tx(this.db, () => {
+      for (const g of res.geofences) {
+        // A zone with the same name is replaced, so re-importing a GIS layer updates rather than duplicates.
+        const same = existing.find((x) => x.name === g.name);
+        created.push(this.saveGeofence(a, { ...g, siteId: site.id }, same?.id));
+      }
+    });
+    this.audit(a, 'geofence.import', site.id, 'ok', `${created.length} zones${res.errors.length ? `, ${res.errors.length} skipped` : ''}`);
+    return { imported: created.length, geofences: created, errors: res.errors };
+  }
+
+  /** A gateway converts positions with its own anchor: it must be the one the site is registered with. */
+  private checkGatewayAnchor(sys: Actor, siteIds: string[], gatewayId: string, geo: GeoAnchor) {
+    const sites = siteIds.length ? siteIds : (this.db.prepare('SELECT id FROM sites WHERE org_id = ?').all(sys.orgId) as { id: string }[]).map((r) => r.id);
+    for (const siteId of sites) {
+      const want = this.siteAnchor(sys.orgId, siteId);
+      const here = siteToGeo(want, { x: 0, y: 0 });
+      const dLat = ((geo.originLat - here.lat) * Math.PI * 6_378_137) / 180;
+      const dLon = ((geo.originLon - here.lon) * Math.PI * 6_378_137 * Math.cos((here.lat * Math.PI) / 180)) / 180;
+      const offM = Math.hypot(dLat, dLon);
+      const dRot = Math.abs(((geo.rotationDeg ?? 0) - (want.rotationDeg ?? 0) + 540) % 360) - 180;
+      if (offM > 2 || Math.abs(dRot) > 0.5) {
+        const text = `Gateway ${gatewayId} uses a site anchor ${offM.toFixed(1)} m${Math.abs(dRot) > 0.5 ? ` and ${Math.abs(dRot).toFixed(1)}°` : ''} off the one registered for the site. Positions from real devices may be shifted; fix the gateway config or the site anchor.`;
+        this.audit(sys, 'gateway.geo_mismatch', gatewayId, 'error', text);
+        this.publish({ orgId: sys.orgId, siteId, event: { type: 'notice', tone: 'warn', text } });
+      }
+    }
+  }
+
   site(a: Actor, siteId?: string) {
     const id = siteId ?? this.defaultSite(a);
     const r = this.db.prepare('SELECT id, org_id, name, geometry FROM sites WHERE id = ?').get(id) as { id: string; org_id: string; name: string; geometry: string } | undefined;
     if (!r || !this.inScope(a, r.org_id, r.id)) return fail(404, 'not_found', 'Site not found.');
-    return { id: r.id, name: r.name, geometry: JSON.parse(r.geometry) as SiteGeometry };
+    const geometry = JSON.parse(r.geometry) as SiteGeometry;
+    if (!geometry.geo) geometry.geo = { ...SITE.geo };
+    return { id: r.id, name: r.name, geometry };
   }
 
   listSites(a: Actor) {
@@ -3025,7 +3125,7 @@ export class Platform {
     if (m.siteId && a.siteIds.length && !a.siteIds.includes(m.siteId)) return false;
     const e = m.event;
     if (e.type === 'resync' || e.type === 'notice') return true;
-    if (e.type === 'geofence') return true;
+    if (e.type === 'geofence' || e.type === 'site') return true;
     if (e.type === 'patrol') return a.role !== 'responder' && a.role !== 'admin';
     if (a.role === 'admin') return e.type === 'audit' || e.type === 'device';
     if (e.type === 'audit') return can(a.role as Role, 'audit.view');

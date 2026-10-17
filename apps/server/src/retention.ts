@@ -2,6 +2,7 @@
 // Retention is per organisation, set by an administrator and audited; the purge runs hourly.
 // The audit log is never purged by this job: it is the record of what the platform did and is
 // kept for the legal retention period and exported through backups.
+import { open as openSecret, seal } from './secrets';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -35,7 +36,7 @@ export function getOrgSettings(db: DB, orgId: string): OrgSettings {
       timezone: stored.detection?.timezone || DEFAULT_ORG_SETTINGS.detection.timezone,
     },
     playbooks: Array.isArray(stored.playbooks) ? stored.playbooks : DEFAULT_PLAYBOOKS.map((b) => ({ ...b, steps: b.steps.map((x) => ({ ...x })), sla: { ...b.sla } })),
-    notifications: { channels: Array.isArray(stored.notifications?.channels) ? stored.notifications!.channels : [] },
+    notifications: { channels: Array.isArray(stored.notifications?.channels) ? stored.notifications!.channels.map(openChannel) : [] },
   };
 }
 
@@ -66,12 +67,24 @@ export function setOrgSettings(db: DB, orgId: string, patch: Partial<OrgSettings
   }
   if (patch.playbooks !== undefined) next.playbooks = validatePlaybooks(patch.playbooks);
   if (patch.notifications?.channels !== undefined) next.notifications.channels = validateChannels(patch.notifications.channels, cur.notifications.channels);
-  db.prepare('UPDATE orgs SET settings = ? WHERE id = ?').run(JSON.stringify(next), orgId);
+  // Secrets are sealed in the database and open in memory.
+  db.prepare('UPDATE orgs SET settings = ? WHERE id = ?').run(JSON.stringify({ ...next, notifications: { channels: next.notifications.channels.map(sealChannel) } }), orgId);
   return next;
 }
 
 /** Secrets never leave the server in clear: the console sees a mask and sends it back unchanged. */
 export const SECRET_MASK = '••••••••';
+
+function mapSecrets(c: NotificationChannel, f: (v: string) => string): NotificationChannel {
+  return {
+    ...c,
+    webhook: c.webhook ? { ...c.webhook, secret: c.webhook.secret ? f(c.webhook.secret) : undefined } : undefined,
+    line: c.line ? { ...c.line, token: f(c.line.token) } : undefined,
+    sms: c.sms ? { ...c.sms, headers: c.sms.headers ? Object.fromEntries(Object.entries(c.sms.headers).map(([k, v]) => [k, f(v)])) : undefined } : undefined,
+  };
+}
+const sealChannel = (c: NotificationChannel) => mapSecrets(c, seal);
+const openChannel = (c: NotificationChannel) => mapSecrets(c, openSecret);
 
 export function maskChannels(channels: NotificationChannel[]): NotificationChannel[] {
   return channels.map((c) => ({

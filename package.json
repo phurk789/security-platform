@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "13STORE Digital Twin for Public Security \u2014 command centre, API server, edge gateway and field app",
+  "description": "13STORE Digital Twin for Public Security — command centre, API server, edge gateway and field app",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -21,5 +21,8 @@
     "@types/node": "^26.6.5",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "xml2js": "^0.6.2"
   }
 }

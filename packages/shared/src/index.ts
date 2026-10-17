@@ -6,6 +6,7 @@ export * from './states';
 export * from './protocol';
 export * from './kinematics';
 export * from './geo';
+export * from './geojson';
 export * from './camera';
 export * from './aim';
 export * from './catalog';

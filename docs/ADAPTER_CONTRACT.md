@@ -13,27 +13,36 @@ Until then, declare it `testing` or `simulated`. The platform labels it that way
 Each adapter declares an `AdapterDeclaration` (`packages/shared/src/protocol.ts`). The gateway sends it to
 the server in `hello`. The server only accepts device ids that an administrator has registered for that site.
 
-| Field | Rule |
-|---|---|
-| `deviceId` | Must match the id registered on the server. |
-| `kind` | `ugv`, `uav` or `cctv`. |
-| `model`, `adapterVersion`, `protocolVersion`, `firmwareTested` | Exact versions you tested. `firmwareTested` says "not tested" when that is the truth. |
-| `integration` | `verified` only after the checklist passes on hardware. Otherwise `testing` or `simulated`. |
-| `capabilities` | What the device offers, e.g. `camera`, `ground_patrol`, `waypoints`. |
-| `commands` | Only commands the device really executes (`start`, `pause`, `resume`, `stop`). The server never sends anything else, and the UI shows no button for anything else (PRD F06). |
-| `units` | Position in site metres (`site-m`), altitude in metres above the site datum, speed m/s, battery %. Convert in the adapter. Never mix altitude datums. |
-| `rateMs` | Nominal telemetry interval. The server marks data stale after `max(5 s, 3 × rateMs)`. |
-| `limitations` | Plain-language limits shown to supervisors before approval. |
-| `linkLossBehavior` | What the device does by itself when the link drops. It must be tested on that device. |
+| Field                                                          | Rule                                                                                                                                                                         |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deviceId`                                                     | Must match the id registered on the server.                                                                                                                                  |
+| `kind`                                                         | `ugv`, `uav` or `cctv`.                                                                                                                                                      |
+| `model`, `adapterVersion`, `protocolVersion`, `firmwareTested` | Exact versions you tested. `firmwareTested` says "not tested" when that is the truth.                                                                                        |
+| `integration`                                                  | `verified` only after the checklist passes on hardware. Otherwise `testing` or `simulated`.                                                                                  |
+| `capabilities`                                                 | What the device offers, e.g. `camera`, `ground_patrol`, `waypoints`.                                                                                                         |
+| `commands`                                                     | Only commands the device really executes (`start`, `pause`, `resume`, `stop`). The server never sends anything else, and the UI shows no button for anything else (PRD F06). |
+| `units`                                                        | Position in site metres (`site-m`), altitude in metres above the site datum, speed m/s, battery %. Convert in the adapter. Never mix altitude datums.                        |
+| `rateMs`                                                       | Nominal telemetry interval. The server marks data stale after `max(5 s, 3 × rateMs)`.                                                                                        |
+| `limitations`                                                  | Plain-language limits shown to supervisors before approval.                                                                                                                  |
+| `linkLossBehavior`                                             | What the device does by itself when the link drops. It must be tested on that device.                                                                                        |
 
 ## 2. Telemetry
 
 Send `telemetry` at the declared rate:
 
 ```json
-{ "t": "telemetry", "deviceId": "UGV-01", "seq": 812, "sourceTime": 1792188205123,
-  "pos": { "x": 268.4, "y": 219.1 }, "accuracyM": 1.5, "battery": 81.6, "speed": 6,
-  "quality": "good", "nextCp": 1 }
+{
+  "t": "telemetry",
+  "deviceId": "UGV-01",
+  "seq": 812,
+  "sourceTime": 1792188205123,
+  "pos": { "x": 268.4, "y": 219.1 },
+  "accuracyM": 1.5,
+  "battery": 81.6,
+  "speed": 6,
+  "quality": "good",
+  "nextCp": 1
+}
 ```
 
 - `sourceTime` is when the device measured the value, not when you sent it. The server stores its own receive time beside it (PRD F10).
@@ -47,9 +56,19 @@ Send `telemetry` at the declared rate:
 Server → gateway:
 
 ```json
-{ "t": "command", "commandId": "CMD-0042", "idempotencyKey": "MSN-0007:start:0",
-  "deviceId": "UGV-01", "type": "start", "missionId": "MSN-0007",
-  "expiresAt": 1792188215123, "route": [{ "x": 262, "y": 218 }, { "x": 334, "y": 228 }] }
+{
+  "t": "command",
+  "commandId": "CMD-0042",
+  "idempotencyKey": "MSN-0007:start:0",
+  "deviceId": "UGV-01",
+  "type": "start",
+  "missionId": "MSN-0007",
+  "expiresAt": 1792188215123,
+  "route": [
+    { "x": 262, "y": 218 },
+    { "x": 334, "y": 228 }
+  ]
+}
 ```
 
 Gateway → server, one message per status change:
@@ -66,7 +85,7 @@ Rules:
 2. **Idempotency.** A repeated `idempotencyKey` never executes again. Re-report the status you already have. `CommandLedger` and `admitCommand()` in the SDK do this for you.
 3. **Unsupported or wrong state.** Reply `rejected` with a `detail` the operator can act on, e.g. "Cannot resume while idle."
 4. **Success means confirmed.** Send `succeeded` only when the device confirms the effect: moving for start/resume, speed 0 for pause/stop. If the effect does not happen, send `failed`.
-5. **Silence is allowed.** If you cannot tell what happened, send nothing. The server shows *timed out* (no ack in 5 s) or *unknown*. It never shows success by itself.
+5. **Silence is allowed.** If you cannot tell what happened, send nothing. The server shows _timed out_ (no ack in 5 s) or _unknown_. It never shows success by itself.
 6. **Stop request is not an emergency stop.** The physical E-stop and local control must work without the platform.
 
 ## 4. Link loss and reconnect
@@ -76,8 +95,7 @@ Rules:
 - After reconnect the device must not resume a mission or replay anything by itself. Report what happened:
 
 ```json
-{ "t": "event", "deviceId": "UGV-01", "kind": "failsafe_stop", "at": 1792188209870,
-  "detail": "Stopped in place after link loss. Waiting for the operator to resume." }
+{ "t": "event", "deviceId": "UGV-01", "kind": "failsafe_stop", "at": 1792188209870, "detail": "Stopped in place after link loss. Waiting for the operator to resume." }
 ```
 
 Any resume comes from the operator as a new command with a new `commandId`.
@@ -94,7 +112,7 @@ sent in time order once it is back. Command status updates from that period are 
 1. Connect a WebSocket to `wss://<server>/api/v1/gateway` with the header `Authorization: Bearer <gateway key>`. Keys are issued per environment (demo, sandbox, pilot) in Admin → API keys.
 2. Send `hello`:
    ```json
-   { "t": "hello", "protocol": "ps-gw/1", "gatewayId": "edge-civic-01", "adapters": [ { "deviceId": "UGV-01", "...": "…" } ] }
+   { "t": "hello", "protocol": "ps-gw/1", "gatewayId": "edge-civic-01", "adapters": [{ "deviceId": "UGV-01", "...": "…" }] }
    ```
 3. The server answers `welcome` with `accepted` and `rejected` device ids. Only accepted devices may send telemetry or receive commands.
 4. The server may send `demo` (`cut_link`, `restore_link`, `reset`) to simulators. Real adapters ignore it. `deviceId: "*"` targets every adapter.
@@ -102,16 +120,16 @@ sent in time order once it is back. Command status updates from that period are 
 
 ## 7. Test checklist before declaring `verified` (PRD §11)
 
-| Check | How |
-|---|---|
-| Retry does not execute twice | Send the same command twice with one `idempotencyKey`. The device moves once. |
-| Expired command not executed | Send with `expiresAt` in the past. Expect `rejected` and no motion. |
-| Unauthorised user cannot command | Covered by the server. Confirm the adapter only acts on gateway messages, with no side channel. |
-| Network cut mid-mission | Pull the link. The device reaches its declared safe state. The server shows STALE and then unknown or timed out. |
-| Reconnect does not resume or replay | Restore the link. The device stays stopped, reports `failsafe_stop`, and nothing sent during the cut runs. |
-| Stop shows pending, then confirmed | `succeeded` only after measured speed is 0. Test the physical E-stop per the device plan. |
-| Position accuracy is honest | Compare reported `accuracyM` with surveyed points. |
-| Units and datum | Positions are in site metres after your transform. Altitude uses the site datum. |
+| Check                               | How                                                                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Retry does not execute twice        | Send the same command twice with one `idempotencyKey`. The device moves once.                                    |
+| Expired command not executed        | Send with `expiresAt` in the past. Expect `rejected` and no motion.                                              |
+| Unauthorised user cannot command    | Covered by the server. Confirm the adapter only acts on gateway messages, with no side channel.                  |
+| Network cut mid-mission             | Pull the link. The device reaches its declared safe state. The server shows STALE and then unknown or timed out. |
+| Reconnect does not resume or replay | Restore the link. The device stays stopped, reports `failsafe_stop`, and nothing sent during the cut runs.       |
+| Stop shows pending, then confirmed  | `succeeded` only after measured speed is 0. Test the physical E-stop per the device plan.                        |
+| Position accuracy is honest         | Compare reported `accuracyM` with surveyed points.                                                               |
+| Units and datum                     | Positions are in site metres after your transform. Altitude uses the site datum.                                 |
 
 A tested example is in [`examples/custom-adapter.ts`](../examples/custom-adapter.ts), exercised by
 `apps/gateway/test/example.test.ts`.

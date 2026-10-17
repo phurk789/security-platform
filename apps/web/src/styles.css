@@ -3799,3 +3799,35 @@ html:lang(th) .meta dt {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* GIS */
+.latlon {
+  font-size: 12px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+}
+a.latlon:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+.inline-form input.wide {
+  width: 150px;
+}
+.file-btn {
+  cursor: pointer;
+}
+.import-errors {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--warn, #f59e0b);
+}

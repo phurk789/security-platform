@@ -1,4 +1,4 @@
-import { DEFAULT_GEOFENCES, DEFAULT_LAYERS, DEFAULT_PLAYBOOKS, SEED_USERS, seedDevices, seedEvidence, seedIncidents, seedTimeline } from '@13store/shared';
+import { DEFAULT_GEOFENCES, DEFAULT_LAYERS, DEFAULT_PLAYBOOKS, SEED_USERS, SITE, seedDevices, seedEvidence, seedIncidents, seedTimeline } from '@13store/shared';
 import type { AppState } from '@13store/shared';
 import { attachPlaybook } from './reducer';
 
@@ -36,6 +36,7 @@ export function initialState(): AppState {
     replay: { active: false, at: now },
     assignments: [],
     geofences: DEFAULT_GEOFENCES.map((g) => ({ ...g, poly: g.poly.map((p) => ({ ...p })) })),
+    geo: { ...SITE.geo },
     patrols: [],
     playbooks: DEFAULT_PLAYBOOKS,
     dataLabel: 'OFFLINE DEMO',

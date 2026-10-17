@@ -14,6 +14,8 @@ import { OidcClient, OidcError } from './oidc';
 import { openapi } from './openapi';
 import { ApiError, Platform, type Actor, type BusMessage } from './platform';
 import { DEMO_ORG, resetDemo } from './seed';
+import { initSecrets } from './secrets';
+import { RateLimiter } from './security';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -44,6 +46,8 @@ function bearer(req: FastifyRequest) {
 }
 
 export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } = {}) {
+  const secrets = initSecrets({ key: cfg.secretsKey, dataDir: cfg.dataDir });
+  if (secrets.source === 'generated') console.log(`[server] generated secrets key at ${secrets.file}; keep it with the backups`);
   const p = new Platform(db, cfg);
   const accounts = new Accounts(db, p, cfg.sessionTtlMs);
   const hub = new GatewayHub(p, accounts);
@@ -89,11 +93,32 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     metrics.inc('ps_http_requests_total', { route: req.routeOptions?.url ?? 'unmatched', method: req.method, status: reply.statusCode });
   });
 
-  // Security headers for every response.
-  app.addHook('onSend', async (_req, reply) => {
+  // Security headers for every response; a Content-Security-Policy for the HTML the server hosts.
+  const csp = cspHeader(cfg);
+  app.addHook('onSend', async (req, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'no-referrer');
     reply.header('X-Frame-Options', 'DENY');
+    reply.header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self), payment=(), usb=()');
+    reply.header('Cross-Origin-Opener-Policy', 'same-origin');
+    reply.header('Cross-Origin-Resource-Policy', 'same-origin');
+    if (cfg.hsts && req.protocol === 'https') reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    const ct = String(reply.getHeader('content-type') ?? '');
+    if (ct.startsWith('text/html') && !reply.hasHeader('Content-Security-Policy')) reply.header('Content-Security-Policy', csp);
+  });
+
+  // Rate limits per client address: tight on sign-in and step-up, optional on the whole API.
+  const limiter = new RateLimiter();
+  app.addHook('onRequest', async (req, reply) => {
+    const path = req.url.split('?')[0];
+    if (!path.startsWith('/api/v1/')) return;
+    const isAuth = path === '/api/v1/auth/login' || path === '/api/v1/auth/step-up' || path.startsWith('/api/v1/auth/sso');
+    const wait = isAuth ? limiter.hit(`auth:${req.ip}`, cfg.rateLimitAuthPerMin, Date.now()) : limiter.hit(`api:${req.ip}`, cfg.rateLimitPerMin, Date.now());
+    if (wait) {
+      metrics.inc('ps_rate_limited_total', { kind: isAuth ? 'auth' : 'api' });
+      reply.header('Retry-After', String(wait));
+      return reply.code(429).send({ code: 'rate_limited', message: `Too many requests. Try again in ${wait} s.` });
+    }
   });
 
   app.addHook('preHandler', async (req: FastifyRequest) => {
@@ -191,7 +216,8 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
 
   // ---- sites / snapshot ----------------------------------------------------
   app.get('/api/v1/sites', async (req) => p.listSites(A(req)));
-  app.get('/api/v1/sites/:id', async (req: Req) => p.site(A(req), req.params.id));
+  const siteParam = (req: Req) => (req.params.id === 'default' ? undefined : req.params.id);
+  app.get('/api/v1/sites/:id', async (req: Req) => p.site(A(req), siteParam(req)));
   app.get('/api/v1/snapshot', async (req: Req) => p.snapshot(A(req), req.query.siteId));
   app.get('/api/v1/users', async (req) => p.orgUsers(A(req)));
 
@@ -248,6 +274,16 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   // Route planning and site geofences.
   app.post('/api/v1/routes/plan', async (req: Req) => p.planRouteFor(A(req), body(req) as any));
   app.get('/api/v1/geofences', async (req: Req) => p.listGeofences(A(req), req.query.siteId || undefined));
+  app.post('/api/v1/geofences/import', async (req: Req) => p.importGeofences(A(req), body(req), req.query.siteId || undefined));
+  // GIS: site anchor and GeoJSON.
+  app.patch('/api/v1/sites/:id/geo', async (req: Req) => p.setSiteGeo(A(req), siteParam(req), body(req) as any));
+  app.get('/api/v1/sites/:id/geojson', async (req: Req, reply) => {
+    const download = req.query.download === '1';
+    const fc = p.siteGeoJson(A(req), siteParam(req), typeof req.query.layers === 'string' ? req.query.layers.split(',') : undefined, download);
+    reply.header('content-type', 'application/geo+json; charset=utf-8');
+    if (download) reply.header('content-disposition', `attachment; filename="${fc.site?.id ?? 'site'}-${new Date(p.now()).toISOString().slice(0, 10)}.geojson"`);
+    return JSON.stringify(fc);
+  });
   app.post('/api/v1/geofences', async (req: Req) => p.saveGeofence(A(req), body(req) as any));
   app.patch('/api/v1/geofences/:id', async (req: Req) => p.saveGeofence(A(req), body(req) as any, req.params.id));
   app.delete('/api/v1/geofences/:id', async (req: Req) => p.deleteGeofence(A(req), req.params.id));
@@ -494,7 +530,12 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   // ---- websockets ------------------------------------------------------------------
   app.get('/api/v1/gateway', { websocket: true }, (socket, req) => hub.accept(socket, bearer(req)));
 
-  app.get('/api/v1/ws', { websocket: true }, (socket) => {
+  app.get('/api/v1/ws', { websocket: true }, (socket, req) => {
+    const origin = String(req.headers.origin ?? '');
+    if (cfg.allowedOrigins.length && origin && !cfg.allowedOrigins.includes(origin)) {
+      socket.close(4403, 'origin not allowed');
+      return;
+    }
     let actor: Actor | null = null;
     let token = '';
     const timer = setTimeout(() => !actor && socket.close(4401, 'auth timeout'), 5000);
@@ -546,3 +587,23 @@ function orgEnv(db: DB, orgId: string): 'demo' | 'sandbox' | 'pilot' {
 }
 
 export type { Role };
+
+/** Content-Security-Policy for the hosted console and field app. Scripts only from this origin;
+ *  video and WebSockets to this origin plus the configured media servers (default: any https/wss). */
+export function cspHeader(cfg: Pick<Config, 'cspConnectSrc'>) {
+  const remote = cfg.cspConnectSrc.length ? cfg.cspConnectSrc.join(' ') : 'https: wss:';
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "img-src 'self' data: blob:",
+    `media-src 'self' blob: ${remote}`,
+    `connect-src 'self' ${remote}`,
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}

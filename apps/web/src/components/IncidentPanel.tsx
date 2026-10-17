@@ -27,6 +27,7 @@ import { isTerminal, missionForIncident } from '../domain/reducer';
 import { constraintChecks } from '../domain/policy';
 import { DEFAULT_ROUTE, planRoute, rankUnits } from '@13store/shared';
 import type { AppState, CommandType, Device, Incident, Mission, Point } from '@13store/shared';
+import { LatLon } from './LatLon';
 import { useStore } from '../store';
 import { CameraFeed } from './CameraFeed';
 import { Badge, CommandBadge, FreshBadge, IncidentBadge, IntegrationBadge, MissionBadge } from './Badges';
@@ -127,6 +128,14 @@ function IncidentPanel({ inc }: { inc: Incident }) {
           <div>
             <dt>{t('Owner')}</dt>
             <dd>{inc.owner ?? t('Unassigned')}</dd>
+          </div>
+          <div>
+            <dt>{t('Position')}</dt>
+            <dd>
+              {inc.pos.x.toFixed(0)}, {inc.pos.y.toFixed(0)} m
+              <br />
+              <LatLon p={inc.pos} />
+            </dd>
           </div>
           <div>
             <dt>{t('Status')}</dt>

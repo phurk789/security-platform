@@ -47,6 +47,7 @@ export type Action =
   | 'admin.settings'
   | 'admin.privacy'
   | 'site.geofences'
+  | 'site.manage'
   | 'patrol.manage'
   | 'device.service'
   | 'demo.control';
@@ -80,11 +81,33 @@ export const MATRIX: Record<Role, Action[]> = {
   operator: ['mission.accept', 'device.command', 'media.view', 'camera.control', 'payload.control', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'],
   responder: ['incident.create', 'field.update', 'evidence.view', 'evidence.add'],
   auditor: ['evidence.view', 'evidence.export', 'report.view', 'audit.view'],
-  admin: ['admin.users', 'admin.devices', 'admin.keys', 'admin.backup', 'admin.settings', 'admin.privacy', 'site.geofences', 'device.service', 'audit.view', 'demo.control'],
+  admin: [
+    'admin.users',
+    'admin.devices',
+    'admin.keys',
+    'admin.backup',
+    'admin.settings',
+    'admin.privacy',
+    'site.geofences',
+    'site.manage',
+    'device.service',
+    'audit.view',
+    'demo.control',
+  ],
 };
 
 /** Actions that require a recent password check. */
-export const STEP_UP_ACTIONS: Action[] = ['mission.approve', 'evidence.export', 'control.handover', 'admin.users', 'admin.keys', 'admin.backup', 'admin.privacy', 'patrol.manage'];
+export const STEP_UP_ACTIONS: Action[] = [
+  'mission.approve',
+  'evidence.export',
+  'control.handover',
+  'admin.users',
+  'admin.keys',
+  'admin.backup',
+  'admin.privacy',
+  'patrol.manage',
+  'site.manage',
+];
 
 export function can(role: Role, action: Action): boolean {
   return MATRIX[role].includes(action);

@@ -1,3 +1,4 @@
+import type { GeoAnchor } from './geo';
 // Domain model for the prototype. Names follow PRD R1 §4 and §6.
 import type { GimbalState, SimGimbal, StreamInfo } from './camera';
 import type { Geofence } from './routing';
@@ -391,6 +392,8 @@ export interface AppState {
   assignments: Assignment[];
   /** Keep-out, caution and no-fly zones for this site. */
   geofences: Geofence[];
+  /** WGS 84 anchor of the site grid (from the server's site record; the demo anchor offline). */
+  geo: GeoAnchor;
   /** Scheduled patrols (server only; empty in the offline demo). */
   patrols: Patrol[];
   /** SOP playbooks with SLA limits (organisation settings; defaults offline). */

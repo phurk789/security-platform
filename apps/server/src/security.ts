@@ -36,7 +36,10 @@ export function safeEqual(a: string, b: string) {
 /** Simple lockout after repeated failed logins. */
 export class LoginThrottle {
   private fails = new Map<string, { n: number; until: number }>();
-  constructor(private max = 5, private lockMs = 60_000) {}
+  constructor(
+    private max = 5,
+    private lockMs = 60_000,
+  ) {}
   blocked(key: string, now: number) {
     const f = this.fails.get(key);
     return !!f && f.until > now;
@@ -52,5 +55,23 @@ export class LoginThrottle {
   }
   ok(key: string) {
     this.fails.delete(key);
+  }
+}
+
+/** Fixed-window request counter per key (client address). Enough to blunt brute force and floods on one node. */
+export class RateLimiter {
+  private hits = new Map<string, { n: number; windowStart: number }>();
+  constructor(private windowMs = 60_000) {}
+  /** Counts one hit; returns how long to wait when over the limit (seconds), else 0. */
+  hit(key: string, limit: number, now: number): number {
+    if (limit <= 0) return 0;
+    let h = this.hits.get(key);
+    if (!h || now - h.windowStart >= this.windowMs) {
+      h = { n: 0, windowStart: now };
+      this.hits.set(key, h);
+      if (this.hits.size > 50_000) for (const [k, v] of this.hits) if (now - v.windowStart >= this.windowMs) this.hits.delete(k);
+    }
+    h.n += 1;
+    return h.n > limit ? Math.max(1, Math.ceil((h.windowStart + this.windowMs - now) / 1000)) : 0;
   }
 }

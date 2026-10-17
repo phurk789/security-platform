@@ -2,7 +2,7 @@
 // Telemetry and events are dropped (not buffered) while the server link is down; adapters
 // keep running, so devices keep their own safety behaviour regardless of the server.
 import WebSocket from 'ws';
-import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway } from '@13store/shared';
+import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type GeoAnchor } from '@13store/shared';
 import { consoleLogger, type Adapter, type AdapterContext, type Logger } from './sdk';
 
 export interface GatewayOptions {
@@ -12,6 +12,8 @@ export interface GatewayOptions {
   key: string;
   gatewayId: string;
   adapters: Adapter[];
+  /** WGS 84 anchor the adapters convert positions with; sent to the server so a mismatch with the site is caught. */
+  geo?: GeoAnchor;
   log?: Logger;
   now?: () => number;
   /** Reconnect backoff. Defaults: 250 ms doubling up to 5 s. */
@@ -109,7 +111,15 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
       delay = backoff.initialMs;
       accepted = new Set();
       log.info(`connected to ${opts.serverUrl} as ${opts.gatewayId}`);
-      sock.send(JSON.stringify({ t: 'hello', protocol: GATEWAY_PROTOCOL, gatewayId: opts.gatewayId, adapters: opts.adapters.map((a) => a.declaration) } satisfies GatewayToServer));
+      sock.send(
+        JSON.stringify({
+          t: 'hello',
+          protocol: GATEWAY_PROTOCOL,
+          gatewayId: opts.gatewayId,
+          adapters: opts.adapters.map((a) => a.declaration),
+          geo: opts.geo,
+        } satisfies GatewayToServer),
+      );
     });
     sock.on('message', onMessage);
     sock.on('error', (err) => log.warn(`server link error: ${err.message}`));
