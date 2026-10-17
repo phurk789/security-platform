@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState, type JSX, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from 'react';
 import { Bot, Cctv, Drone, Layers, LocateFixed, Minus, Plus, TriangleAlert } from 'lucide-react';
-import { BUILDINGS, FENCE_Y, GATE, PARKING, PLAZA, ROAD, SITE, ZONES } from '@13store/shared';
+import { BUILDINGS, FENCE_Y, GATE, PARKING, PLAZA, ROAD, SITE, ZONES, floorPlan, floorPlansOf, type FloorPlan } from '@13store/shared';
 import { freshness, ageMs } from '../domain/policy';
 import { missionForIncident } from '../domain/reducer';
 import type { AppState, Device, Layers as LayerState, Point } from '@13store/shared';
@@ -62,6 +62,15 @@ export function TwinMap() {
   const [zoom, setZoom] = useState(1.1);
   const [pan, setPan] = useState<[number, number]>([0, 0]);
   const [layersOpen, setLayersOpen] = useState(false);
+  const ivKey = s.indoorView ? `${s.indoorView.buildingId}:${s.indoorView.level}` : '';
+  useEffect(() => {
+    if (!ivKey) return;
+    const b = BUILDINGS.find((x) => x.id === s.indoorView!.buildingId);
+    if (!b) return;
+    setZoom(2.6);
+    setPan([SITE.width / 2 - (b.x + b.w / 2), SITE.height / 2 - (b.y + b.d / 2)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ivKey]);
   const quality = useQuality();
   const drag = useRef<{ x: number; y: number; pan: [number, number] } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -130,7 +139,8 @@ export function TwinMap() {
           {mode === '2d' ? TREES.map((t, i) => <circle key={i} cx={t.x} cy={t.y} r={4} className="tree" />) : null}
           {mode === '2d' && BUILDINGS.map((b) => <rect key={b.id} x={b.x} y={b.y} width={b.w} height={b.d} className={`bld-2d click${s.selectedBuildingId === b.id ? ' sel' : ''}`} rx={1} onClick={() => dispatch({ type: 'selectBuilding', id: b.id })} />)}
           {mode === '3d' && <Buildings3D trees />}
-          {mode === '2d' && BUILDINGS.map((b) => <BuildingLabel key={b.id} P={P} b={b} />)}
+          {mode === '2d' && s.indoorView && <FloorPlanLayer P={P} plan={floorPlan(s.indoorView.buildingId, s.indoorView.level)} />}
+          {mode === '2d' && BUILDINGS.filter((b) => b.id !== s.indoorView?.buildingId).map((b) => <BuildingLabel key={b.id} P={P} b={b} />)}
           {mission && !['cancelled', 'rejected', 'completed'].includes(mission.status) && (
             <Route P={P} pts={[positions[mission.deviceId] ?? s.devices[mission.deviceId].pos, ...mission.checkpoints.slice(mission.nextCp)]} cps={mission.checkpoints} next={mission.nextCp} draft={mission.approvedVersion !== mission.planVersion} />
           )}
@@ -139,6 +149,7 @@ export function TwinMap() {
               <DeviceMarker
                 key={d.id}
                 d={d}
+                k={1 / Math.max(1, zoom)}
                 pos={positions[d.id] ?? d.pos}
                 P={P}
                 s={s}
@@ -153,7 +164,7 @@ export function TwinMap() {
             const sel = i.id === s.selectedIncidentId;
             const tone = i.status === 'new' || i.status === 'triaging' ? 'amber' : i.severity === 'high' ? 'red' : 'cyan';
             return (
-              <g key={i.id} data-hit className={`inc inc-${tone}${sel ? ' sel' : ''}`} onClick={() => dispatch({ type: 'selectIncident', id: i.id })} transform={`translate(${x} ${y})`}>
+              <g key={i.id} data-hit className={`inc inc-${tone}${sel ? ' sel' : ''}`} onClick={() => dispatch({ type: 'selectIncident', id: i.id })} transform={`translate(${x} ${y}) scale(${1 / Math.max(1, zoom)})`}>
                 {sel && <circle r={13} className="inc-pulse" />}
                 <circle r={7} className="inc-dot" />
                 <text y={3} textAnchor="middle" className="inc-mark">!</text>
@@ -171,6 +182,17 @@ export function TwinMap() {
       </svg>
       )}
 
+        {s.indoorView && (
+          <div className="seg indoor-seg indoor-bar" role="group" aria-label={t('Floor plan')}>
+            <span className="indoor-name">{t(BUILDINGS.find((b) => b.id === s.indoorView!.buildingId)?.name ?? s.indoorView.buildingId)}</span>
+            {floorPlansOf(s.indoorView.buildingId).map((pl) => (
+              <button key={pl.level} className={pl.level === s.indoorView!.level ? 'on' : ''} onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: s.indoorView!.buildingId, level: pl.level } })}>
+                L{pl.level}
+              </button>
+            ))}
+            <button aria-label={t('Close floor plan')} onClick={() => dispatch({ type: 'setIndoor', view: null })}>×</button>
+          </div>
+        )}
       <div className="map-tools">
         <div className="seg" role="group" aria-label={t('Map view')}>
           <button className={mode === '2d' ? 'on' : ''} onClick={() => dispatch({ type: 'setMapMode', mode: '2d' })}>2D</button>
@@ -251,6 +273,49 @@ function poly(P: Proj, pts: [number, number][], z = 0) {
 
 function rectPts(x: number, y: number, w: number, d: number): [number, number][] {
   return [[x, y], [x + w, y], [x + w, y + d], [x, y + d]];
+}
+
+/** Indoor view: walls, rooms, doors, stairs and lifts of one floor, drawn over the building footprint. */
+function FloorPlanLayer({ P, plan }: { P: Proj; plan?: FloorPlan }) {
+  const t = useT();
+  if (!plan) return null;
+  const pts = (poly: Point[]) => poly.map((p) => P(p.x, p.y).join(',')).join(' ');
+  const centre = (poly: Point[]) => {
+    const c = poly.reduce((a, p) => ({ x: a.x + p.x / poly.length, y: a.y + p.y / poly.length }), { x: 0, y: 0 });
+    return P(c.x, c.y);
+  };
+  return (
+    <g className="floorplan">
+      {plan.rooms.map((r) => {
+        const [cx, cy] = centre(r.poly);
+        const corridor = r.name === 'Corridor';
+        return (
+          <g key={r.id}>
+            <polygon points={pts(r.poly)} className={corridor ? 'fp-corr' : 'fp-room'} />
+            {!corridor && <text x={cx} y={cy} className="fp-label" textAnchor="middle">{t(r.name.replace(/ \d+\.\d+$/, ''))}{r.name.match(/ (\d+\.\d+)$/)?.[0] ?? ''}</text>}
+          </g>
+        );
+      })}
+      {plan.noGo.map((r) => {
+        const [cx, cy] = centre(r.poly);
+        return (
+          <g key={r.id}>
+            <polygon points={pts(r.poly)} className="fp-nogo" />
+            <text x={cx} y={cy} className="fp-label nogo" textAnchor="middle">{t(r.name)}</text>
+          </g>
+        );
+      })}
+      {plan.walls.map((w, i) => {
+        const [x1, y1] = P(w.a.x, w.a.y);
+        const [x2, y2] = P(w.b.x, w.b.y);
+        return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} className={`fp-wall ${w.kind ?? 'interior'}`} />;
+      })}
+      {plan.doors.map((d) => {
+        const [x, y] = P(d.at.x, d.at.y);
+        return <circle key={d.id} cx={x} cy={y} r={d.kind === 'door' ? 0.7 : 1} className={`fp-door k-${d.kind}`} />;
+      })}
+    </g>
+  );
 }
 
 function Ground({ P }: { P: Proj }) {
@@ -393,7 +458,7 @@ function Route({ P, pts, cps, next, draft }: { P: Proj; pts: Point[]; cps: Point
   );
 }
 
-function DeviceMarker({ d, pos, P, s, selected, onClick, replay }: { d: Device; pos: Point; P: Proj; s: AppState; selected: boolean; onClick: () => void; replay: boolean }) {
+function DeviceMarker({ d, pos, P, s, selected, onClick, replay, k = 1 }: { d: Device; pos: Point; P: Proj; s: AppState; selected: boolean; onClick: () => void; replay: boolean; /** Counter-scale so markers keep their screen size when the map is zoomed in. */ k?: number }) {
   const f = replay ? 'live' : freshness(s, d);
   const z = d.kind === 'uav' ? (P === P3 ? d.alt ?? 0 : 0) : 0;
   const [gx, gy] = P(pos.x, pos.y);
@@ -409,7 +474,7 @@ function DeviceMarker({ d, pos, P, s, selected, onClick, replay }: { d: Device; 
       )}
       {z > 0 && <line x1={gx} y1={gy} x2={x} y2={y} className="tether" />}
       {z > 0 && <ellipse cx={gx} cy={gy} rx={4} ry={2} className="tree-shadow" />}
-      <g className="dev-pos" style={{ transform: `translate(${x}px, ${y}px)` }}>
+      <g className="dev-pos" style={{ transform: `translate(${x}px, ${y}px) scale(${k})` }}>
         <circle r={7.5} className="dev-ring" />
         <Icon x={-5} y={-5} width={10} height={10} className="dev-icon" strokeWidth={2} />
         <g transform="translate(10 -6)">

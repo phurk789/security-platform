@@ -1,7 +1,7 @@
 // Building panel: BIM / facility-register data for a building picked on the map — levels,
 // entrances and fire exits, systems, cameras that can see it, open incidents there.
 import { Building2, Cctv, Crosshair, DoorOpen, Droplets, Flame, X } from 'lucide-react';
-import { BUILDINGS, atBuilding, pickCamera, type Building, type Point } from '@13store/shared';
+import { BUILDINGS, atBuilding, floorPlansOf, pickCamera, type Building, type Point } from '@13store/shared';
 import { can, currentUser, freshness } from '../domain/policy';
 import { useT } from '../i18n';
 import { useStore } from '../store';
@@ -59,6 +59,23 @@ export function BuildingPanel({ b }: { b: Building }) {
             <div><dt>{t('Footprint')}</dt><dd>{b.w} × {b.d} m</dd></div>
             <div><dt>{t('Year built')}</dt><dd>{b.bim.yearBuilt ?? '—'}</dd></div>
           </dl>
+        </section>
+
+        <section className="step">
+          <h4>{t('Floor plans')}</h4>
+          {floorPlansOf(b.id).length ? (
+            <div className="row gap-s wrap">
+              {floorPlansOf(b.id).map((pl) => (
+                <button key={pl.level} className={`btn-secondary small${s.indoorView?.buildingId === b.id && s.indoorView.level === pl.level ? ' on' : ''}`} onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: b.id, level: pl.level } })}>
+                  {t('Level {n}', { n: pl.level })} · {pl.rooms.length} {t('rooms')}
+                </button>
+              ))}
+              {s.indoorView?.buildingId === b.id && <button className="btn-outline small" onClick={() => dispatch({ type: 'setIndoor', view: null })}>{t('Close floor plan')}</button>}
+            </div>
+          ) : (
+            <p className="muted">{t('No floor plans yet. Export each level from the BIM model (docs/BIM.md).')}</p>
+          )}
+          <p className="fine">{t('Indoor devices on this floor show on the plan; indoor routes are checked against walls, stairs and lifts.')}</p>
         </section>
 
         <section className="step">

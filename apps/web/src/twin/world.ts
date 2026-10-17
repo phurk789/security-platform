@@ -2,7 +2,7 @@
 // camera "sees" is the same model the map shows. Kept in sync with AppState every frame.
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { BUILDINGS, FENCE_Y, GATE, ROAD, SITE, ZONES, atBuilding, freshnessAt, type AppState, type Device, type Incident, type Mission, type Point } from '@13store/shared';
+import { BUILDINGS, FENCE_Y, GATE, ROAD, SITE, ZONES, atBuilding, floorPlan, freshnessAt, levelHeight, type AppState, type Device, type Incident, type Mission, type Point } from '@13store/shared';
 import { CAMERA_VIEWS, LAMPS, LIT_LAMPS, PARKED, TREES, fromWorld, toWorld } from './layout';
 import { beamTexture, facadeTextures, groundTexture, roofTexture } from './textures';
 import { loadOrtho, loadTwinManifest, loadTwinModel, makeEnvironment } from './bim';
@@ -94,6 +94,8 @@ export class TwinWorld {
   private siteMat?: THREE.MeshStandardMaterial;
   private buildingVis = new Map<string, { group: THREE.Group; floors: THREE.Group; highlight: THREE.LineSegments; mesh: THREE.Mesh; b: (typeof BUILDINGS)[number] }>();
   private imported: THREE.Group[] = [];
+  private floorWalls = new Map<string, THREE.Group>();
+  private cutaway: string | null = null;
   private hudPulse?: THREE.Mesh;
   buildingLabels: CSS2DObject[] = [];
 
@@ -522,6 +524,10 @@ export class TwinWorld {
       const m = makeCctv(view.height);
       m.root.userData = { kind: 'device', id: d.id };
       m.root.position.copy(pos);
+      if (d.indoor) {
+        const ib = BUILDINGS.find((x) => x.id === d.indoor!.buildingId);
+        if (ib) m.root.position.y = levelHeight(ib, d.indoor.level);
+      }
       const t = toWorld(view.target.x, view.target.y);
       m.head.lookAt(new THREE.Vector3(t.x, view.targetHeight ?? 0, t.z));
       // lookAt points +Z at the target; the model looks down −Z, so turn it around.
@@ -595,7 +601,9 @@ export class TwinWorld {
       const fresh = s.replay.active ? 'live' : freshnessAt(s.now, d);
       const sel = s.selectedDeviceId === d.id;
       const target = toWorld((positions[d.id] ?? d.pos).x, (positions[d.id] ?? d.pos).y);
-      const tv = new THREE.Vector3(target.x, 0, target.z);
+      const ib = d.indoor ? BUILDINGS.find((x) => x.id === d.indoor!.buildingId) : undefined;
+      const floorY = ib ? levelHeight(ib, d.indoor!.level) : 0;
+      const tv = new THREE.Vector3(target.x, floorY, target.z);
       const moving = v.pos.distanceTo(tv);
       if (v.kind !== 'cctv') {
         // smooth between 1 Hz telemetry fixes; snap if far (e.g. reset or replay seek)
@@ -898,10 +906,12 @@ export class TwinWorld {
   update(dt: number) {
     this.t += dt;
     const selB = this.state?.selectedBuildingId ?? null;
+    const iv = this.state?.indoorView ?? null;
     for (const [id, v] of this.buildingVis) {
-      const on = id === selB;
+      const on = id === selB || id === iv?.buildingId;
       if (v.floors.visible !== on) v.floors.visible = v.highlight.visible = on;
     }
+    this.syncCutaway(iv);
     if (this.hud.visible && this.hudPulse) {
       // A slow radar-style sweep ring from the site centre every 6 s.
       const k = (this.t % 6) / 6;
@@ -1000,6 +1010,66 @@ export class TwinWorld {
       if (b) return { kind: 'building', id: b.id };
     }
     return null;
+  }
+
+  /** Indoor view: hide the building's shell and show the walls of one floor at its height. */
+  private syncCutaway(iv: { buildingId: string; level: number } | null) {
+    const key = iv ? `${iv.buildingId}:${iv.level}` : null;
+    if (key === this.cutaway) return;
+    // restore the previous building
+    if (this.cutaway) {
+      const [bid] = this.cutaway.split(':');
+      const v = this.buildingVis.get(bid);
+      if (v && !importedBuildings.has(bid)) for (const c of v.group.children) if (c !== v.floors && c !== v.highlight) c.visible = true;
+      const g = this.floorWalls.get(this.cutaway);
+      if (g) g.visible = false;
+    }
+    this.cutaway = key;
+    if (!iv || !key) return;
+    const v = this.buildingVis.get(iv.buildingId);
+    const b = v?.b;
+    const plan = floorPlan(iv.buildingId, iv.level);
+    if (!v || !b || !plan) return;
+    for (const c of v.group.children) if (c !== v.floors && c !== v.highlight) c.visible = false;
+    let g = this.floorWalls.get(key);
+    if (!g) {
+      g = new THREE.Group();
+      const y0 = levelHeight(b, iv.level);
+      const wallH = Math.min(2.8, b.bim.levelHeightM - 0.4);
+      const wallMat = new THREE.MeshStandardMaterial({ color: '#d9e1ea', roughness: 0.85 });
+      const slabMat = new THREE.MeshStandardMaterial({ color: '#8d96a3', roughness: 0.95 });
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(b.w, 0.3, b.d), slabMat);
+      const c = toWorld(b.x + b.w / 2, b.y + b.d / 2);
+      slab.position.set(c.x, y0 - 0.15, c.z);
+      slab.receiveShadow = true;
+      g.add(slab);
+      for (const w of plan.walls) {
+        const a = toWorld(w.a.x, w.a.y);
+        const bb = toWorld(w.b.x, w.b.y);
+        const len = Math.hypot(bb.x - a.x, bb.z - a.z);
+        if (len < 0.05) continue;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(len, wallH, w.kind === 'exterior' ? 0.35 : 0.18), wallMat);
+        m.position.set((a.x + bb.x) / 2, y0 + wallH / 2, (a.z + bb.z) / 2);
+        m.rotation.y = -Math.atan2(bb.z - a.z, bb.x - a.x);
+        m.castShadow = true;
+        m.receiveShadow = true;
+        g.add(m);
+      }
+      const nogoMat = new THREE.MeshBasicMaterial({ color: 0xf87171, transparent: true, opacity: 0.25, depthWrite: false, toneMapped: false });
+      for (const r of plan.noGo) {
+        const xs = r.poly.map((p) => p.x);
+        const ys = r.poly.map((p) => p.y);
+        const w = Math.max(...xs) - Math.min(...xs);
+        const d = Math.max(...ys) - Math.min(...ys);
+        const cc = toWorld(Math.min(...xs) + w / 2, Math.min(...ys) + d / 2);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), nogoMat);
+        m.position.set(cc.x, y0 + 0.06, cc.z);
+        g.add(overlay(m));
+      }
+      this.scene.add(g);
+      this.floorWalls.set(key, g);
+    }
+    g.visible = true;
   }
 
   /** Centre and size of a building, for camera focus. */

@@ -71,6 +71,7 @@ and merge it.
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Configuration, deployment, pilot checklist, backup and restore, security notes |
 | [`docs/API.md`](docs/API.md) | API guide, developer sandbox, examples; full reference at `/api/v1/openapi.json` |
 | [`docs/ADAPTER_CONTRACT.md`](docs/ADAPTER_CONTRACT.md) | How to connect a real device (BUILD YOUR OWN) |
+| [`docs/INDOOR.md`](docs/INDOOR.md) | UGVs inside buildings: what indoor needs (positioning, floor maps, link, safety), what the platform does now, ROS 2 Nav2 setup |
 | [`docs/BIM.md`](docs/BIM.md) | Importing real building models (glTF from Revit / ArchiCAD / SketchUp / IFC) and an orthophoto into the twin; building information panel |
 | [`docs/BOOTH.md`](docs/BOOTH.md) | Running the live demo at a booth: risks and mitigations, kit, run-of-show, answers |
 | [`docs/HARDWARE_SIYI.md`](docs/HARDWARE_SIYI.md) | Connecting SIYI cameras, the UniFC 6 Pico flight controller and the UniRC 7 Pro remote; edge PC and video setup; hardware test checklist |

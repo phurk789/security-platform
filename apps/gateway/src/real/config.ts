@@ -5,6 +5,7 @@ import { defaultAdapters } from '../adapters';
 import type { Adapter } from '../sdk';
 import { MavlinkVehicleAdapter, UNIRC7_DATALINK, type VehicleProfile } from './mavlinkVehicle';
 import { SiyiCameraAdapter } from './siyiCamera';
+import { RosNav2Adapter, type RosNav2Config } from './rosNav2';
 import { SIYI_DEFAULT } from './siyiProtocol';
 
 export type DeviceConfig =
@@ -23,7 +24,10 @@ export type DeviceConfig =
       catalogId?: string;
       /** 4-in-1 module wired to flight-controller relays. */
       payload?: { module: 'loudhailer-4in1'; spotlightRelay?: number; beaconRelay?: number };
+      /** Indoor vehicle: ArduPilot external navigation (LOCAL_POSITION_NED) instead of GPS. */
+      indoor?: { buildingId: string; level: number; origin: { x: number; y: number }; yawDeg?: number };
     }
+  | ({ type: 'ros2-nav2' } & RosNav2Config)
   | {
       type: 'siyi-camera';
       deviceId: string;
@@ -61,6 +65,8 @@ export function parseSiteConfig(json: unknown): SiteConfig {
     if (!d.deviceId || !/^[A-Z0-9-]{3,32}$/.test(d.deviceId)) throw new ConfigError(`Bad deviceId: ${JSON.stringify(d.deviceId)}`);
     if (ids.has(d.deviceId)) throw new ConfigError(`Duplicate deviceId ${d.deviceId}`);
     ids.add(d.deviceId);
+    if (d.type === 'ros2-nav2' && !/^wss?:\/\//.test(d.url)) throw new ConfigError(`${d.deviceId}: url must be a ws:// or wss:// rosbridge address.`);
+    if (d.type === 'ros2-nav2' && (!d.frame || !Number.isFinite(d.frame.originX) || !Number.isFinite(d.frame.originY))) throw new ConfigError(`${d.deviceId}: frame.originX / originY (site metres of the ROS map origin) are required.`);
     if (d.type === 'mavlink' && d.catalogId && !VEHICLE_CATALOG[d.catalogId]) throw new ConfigError(`${d.deviceId}: unknown catalogId ${d.catalogId} (known: ${Object.keys(VEHICLE_CATALOG).join(', ')})`);
     if (d.type === 'mavlink' && d.payload && !PAYLOAD_CATALOG[d.payload.module]) throw new ConfigError(`${d.deviceId}: unknown payload module ${d.payload.module}`);
     if (d.type === 'mavlink' && !['ardupilot-rover', 'ardupilot-copter', 'px4-rover', 'px4-multicopter'].includes(d.profile)) throw new ConfigError(`${d.deviceId}: unknown profile ${d.profile}`);
@@ -92,8 +98,10 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           firmwareTested: d.firmwareTested,
           catalogId: d.catalogId,
           payload: d.payload,
+          indoor: d.indoor,
         }),
       );
+    else if (d.type === 'ros2-nav2') out.push(new RosNav2Adapter(d));
     else out.push(new SiyiCameraAdapter({ deviceId: d.deviceId, host: d.host ?? SIYI_DEFAULT.host, port: d.port ?? SIYI_DEFAULT.port, model: d.model, pos: d.pos, stream: d.stream, firmwareTested: d.firmwareTested, yawSign: d.yawSign, mount: d.mount }));
   }
   return out;

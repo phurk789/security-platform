@@ -127,6 +127,14 @@ export interface Device {
   /** Catalogue model (VEHICLE_CATALOG) and fitted payload modules (PAYLOAD_CATALOG). */
   catalogId?: string;
   payloads?: string[];
+  /** Device operating inside a building: which floor it is on and how it is positioned (no GNSS). */
+  indoor?: IndoorState;
+}
+
+export interface IndoorState {
+  buildingId: string;
+  level: number;
+  positioning?: 'slam' | 'uwb' | 'vision' | 'fixed';
 }
 
 export interface Incident {
@@ -296,6 +304,8 @@ export interface AppState {
   selectedDeviceId: string | null;
   /** Building whose BIM panel is open (map click). */
   selectedBuildingId?: string | null;
+  /** Floor plan shown on the map (indoor view). */
+  indoorView?: { buildingId: string; level: number } | null;
   incidents: Incident[];
   devices: Record<string, Device>;
   missions: Mission[];

@@ -969,6 +969,7 @@ export class Platform {
         stream: decl.stream,
         mount: sanitizeMount(decl.mount) ?? d.mount,
         catalogId: decl.catalogId && VEHICLE_CATALOG[decl.catalogId] ? decl.catalogId : d.catalogId,
+        indoor: sanitizeIndoor(decl.indoor) ?? d.indoor,
         payloads: Array.isArray(decl.payloads) ? decl.payloads.filter((p) => typeof p === 'string' && PAYLOAD_CATALOG[p]) : d.payloads,
       });
       this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
@@ -1010,6 +1011,7 @@ export class Platform {
     if (t.signal !== undefined) d.signal = t.signal;
     if (t.satellites !== undefined) d.satellites = t.satellites;
     if (t.temperatureC !== undefined) d.temperatureC = t.temperatureC;
+    if (d.indoor && Number.isFinite(t.level)) d.indoor = { ...d.indoor, level: Math.round(t.level as number) };
     if (t.gimbal && Number.isFinite(t.gimbal.yaw) && Number.isFinite(t.gimbal.pitch)) {
       const g = t.gimbal;
       const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
@@ -1635,6 +1637,15 @@ export function streamPath(url: string) {
   } catch {
     return '';
   }
+}
+
+/** Indoor declaration from a gateway: a known building id, a sane level, a known positioning source. */
+function sanitizeIndoor(v: unknown): Device['indoor'] {
+  const i = v as Record<string, unknown> | undefined;
+  if (!i || typeof i !== 'object' || typeof i.buildingId !== 'string' || !/^[A-Z0-9-]{1,16}$/.test(i.buildingId)) return undefined;
+  const level = typeof i.level === 'number' && Number.isFinite(i.level) ? Math.round(i.level) : 1;
+  const positioning = ['slam', 'uwb', 'vision', 'fixed'].includes(i.positioning as string) ? (i.positioning as 'slam') : undefined;
+  return { buildingId: i.buildingId, level: Math.max(-5, Math.min(200, level)), positioning };
 }
 
 /** Mount data from a gateway declaration: numbers only, sane ranges. */

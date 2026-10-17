@@ -1,6 +1,7 @@
 // Wire contracts between the Edge Gateway, the server and the clients.
 // Gateway protocol version — bump on any breaking change.
 import type {
+  IndoorState,
   Assignment,
   AuditEvent,
   Command,
@@ -54,6 +55,8 @@ export interface AdapterDeclaration {
   /** Catalogue vehicle model and fitted payload modules. */
   catalogId?: string;
   payloads?: string[];
+  /** Indoor device: building, floor and positioning source. */
+  indoor?: IndoorState;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +92,8 @@ export interface GwTelemetry {
   temperatureC?: number;
   /** Gimbal camera attitude/zoom (SIYI and similar). */
   gimbal?: GimbalState;
+  /** Indoor vehicles: floor the position refers to (building from the declaration). */
+  level?: number;
 }
 
 export interface GwCommandUpdate {

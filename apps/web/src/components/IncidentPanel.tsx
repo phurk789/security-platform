@@ -33,7 +33,7 @@ import { Badge, CommandBadge, FreshBadge, IncidentBadge, IntegrationBadge, Missi
 import { ReasonDialog } from './Dialog';
 import { TelemetryPanel } from './TelemetryPanel';
 import { BuildingPanel } from './BuildingPanel';
-import { BUILDINGS } from '@13store/shared';
+import { BUILDINGS, floorPlan, roomAt } from '@13store/shared';
 import { ago, useT } from '../i18n';
 
 const SEV = { low: 'Low', medium: 'Medium', high: 'High' } as const;
@@ -399,6 +399,14 @@ function PrepareMission({ inc }: { inc: Incident }) {
   const [open, setOpen] = useState(false);
   const [deviceId, setDeviceId] = useState('UGV-01');
   const [route, setRoute] = useState('direct');
+  const picked = s.devices[deviceId];
+  const indoorPlan = picked?.indoor ? floorPlan(picked.indoor.buildingId, picked.indoor.level) : undefined;
+  useEffect(() => {
+    // Indoor vehicle: the floor patrol is the only sensible default; outdoor routes would cross walls.
+    if (indoorPlan && route !== 'indoor') setRoute('indoor');
+    if (!indoorPlan && route === 'indoor') setRoute('direct');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceId]);
   const operators = s.users.filter((u) => u.role === 'operator');
   const [op, setOp] = useState(operators[0]?.id ?? '');
   const allowed = can(me.role, 'mission.prepare') && !s.replay.active;
@@ -428,6 +436,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
         <label className="field">
           <span><RouteIcon size={14} /> {t('Route')}</span>
           <select value={route} onChange={(e) => setRoute(e.target.value)}>
+            {indoorPlan && <option value="indoor">{t('Floor patrol · {b} level {n} · {k} checkpoints', { b: t(BUILDINGS.find((x) => x.id === indoorPlan.buildingId)?.name ?? ''), n: indoorPlan.level, k: indoorPlan.patrolRoute.length })}</option>}
             {ROUTES.map((r) => <option key={r.id} value={r.id}>{t(r.label)}</option>)}
           </select>
         </label>
@@ -442,7 +451,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
           <button
             className="btn-primary grow"
             disabled={!allowed || !deviceId}
-            onClick={() => dispatch({ type: 'createMission', incidentId: inc.id, deviceId, operatorId: op, checkpoints: ROUTES.find((r) => r.id === route)!.pts })}
+            onClick={() => dispatch({ type: 'createMission', incidentId: inc.id, deviceId, operatorId: op, checkpoints: route === 'indoor' && indoorPlan ? indoorPlan.patrolRoute : (ROUTES.find((r) => r.id === route) ?? ROUTES[0]).pts })}
           >
             {t('Save draft & run checks')}
           </button>
@@ -681,6 +690,21 @@ function DevicePanel({ d }: { d: Device }) {
           <dl className="meta">
             <div><dt>{t('Zone')}</dt><dd>{d.zone}</dd></div>
             <div><dt>{t('Position')}</dt><dd>{d.pos.x.toFixed(0)}, {d.pos.y.toFixed(0)} m ± {d.accuracyM} m</dd></div>
+            {d.indoor && (
+              <div>
+                <dt>{t('Indoor')}</dt>
+                <dd>
+                  {t(BUILDINGS.find((b) => b.id === d.indoor!.buildingId)?.name ?? d.indoor.buildingId)} · {t('Level {n}', { n: d.indoor.level })}
+                  {d.indoor.positioning && d.indoor.positioning !== 'fixed' ? ` · ${{ slam: t('LiDAR SLAM'), uwb: 'UWB', vision: t('visual SLAM') }[d.indoor.positioning]}` : ''}
+                  {(() => {
+                    const r = roomAt(floorPlan(d.indoor.buildingId, d.indoor.level) ?? { walls: [], rooms: [], doors: [], noGo: [], patrolRoute: [], buildingId: '', level: 0, name: '' }, d.pos);
+                    return r ? ` · ${t(r.name.replace(/ \d+\.\d+$/, ''))}` : '';
+                  })()}
+                  {' '}
+                  <button className="link" onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: d.indoor!.buildingId, level: d.indoor!.level } })}>{t('Floor plan')}</button>
+                </dd>
+              </div>
+            )}
             {d.alt !== undefined && <div><dt>{t('Altitude')}</dt><dd>{t('{alt} m (site datum, simulated)', { alt: d.alt })}</dd></div>}
             {d.battery !== undefined && <div><dt>{t('Battery')}</dt><dd>{Math.round(d.battery)}%</dd></div>}
             <div><dt>{t('Adapter')}</dt><dd>{d.adapterVersion}</dd></div>

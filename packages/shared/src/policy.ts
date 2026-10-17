@@ -1,5 +1,6 @@
 // Rules shared by the server (authoritative) and the clients (to hide what a role cannot do).
-import { insideDemoArea } from './site';
+import { BUILDINGS, atBuilding, insideDemoArea } from './site';
+import { floorPlan, inNoGo, routeCrossesWalls } from './indoor';
 import type { Device, Freshness, Mission, Role } from './types';
 
 /** Telemetry older than this is stale (PRD §9: 5 s default for the demo vehicle). */
@@ -122,10 +123,11 @@ export function constraintChecksAt(now: number, d: Device, m: Mission, nameOf: (
   const fresh = freshnessAt(now, d);
   const inside = m.checkpoints.length > 0 && m.checkpoints.every(insideDemoArea);
   const battery = d.battery ?? 0;
+  const routeChecks: Check[] = d.indoor ? indoorRouteChecks(d, m) : [{ label: 'Route inside demo area', ok: inside, hard: true, detail: `${m.checkpoints.length} checkpoints inside site boundary` }];
   return [
     { label: 'Telemetry fresh', ok: fresh === 'live', hard: true, detail: fresh === 'live' ? 'Last seen < 5 s' : `Telemetry ${fresh}` },
     { label: 'Battery ≥ 30%', ok: battery >= 30, hard: true, detail: `${Math.round(battery)}%` },
-    { label: 'Route inside demo area', ok: inside, hard: true, detail: `${m.checkpoints.length} checkpoints inside site boundary` },
+    ...routeChecks,
     { label: 'Operator assigned', ok: !!m.operatorId, hard: true, detail: nameOf(m.operatorId) },
     {
       label: 'Control available',
@@ -140,6 +142,24 @@ export function constraintChecksAt(now: number, d: Device, m: Mission, nameOf: (
       detail: d.integration === 'simulated' ? 'SIMULATED device — demo only' : d.integration,
     },
   ];
+}
+
+/** Indoor vehicle: the route must stay in the building, on its floor, off stairs and lifts, and not cross a wall. */
+export function indoorRouteChecks(d: Device, m: Mission): Check[] {
+  const b = BUILDINGS.find((x) => x.id === d.indoor?.buildingId);
+  const plan = floorPlan(d.indoor?.buildingId, d.indoor?.level);
+  const cps = m.checkpoints;
+  const insideBuilding = !!b && cps.length > 0 && cps.every((p) => atBuilding(b, p, 0));
+  const out: Check[] = [{ label: 'Route inside building', ok: insideBuilding, hard: true, detail: b ? `${cps.length} checkpoints inside ${b.name}, level ${d.indoor?.level}` : 'Unknown building' }];
+  if (!plan) {
+    out.push({ label: 'Floor plan available', ok: false, hard: true, detail: 'No floor plan for this level — import one from the BIM model.' });
+    return out;
+  }
+  const leg = routeCrossesWalls([d.pos, ...cps], plan);
+  out.push({ label: 'Route clear of walls', ok: leg < 0, hard: true, detail: leg < 0 ? 'No leg crosses a wall' : leg === 0 ? 'The leg from the vehicle to checkpoint 1 crosses a wall' : `The leg between checkpoints ${leg} and ${leg + 1} crosses a wall` });
+  const bad = cps.findIndex((p) => inNoGo(plan, p));
+  out.push({ label: 'Avoids stairs and lifts', ok: bad < 0, hard: true, detail: bad < 0 ? 'No checkpoint on stairs or in a lift' : `Checkpoint ${bad + 1} is in ${inNoGo(plan, cps[bad])?.name}` });
+  return out;
 }
 
 export function fmtAge(ms: number) {

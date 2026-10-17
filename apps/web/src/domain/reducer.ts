@@ -61,6 +61,7 @@ export type Msg =
   | { type: 'selectIncident'; id: string | null }
   | { type: 'selectDevice'; id: string | null }
   | { type: 'selectBuilding'; id: string | null }
+  | { type: 'setIndoor'; view: { buildingId: string; level: number } | null }
   | { type: 'openCamera'; incidentId: string }
   | { type: 'confirmIncident'; incidentId: string }
   | { type: 'dismissIncident'; incidentId: string; reason: string }
@@ -492,7 +493,14 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       return s;
     case 'selectDevice':
       s.selectedDeviceId = msg.id;
-      if (msg.id) s.selectedBuildingId = null;
+      if (msg.id) {
+        s.selectedBuildingId = null;
+        const d = s.devices[msg.id];
+        if (d?.indoor) s.indoorView = { buildingId: d.indoor.buildingId, level: d.indoor.level };
+      }
+      return s;
+    case 'setIndoor':
+      s.indoorView = msg.view;
       return s;
     case 'selectBuilding':
       s.selectedBuildingId = msg.id;

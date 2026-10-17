@@ -18,6 +18,7 @@ export function initialState(): AppState {
     selectedIncidentId: 'INC-024',
     selectedDeviceId: null,
     selectedBuildingId: null,
+    indoorView: null,
     incidents: seedIncidents(now),
     devices: seedDevices(now),
     missions: [],
