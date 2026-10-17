@@ -7,7 +7,7 @@ import type { AppState, Device, Layers as LayerState, Point } from '@13store/sha
 import { useStore } from '../store';
 import { Twin3D, type Twin3DApi, type ViewInfo } from './Twin3D';
 import { webglAvailable } from '../twin/world';
-import { setQuality, useQuality } from '../twin/quality';
+import { setQuality, useFps, useQuality } from '../twin/quality';
 import { ago, tr, useT } from '../i18n';
 
 // --- projection ------------------------------------------------------------
@@ -72,6 +72,7 @@ export function TwinMap() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ivKey]);
   const quality = useQuality();
+  const fps = useFps();
   const drag = useRef<{ x: number; y: number; pan: [number, number] } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const api3d = useRef<Twin3DApi>(null);
@@ -115,7 +116,7 @@ export function TwinMap() {
   return (
     <div className={`map map-${mode}${replay ? ' replay' : ''}${gl ? ' map-gl' : ''}${L.labels ? '' : ' no-labels'}`}>
       {gl ? (
-        <Twin3D ref={api3d} onHeading={setHeading} onView={setView} />
+        <Twin3D ref={api3d} onHeading={setHeading} onView={setView} directed />
       ) : (
         <svg
           ref={svgRef}
@@ -275,6 +276,7 @@ export function TwinMap() {
               <label>
                 <input type="checkbox" checked={quality === 'high'} onChange={() => setQuality(quality === 'high' ? 'low' : 'high')} />
                 {t('High quality 3D (bloom, reflections)')}
+                {gl && fps > 0 && <small className="muted fps">{fps} fps</small>}
               </label>
               <p className="pop-h">{t('Click a building for its BIM data')}</p>
             </div>

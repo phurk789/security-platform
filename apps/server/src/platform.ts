@@ -274,6 +274,28 @@ export class Platform {
       )
       .run(clean.id, orgId, siteId, clean.status, clean.createdAt, JSON.stringify(clean));
     this.publish({ orgId, siteId, incidentId: clean.id, event: { type: 'incident', incident: clean } });
+    this.syncOverwatch(orgId, siteId);
+  }
+
+  /** Last overwatch target sent to each simulated UAV (incident id or 'none'), so we only send changes. */
+  private lastOverwatch = new Map<string, string>();
+
+  /**
+   * Simulated UAVs with the `overwatch` capability orbit over a verified incident (one with a live
+   * mission first, else the newest) and return to their patrol loop when none is open. A demo
+   * message to the gateway; real aircraft are never tasked this way.
+   */
+  private syncOverwatch(orgId: string, siteId: string) {
+    const rows = this.db.prepare('SELECT data FROM incidents WHERE org_id = ? AND site_id = ?').all(orgId, siteId) as { data: string }[];
+    const open = rows.map((r) => JSON.parse(r.data) as Incident).filter((i) => i.status === 'confirmed' || i.status === 'responding');
+    const pick = open.find((i) => this.missionsFor(i.id).some((m) => ['assigned', 'executing', 'paused'].includes(m.status))) ?? open.sort((a, b) => b.createdAt - a.createdAt)[0];
+    const key = pick ? pick.id : 'none';
+    for (const d of this.devices.values()) {
+      if (d.orgId !== orgId || d.siteId !== siteId || d.kind !== 'uav' || d.integration !== 'simulated' || !d.capabilities.includes('overwatch')) continue;
+      if (this.lastOverwatch.get(d.id) === key) continue;
+      if (this.gateways.send(orgId, d.id, { t: 'demo', deviceId: d.id, action: 'overwatch', target: pick ? { x: pick.pos.x, y: pick.pos.y } : null }))
+        this.lastOverwatch.set(d.id, key);
+    }
   }
 
   private moveIncident(_a: Actor, inc: Incident & { siteId: string }, to: IncidentStatus) {
@@ -1038,6 +1060,12 @@ export class Platform {
     }
     // Anything never delivered before this (re)connect is dropped, never replayed (F09).
     for (const id of accepted) this.expireUndelivered(id, 'Not delivered before the gateway reconnected. Not replayed.');
+    // A (re)connected simulated UAV learns where to orbit.
+    for (const id of accepted) {
+      this.lastOverwatch.delete(id);
+      const d = this.devices.get(id);
+      if (d?.kind === 'uav') this.syncOverwatch(orgId, d.siteId);
+    }
     this.audit(
       sys,
       'gateway.connect',

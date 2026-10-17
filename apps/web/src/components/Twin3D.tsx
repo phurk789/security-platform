@@ -9,10 +9,11 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { Point } from '@13store/shared';
-import { getQuality, useQuality } from '../twin/quality';
+import { feedFrame, getQuality, useQuality } from '../twin/quality';
 import { useStore } from '../store';
 import { fromWorld } from '../twin/layout';
 import { getWorld, subscribeFrame } from '../twin/world';
+import { director, useDirector } from '../twin/director';
 import { useAppearance, useTheme } from './Hud';
 import { TwinCallout } from './TwinCallout';
 
@@ -35,8 +36,14 @@ const HOME = { pos: new THREE.Vector3(-175, 235, 320), target: new THREE.Vector3
 
 export const Twin3D = forwardRef<
   Twin3DApi,
-  { onHeading?: (deg: number) => void; onView?: (v: ViewInfo) => void; /** Keep this device centred (camera follows it). */ follow?: string }
->(function Twin3D({ onHeading, onView, follow }, ref) {
+  {
+    onHeading?: (deg: number) => void;
+    onView?: (v: ViewInfo) => void;
+    /** Keep this device centred (camera follows it). */ follow?: string;
+    /** Take shots from the camera director (booth script). */
+    directed?: boolean;
+  }
+>(function Twin3D({ onHeading, onView, follow, directed }, ref) {
   const { s, dispatch } = useStore();
   const host = useRef<HTMLDivElement>(null);
   const ctl = useRef<{ camera: THREE.PerspectiveCamera; controls: OrbitControls; goal?: { target: THREE.Vector3; dist: number } } | null>(null);
@@ -56,8 +63,13 @@ export const Twin3D = forwardRef<
   headingRef.current = onHeading;
   const viewRef = useRef(onView);
   viewRef.current = onView;
+  const dispatchRef = useRef(dispatch);
+  dispatchRef.current = dispatch;
   const followRef = useRef(follow);
   followRef.current = follow;
+  /** Vehicle the director asked us to follow (overview only). */
+  const scriptFollow = useRef<string | null>(null);
+  const dir = useDirector();
 
   useEffect(() => {
     const el = host.current!;
@@ -126,7 +138,22 @@ export const Twin3D = forwardRef<
     let down: { x: number; y: number } | null = null;
     const ray = new THREE.Raycaster();
     ray.layers.enableAll();
-    const onDown = (e: PointerEvent) => (down = { x: e.clientX, y: e.clientY });
+    const onDown = (e: PointerEvent) => {
+      down = { x: e.clientX, y: e.clientY };
+      if (directed) {
+        director.userMoved();
+        controls.autoRotate = false;
+        scriptFollow.current = null;
+      }
+    };
+    const onWheel = () => {
+      if (directed) {
+        director.userMoved();
+        controls.autoRotate = false;
+      }
+    };
+    renderer.domElement.addEventListener('wheel', onWheel, { passive: true });
+    controls.autoRotateSpeed = 0.35;
     const onUp = (e: PointerEvent) => {
       if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
       const r = renderer.domElement.getBoundingClientRect();
@@ -142,6 +169,8 @@ export const Twin3D = forwardRef<
     let lastHeading = 999;
     const lastView = { x: Infinity, z: Infinity, d: Infinity, az: Infinity };
     const unsub = subscribeFrame((dt) => {
+      if (feedFrame(dt, performance.now()))
+        dispatchRef.current({ type: 'toast', tone: 'warn', text: 'Switched the 3D twin to low quality to keep the picture smooth on this computer.' });
       const c = ctl.current!;
       if (c.goal) {
         const k = 1 - Math.exp(-dt * 3);
@@ -150,9 +179,9 @@ export const Twin3D = forwardRef<
         off.setLength(THREE.MathUtils.lerp(off.length(), c.goal.dist, k));
         camera.position.copy(controls.target).add(off);
         if (controls.target.distanceTo(c.goal.target) < 0.5 && Math.abs(off.length() - c.goal.dist) < 1) c.goal = undefined;
-      } else if (followRef.current) {
+      } else if (followRef.current ?? scriptFollow.current) {
         // Follow mode: glide the orbit centre (and camera with it) after the vehicle.
-        const p = world.devicePos(followRef.current);
+        const p = world.devicePos((followRef.current ?? scriptFollow.current)!);
         if (p) {
           const delta = p.sub(controls.target).multiplyScalar(1 - Math.exp(-dt * 2.5));
           controls.target.add(delta);
@@ -200,6 +229,7 @@ export const Twin3D = forwardRef<
       controls.dispose();
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('pointerup', onUp);
+      renderer.domElement.removeEventListener('wheel', onWheel);
       composer.dispose();
       target.dispose();
       renderer.dispose();
@@ -207,6 +237,21 @@ export const Twin3D = forwardRef<
       ctl.current = null;
     };
   }, [world]);
+
+  // Director shots (booth script): home, a point, follow a vehicle, or a slow idle orbit.
+  useEffect(() => {
+    const c = ctl.current;
+    if (!directed || !c || dir.seq === 0) return;
+    const shot = dir.shot;
+    c.controls.autoRotate = shot.kind === 'idle';
+    scriptFollow.current = shot.kind === 'follow' ? shot.id : null;
+    if (shot.kind === 'home' || shot.kind === 'idle') c.goal = { target: HOME.target.clone(), dist: HOME.pos.distanceTo(HOME.target) };
+    else if (shot.kind === 'point') c.goal = { target: world.worldOf(shot.p), dist: shot.dist };
+    else if (shot.kind === 'follow') {
+      const p = world.devicePos(shot.id);
+      if (p) c.goal = { target: p, dist: shot.dist };
+    }
+  }, [dir.seq, dir.shot, directed, world]);
 
   // Starting to follow a vehicle: fly in to a close orbit around it.
   useEffect(() => {

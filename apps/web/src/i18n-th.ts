@@ -810,4 +810,15 @@ export const TH: Record<string, string> = {
   'final': 'สิ้นสุด',
   'in progress': 'กำลังดำเนินการ',
   'pending': 'รอตรวจ',
+  'Switched the 3D twin to low quality to keep the picture smooth on this computer.': 'สลับ 3D เป็นคุณภาพต่ำเพื่อให้ภาพลื่นบนเครื่องนี้',
+  // --- show mode ------------------------------------------------------------
+  'Sound on (alerts, confirmations, announcements)': 'เสียงเปิด (แจ้งเตือน ยืนยันคำสั่ง ประกาศ)',
+  'Sound off': 'เสียงปิด',
+  'Live events': 'เหตุการณ์สด',
+  'Drone overwatch (simulated)': 'โดรนคุมเหตุจากอากาศ (จำลอง)',
+  'While the vehicle drives, the simulated drone is already on station above the alert for an aerial view. No real aircraft flies at the booth.': 'ระหว่างยานวิ่ง โดรนจำลองบินวนเหนือจุดแจ้งเตือนให้มุมมองจากอากาศ ไม่มีอากาศยานจริงบินในงาน',
+  'Press Next (or Space) for each step: the role switches and the action runs for you. A = auto-play loop, R = reset, P = big text, W = wall display, S = sound, B = hide.': 'กด Next (หรือ Space) ทีละขั้น: ระบบสลับบทบาทและทำการให้ A = เล่นอัตโนมัติวนลูป, R = รีเซ็ต, P = ตัวอักษรใหญ่, W = โหมดจอผนัง, S = เสียง, B = ซ่อน',
+  'Online': 'ออนไลน์',
+  'Filter fleet': 'กรองยานพาหนะ',
+  'No vehicles match the filter.': 'ไม่มียานพาหนะตรงตัวกรอง',
 };

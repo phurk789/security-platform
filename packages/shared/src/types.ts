@@ -275,6 +275,10 @@ export interface VehicleSim {
   gimbal?: SimGimbal;
   /** When an operator last moved this camera (auto-aim waits a minute after). */
   cameraManualAt?: number;
+  /** UAV: centre of the current orbit (patrol loop, or over the incident it is watching). */
+  orbit?: Point;
+  /** UAV: incident it is on station over, once the orbit has arrived. */
+  overwatchFor?: string;
 }
 
 export interface Toast {

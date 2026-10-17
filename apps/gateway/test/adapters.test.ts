@@ -276,3 +276,24 @@ describe('SimUav and SimCctv', () => {
     a.stop();
   });
 });
+
+describe('SimUav', () => {
+  it('orbits the patrol loop, flies to an overwatch target on demand and returns when released', () => {
+    const a = new SimUav(seed['UAV-02']);
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    vi.advanceTimersByTime(3000);
+    const p0 = got.telemetry.at(-1)!.pos;
+    expect(Math.hypot(p0.x - 318, p0.y - 52)).toBeLessThan(45);
+    a.onDemo('overwatch', { x: 335, y: 236 });
+    vi.advanceTimersByTime(40_000);
+    const p1 = got.telemetry.at(-1)!.pos;
+    expect(Math.hypot(p1.x - 335, p1.y - 236)).toBeLessThan(26);
+    expect(got.telemetry.at(-1)!.alt).toBeGreaterThan(30);
+    a.onDemo('overwatch', null);
+    vi.advanceTimersByTime(40_000);
+    const p2 = got.telemetry.at(-1)!.pos;
+    expect(Math.hypot(p2.x - 318, p2.y - 52)).toBeLessThan(45);
+    a.stop();
+  });
+});

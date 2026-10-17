@@ -22,6 +22,7 @@ export function getQuality() {
 
 export function setQuality(q: Quality) {
   quality = q;
+  if (q === 'high') resetGuard();
   try {
     localStorage.setItem(KEY, q);
   } catch {
@@ -36,4 +37,54 @@ export function useQuality() {
     () => quality,
     () => quality,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Performance guard: an unknown booth PC must never stutter through the demo. If the twin
+// cannot hold ~22 fps for a few seconds in high quality, drop to low and say so once.
+// ---------------------------------------------------------------------------
+
+let fps = 0;
+const fpsListeners = new Set<() => void>();
+
+export function useFps() {
+  return useSyncExternalStore(
+    (cb) => (fpsListeners.add(cb), () => fpsListeners.delete(cb)),
+    () => fps,
+    () => fps,
+  );
+}
+
+/** Feed one frame interval (seconds). Returns true when the guard just downgraded. */
+let acc = 0;
+let n = 0;
+let slowSince = 0;
+let downgraded = false;
+export function feedFrame(dt: number, nowMs: number): boolean {
+  acc += dt;
+  n++;
+  if (acc >= 0.5) {
+    const next = Math.round(n / acc);
+    acc = 0;
+    n = 0;
+    if (next !== fps) {
+      fps = next;
+      fpsListeners.forEach((l) => l());
+    }
+    if (quality === 'high' && fps > 0 && fps < 22 && document.visibilityState === 'visible') {
+      slowSince ||= nowMs;
+      if (nowMs - slowSince > 4000 && !downgraded) {
+        downgraded = true;
+        setQuality('low');
+        return true;
+      }
+    } else slowSince = 0;
+  }
+  return false;
+}
+
+/** Re-arm the guard (e.g. after the presenter turns high quality back on). */
+export function resetGuard() {
+  downgraded = false;
+  slowSince = 0;
 }

@@ -93,7 +93,7 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
       case 'demo': {
         // `*` targets every adapter (used for a full demo reset).
         const targets = msg.deviceId === '*' ? opts.adapters : [byId.get(msg.deviceId)].filter((a): a is Adapter => !!a);
-        for (const a of targets) a.onDemo(msg.action);
+        for (const a of targets) a.onDemo(msg.action, msg.target);
         return;
       }
     }

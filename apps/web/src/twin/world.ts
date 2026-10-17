@@ -6,6 +6,7 @@ import {
   BUILDINGS,
   FENCE_Y,
   GATE,
+  PLAZA,
   ROAD,
   SITE,
   ZONES,
@@ -22,7 +23,21 @@ import {
 import { CAMERA_VIEWS, LAMPS, LIT_LAMPS, PARKED, TREES, fromWorld, toWorld } from './layout';
 import { beamTexture, facadeTextures, groundTexture, roofTexture } from './textures';
 import { loadOrtho, loadTwinManifest, loadTwinModel, makeEnvironment } from './bim';
-import { lampPool, makeBarrier, makeBooth, makeCar, makeCctv, makeLamp, makeUav, makeUgv, type CctvModel, type UavModel, type UgvModel } from './models';
+import {
+  lampPool,
+  makeBarrier,
+  makeBooth,
+  makeCar,
+  makeCctv,
+  makeLamp,
+  makePerson,
+  makeUav,
+  makeUgv,
+  type CctvModel,
+  type PersonModel,
+  type UavModel,
+  type UgvModel,
+} from './models';
 
 /** Devices are drawn larger than life so they stay visible at site scale (map symbol scale). */
 export const SYMBOL_SCALE = { ugv: 4.5, uav: 3.6 };
@@ -77,6 +92,109 @@ function overlay<T extends THREE.Object3D>(o: T): T {
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
+interface Walker {
+  m: PersonModel;
+  path: Point[];
+  i: number;
+  t: number;
+  speed: number;
+  loop: boolean;
+  dir: 1 | -1;
+  phase: number;
+}
+
+interface Subject {
+  m: PersonModel;
+  pos: Point;
+  phase: number;
+  idle: number;
+  leaving: boolean;
+  gone: boolean;
+  exit?: Point;
+}
+
+/** Swing legs and arms in opposite phase; `amp` in radians. */
+function animateGait(m: PersonModel, phase: number, amp: number) {
+  const k = Math.sin(phase) * amp;
+  m.legL.rotation.x = k;
+  m.legR.rotation.x = -k;
+  m.armL.rotation.x = -k * 0.8;
+  m.armR.rotation.x = k * 0.8;
+}
+
+/** Where a person near `p` leaves the site: through the gate when near it, otherwise off the nearest edge. */
+function exitFor(p: Point): Point {
+  if (p.y > FENCE_Y - 60) return { x: GATE.x + GATE.w / 2, y: ROAD.y + ROAD.h + 30 };
+  const edges: Point[] = [
+    { x: -20, y: p.y },
+    { x: SITE.width + 20, y: p.y },
+    { x: p.x, y: -20 },
+  ];
+  return edges.sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+}
+
+const ring = (cx: number, cy: number, r: number, n: number): Point[] =>
+  Array.from({ length: n }, (_, i) => ({ x: cx + Math.cos((i / n) * Math.PI * 2) * r, y: cy + Math.sin((i / n) * Math.PI * 2) * r }));
+
+/** Pedestrian loops in site metres: plaza ring, the two walkways, the car park aisle. */
+const WALK_LOOPS: { path: Point[]; speed: number; loop: boolean; start: number }[] = [
+  { path: ring(PLAZA.cx, PLAZA.cy, PLAZA.r + 5, 16), speed: 1.2, loop: true, start: 0 },
+  { path: ring(PLAZA.cx, PLAZA.cy, PLAZA.r + 5, 16), speed: 1.05, loop: true, start: 7 },
+  {
+    path: [
+      { x: 70, y: 120 },
+      { x: 180, y: 120 },
+      { x: 244, y: 120 },
+      { x: 380, y: 120 },
+    ],
+    speed: 1.3,
+    loop: false,
+    start: 0,
+  },
+  {
+    path: [
+      { x: 244, y: 30 },
+      { x: 244, y: 110 },
+      { x: 244, y: 190 },
+      { x: 244, y: 226 },
+    ],
+    speed: 1.15,
+    loop: false,
+    start: 1,
+  },
+  {
+    path: [
+      { x: 184, y: 192 },
+      { x: 230, y: 192 },
+      { x: 278, y: 192 },
+    ],
+    speed: 1.0,
+    loop: false,
+    start: 2,
+  },
+  {
+    path: [
+      { x: 380, y: 120 },
+      { x: 300, y: 120 },
+      { x: 244, y: 120 },
+      { x: 244, y: 60 },
+    ],
+    speed: 1.25,
+    loop: false,
+    start: 0,
+  },
+  {
+    path: [
+      { x: 150, y: 150 },
+      { x: 150, y: 200 },
+      { x: 110, y: 200 },
+    ],
+    speed: 0.95,
+    loop: false,
+    start: 0,
+  },
+];
+
 export class TwinWorld {
   readonly scene = new THREE.Scene();
   state: AppState | null = null;
@@ -117,6 +235,10 @@ export class TwinWorld {
   /** Entrances, fire exits and hydrants of every building (the POI layer). */
   private poiGroup = new THREE.Group();
   private parked: THREE.Group[] = [];
+  /** Pedestrians on fixed loops (scenery, follow the traffic layer). */
+  private walkers: Walker[] = [];
+  /** One figure per open alert: the person the alert is about. Leaves when told to or when resolved. */
+  private subjects = new Map<string, Subject>();
   /** Glass info card anchored to the selected building, device or incident (rendered by React). */
   readonly calloutEl = document.createElement('div');
   private callout: CSS2DObject;
@@ -588,6 +710,13 @@ export class TwinWorld {
       car.position.x = -300 + i * 170;
       s.add(car);
     }
+    // people on the plaza and walkways (scenery)
+    WALK_LOOPS.forEach((loop, i) => {
+      const m = makePerson(i * 7 + 3);
+      m.root.castShadow = true;
+      s.add(m.root);
+      this.walkers.push({ m, path: loop.path, i: loop.start % loop.path.length, t: 0, speed: loop.speed, loop: loop.loop, dir: 1, phase: i * 1.3 });
+    });
 
     // zones
     for (const z of ZONES) {
@@ -1096,13 +1225,108 @@ export class TwinWorld {
       if (c.g.position.x < -700) c.g.position.x = 700;
       c.g.position.z = toWorld(0, c.lane).z;
     }
+    this.syncWalkers(dt);
     if (!this.state) return;
     this.syncDevices(dt);
     this.syncIncidents();
+    this.syncSubjects(dt);
     this.syncRoute();
     this.syncZones();
     this.syncCallout();
     for (const b of this.buildingLabels) b.visible = this.labelsVisible;
+  }
+
+  /** Pedestrians: walk their loop, swing limbs, hide with the traffic layer. */
+  private syncWalkers(dt: number) {
+    const show = this.state?.layers.traffic !== false;
+    for (const w of this.walkers) {
+      w.m.root.visible = show;
+      if (!show || this.state?.replay.active) continue;
+      const a = w.path[w.i];
+      const b = w.path[(w.i + w.dir + w.path.length) % w.path.length];
+      const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      w.t += (w.speed * dt) / len;
+      if (w.t >= 1) {
+        w.t = 0;
+        if (w.loop) w.i = (w.i + 1) % w.path.length;
+        else {
+          w.i += w.dir;
+          if (w.i >= w.path.length - 1 || w.i <= 0) w.dir = -w.dir as 1 | -1;
+        }
+      }
+      const p = toWorld(a.x + (b.x - a.x) * w.t, a.y + (b.y - a.y) * w.t);
+      w.m.root.position.set(p.x, 0, p.z);
+      w.m.root.rotation.y = Math.atan2(b.x - a.x, -(b.y - a.y));
+      w.phase += dt * 7;
+      animateGait(w.m, w.phase, 0.55);
+    }
+  }
+
+  /** One figure per open alert at its position; it walks off when the vehicle announces or the alert is resolved. */
+  private syncSubjects(dt: number) {
+    const s = this.state!;
+    const seen = new Set<string>();
+    for (const i of s.incidents) {
+      if (!i.pos || i.id === i.duplicateOf) continue;
+      const open = ['new', 'triaging', 'confirmed', 'responding'].includes(i.status);
+      let sub = this.subjects.get(i.id);
+      if (!sub) {
+        if (!open) continue;
+        const m = makePerson(Number(i.id.replace(/\D/g, '')) || 1, true);
+        this.scene.add(m.root);
+        const p = toWorld(i.pos.x + 1.5, i.pos.y + 1.2);
+        m.root.position.set(p.x, 0, p.z);
+        sub = { m, pos: { x: i.pos.x + 1.5, y: i.pos.y + 1.2 }, phase: 0, leaving: false, gone: false, idle: 0 };
+        this.subjects.set(i.id, sub);
+      }
+      seen.add(i.id);
+      if (sub.gone) {
+        sub.m.root.visible = false;
+        continue;
+      }
+      if (s.replay.active) continue;
+      // Told to leave: a vehicle announcing within earshot, a vehicle right next to them, or the alert is over.
+      if (!sub.leaving) {
+        const told = Object.values(s.devices).some(
+          (d) =>
+            d.kind === 'ugv' &&
+            freshnessAt(s.now, d) === 'live' &&
+            ((d.gimbal?.announcing && Math.hypot(d.pos.x - sub!.pos.x, d.pos.y - sub!.pos.y) < 150) || Math.hypot(d.pos.x - sub!.pos.x, d.pos.y - sub!.pos.y) < 10),
+        );
+        if (told || !open) {
+          sub.leaving = true;
+          sub.exit = exitFor(sub.pos);
+        }
+      }
+      if (sub.leaving && sub.exit) {
+        const dx = sub.exit.x - sub.pos.x;
+        const dy = sub.exit.y - sub.pos.y;
+        const d = Math.hypot(dx, dy);
+        const step = Math.min(d, 1.6 * dt);
+        if (d < 0.5) {
+          sub.gone = true;
+          sub.m.root.visible = false;
+          continue;
+        }
+        sub.pos.x += (dx / d) * step;
+        sub.pos.y += (dy / d) * step;
+        const p = toWorld(sub.pos.x, sub.pos.y);
+        sub.m.root.position.set(p.x, 0, p.z);
+        sub.m.root.rotation.y = Math.atan2(dx, -dy);
+        sub.phase += dt * 8;
+        animateGait(sub.m, sub.phase, 0.6);
+      } else {
+        // idle: face the nearest camera-ish direction and shift weight
+        sub.idle += dt;
+        sub.m.root.rotation.y = Math.sin(sub.idle * 0.4) * 0.5 + Math.PI;
+        animateGait(sub.m, sub.idle * 1.5, 0.08);
+      }
+    }
+    for (const [id, sub] of this.subjects) {
+      if (seen.has(id)) continue;
+      this.scene.remove(sub.m.root);
+      this.subjects.delete(id);
+    }
   }
 
   /** Map layers (buildings, traffic, routes, POI, labels) → object visibility. Cheap per frame. */

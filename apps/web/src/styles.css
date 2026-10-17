@@ -687,3 +687,28 @@ html:lang(th) .meta dt { font-size: 0.78rem; }
 .t3-callout.below .co-lead { bottom: auto; top: 0; transform: scaleY(-1); }
 .t3-callout.flip.below .co-lead { transform: scale(-1, -1); }
 .t3-labels .t3-callout { z-index: 1000 !important; }
+
+/* ---------- twin snapshot (incident thumbnails) ---------- */
+.snap { position: relative; width: 100%; height: 100%; background: #08101c; overflow: hidden; }
+.snap canvas { display: block; width: 100%; height: 100%; object-fit: cover; }
+.snap-label { position: absolute; left: 6px; bottom: 4px; font-size: 0.62rem; font-weight: 600; color: #e6edf5; text-shadow: 0 1px 2px #000; }
+.snap-tag { position: absolute; top: 4px; right: 4px; font-size: 0.56rem; font-weight: 700; letter-spacing: 0.06em; padding: 1px 5px; border-radius: 3px; background: rgba(167, 139, 250, 0.3); border: 1px solid var(--violet); color: #e6deff; }
+
+/* ---------- wall display (booth TV) ---------- */
+.app.wall { grid-template-rows: 56px minmax(0, 1fr) 34px; }
+.app.wall .sidenav, .app.wall .footer, .app.wall .booth, .app.wall .theme-toggle, .app.wall .appearance-toggle, .app.wall .lang-toggle, .app.wall .user, .app.wall .health { display: none !important; }
+.app.wall .main { grid-template-columns: minmax(0, 1fr); }
+.app.wall .booth-caption { left: 50%; right: auto; transform: translateX(-50%); width: min(880px, 70vw); bottom: 230px; }
+.ticker { grid-row: 3; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--bg-2); border-top: 1px solid var(--line); font-size: 0.84rem; overflow: hidden; }
+.ticker-head { flex: none; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.7rem; color: var(--cyan); }
+.ticker-clip { flex: 1; overflow: hidden; min-width: 0; }
+.ticker-track { display: inline-flex; gap: 36px; white-space: nowrap; animation: ticker 48s linear infinite; }
+.ticker-track.paused { animation-play-state: paused; }
+.tk b { color: var(--text-3); font-weight: 600; margin-right: 4px; font-variant-numeric: tabular-nums; }
+.tk.tone-alert { color: var(--amber); }
+.tk.tone-warn { color: var(--amber); }
+.tk.tone-ok { color: var(--green); }
+@keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.theme-hud .ticker { background: rgba(6, 16, 30, 0.96); }
+.theme-hud .ticker-head { font-family: var(--hud-font); }
+.appearance-toggle.on { color: var(--cyan); border-color: var(--cyan); }

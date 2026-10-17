@@ -22,7 +22,9 @@ function cyl(rt: number, rb: number, h: number, m: THREE.Material, seg = 12) {
 let _glowTex: THREE.Texture | null = null;
 export function sprite(color: number, size: number, opacity = 1) {
   _glowTex ??= glowTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)');
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: _glowTex, color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+  const s = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: _glowTex, color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }),
+  );
   s.scale.set(size, size, 1);
   return s;
 }
@@ -94,7 +96,13 @@ function makeTracked(v: { scale: number; color: string; deck: string; cargo?: bo
     const rail = mat('#2a2f36', { metalness: 0.6, roughness: 0.4 });
     for (const x of [-0.36, 0.36]) g.add(box(0.03, 0.03, 1.1, rail, x, 0.84, 0.05));
     for (const z of [-0.5, 0.6]) g.add(box(0.75, 0.03, 0.03, rail, 0, 0.84, z));
-    for (const [x, z] of [[-0.36, -0.5], [0.36, -0.5], [-0.36, 0.6], [0.36, 0.6]]) g.add(box(0.03, 0.22, 0.03, rail, x, 0.73, z));
+    for (const [x, z] of [
+      [-0.36, -0.5],
+      [0.36, -0.5],
+      [-0.36, 0.6],
+      [0.36, 0.6],
+    ])
+      g.add(box(0.03, 0.22, 0.03, rail, x, 0.73, z));
     g.add(box(0.36, 0.2, 0.3, mat('#6d5a3a'), -0.12, 0.72, 0.25)); // crate
   }
   // sensor mast and SIYI gimbal camera
@@ -160,7 +168,18 @@ function fourInOne(g: THREE.Group) {
   const beamGeo = new THREE.ConeGeometry(1, 1, 24, 1, true);
   beamGeo.translate(0, -0.5, 0);
   beamGeo.rotateX(Math.PI / 2 + 0.05);
-  const spotBeam = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({ color: 0xfff1c8, transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false }));
+  const spotBeam = new THREE.Mesh(
+    beamGeo,
+    new THREE.MeshBasicMaterial({
+      color: 0xfff1c8,
+      transparent: true,
+      opacity: 0.12,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    }),
+  );
   spotBeam.scale.set(0.9, 0.9, 6);
   spotBeam.position.copy(spot.position);
   spotBeam.visible = false;
@@ -319,7 +338,10 @@ export function makeCctv(height: number): CctvModel {
   const coneGeo = new THREE.ConeGeometry(1, 1, 24, 1, true);
   coneGeo.translate(0, -0.5, 0);
   coneGeo.rotateX(-Math.PI / 2);
-  const cone = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
+  const cone = new THREE.Mesh(
+    coneGeo,
+    new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }),
+  );
   cone.visible = false;
   head.add(cone);
   return { root, head, ir, cone };
@@ -347,7 +369,13 @@ export function makeLamp() {
 export function lampPool(radius = 9) {
   const m = new THREE.Mesh(
     new THREE.CircleGeometry(radius, 32),
-    new THREE.MeshBasicMaterial({ map: glowTexture('rgba(255,214,150,0.55)', 'rgba(255,214,150,0)'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }),
+    new THREE.MeshBasicMaterial({
+      map: glowTexture('rgba(255,214,150,0.55)', 'rgba(255,214,150,0)'),
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    }),
   );
   m.rotation.x = -Math.PI / 2;
   m.position.y = 0.06;
@@ -412,3 +440,46 @@ export function makeBooth() {
 }
 
 export { CAR_COLORS };
+
+// ---------------------------------------------------------------------------
+// People: low-poly walkers for the plaza and the subject of an alert
+// ---------------------------------------------------------------------------
+
+export interface PersonModel {
+  root: THREE.Group;
+  legL: THREE.Mesh;
+  legR: THREE.Mesh;
+  armL: THREE.Mesh;
+  armR: THREE.Mesh;
+}
+
+const SHIRTS = ['#c9d2dc', '#3b5bdb', '#d9480f', '#2f9e44', '#f08c00', '#862e9c', '#1c7ed6', '#e8e8e2'];
+const TROUSERS = ['#2b2f36', '#3e4a5c', '#5c4b3a', '#1f2a40'];
+
+/** A 1.75 m figure: head, torso, swinging arms and legs. Drawn 1.5× for visibility from the HUD distance. */
+export function makePerson(seed: number, hiVis = false): PersonModel {
+  const root = new THREE.Group();
+  const g = new THREE.Group();
+  g.scale.setScalar(1.5);
+  root.add(g);
+  const shirt = mat(hiVis ? '#f5b301' : SHIRTS[seed % SHIRTS.length], { roughness: 0.9 });
+  const trouser = mat(TROUSERS[seed % TROUSERS.length], { roughness: 0.95 });
+  const skin = mat(['#e3b58f', '#c98f66', '#8d5a3b'][seed % 3], { roughness: 0.8 });
+  const torso = box(0.38, 0.55, 0.22, shirt, 0, 1.05, 0);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), skin);
+  head.position.y = 1.47;
+  head.castShadow = true;
+  const legL = box(0.14, 0.78, 0.16, trouser, -0.1, 0.39, 0);
+  const legR = box(0.14, 0.78, 0.16, trouser, 0.1, 0.39, 0);
+  const armL = box(0.09, 0.5, 0.11, shirt, -0.26, 1.05, 0);
+  const armR = box(0.09, 0.5, 0.11, shirt, 0.26, 1.05, 0);
+  // pivot limbs from the hip / shoulder: shift geometry so rotation swings the lower end
+  for (const m of [legL, legR]) (m.geometry.translate(0, -0.39, 0), (m.position.y = 0.78));
+  for (const m of [armL, armR]) (m.geometry.translate(0, -0.25, 0), (m.position.y = 1.3));
+  if (hiVis) {
+    const stripe = box(0.4, 0.06, 0.24, glow('#f8fafc'), 0, 1.0, 0);
+    g.add(stripe);
+  }
+  g.add(torso, head, legL, legR, armL, armR);
+  return { root, legL, legR, armL, armR };
+}

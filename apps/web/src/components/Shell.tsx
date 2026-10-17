@@ -35,7 +35,10 @@ import { useStore } from '../store';
 import { LangToggle, ago, roleLabel, useLang, useT, type T } from '../i18n';
 import { IncidentBadge } from './Badges';
 import { CameraFeed } from './CameraFeed';
+import { SceneSnapshot } from './SceneSnapshot';
+import { webglAvailable } from '../twin/world';
 import { AppearanceToggle, ThemeToggle, useTheme } from './Hud';
+import { SoundToggle } from './SoundEffects';
 
 export function TopBar() {
   const { s, dispatch, session, mode } = useStore();
@@ -91,6 +94,7 @@ export function TopBar() {
         </span>
         <ThemeToggle />
         <AppearanceToggle />
+        <SoundToggle />
         <LangToggle />
         <div className="user">
           <button className="user-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
@@ -250,7 +254,11 @@ export function IncidentQueue() {
         {list.map((i) => (
           <button key={i.id} className={`inc-card${s.selectedIncidentId === i.id ? ' sel' : ''} st-${i.status}`} onClick={() => dispatch({ type: 'selectIncident', id: i.id })}>
             <div className="thumb">
-              <CameraFeed scene={i.thumb} label={i.id} time={s.now} compact />
+              {i.cameraId && s.devices[i.cameraId] && webglAvailable() ? (
+                <SceneSnapshot deviceId={i.cameraId} label={i.cameraId} />
+              ) : (
+                <CameraFeed scene={i.thumb} label={i.id} time={s.now} compact />
+              )}
             </div>
             <div className="ic-body">
               <div className="row between">

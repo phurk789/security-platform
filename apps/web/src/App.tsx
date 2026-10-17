@@ -11,12 +11,15 @@ import { DevicesPage, EvidencePage, IncidentsPage, MissionsPage, ReportsPage } f
 import { AdminPage } from './views/Admin';
 import { CommandCenter } from './views/CommandCenter';
 import { BoothScript } from './components/BoothScript';
+import { SoundEffects } from './components/SoundEffects';
+import { EventTicker, useWall } from './components/Wall';
 
 export function App() {
   const { s } = useStore();
   const theme = useTheme();
+  const wall = useWall();
   return (
-    <div className={`app theme-${theme}${s.presentation ? ' presentation' : ''}${s.replay.active ? ' is-replay' : ''}`}>
+    <div className={`app theme-${theme}${s.presentation ? ' presentation' : ''}${s.replay.active ? ' is-replay' : ''}${wall ? ' wall' : ''}`}>
       <TopBar />
       <div className="main">
         <SideNav />
@@ -29,9 +32,10 @@ export function App() {
         {s.view === 'reports' && <ReportsPage />}
         {s.view === 'admin' && <AdminPage />}
       </div>
-      <Footer />
+      {wall ? <EventTicker /> : <Footer />}
       <Toasts />
       <BoothScript />
+      <SoundEffects />
     </div>
   );
 }
@@ -48,7 +52,9 @@ function Overview() {
     <div className="replay-bar inline">
       <History size={16} /> <b>REPLAY</b> <span className="mono">{fmtTime(s.replay.at, true)}</span>
       <span>{t('You are viewing past data. Device control is off.')}</span>
-      <button className="btn-primary small" onClick={() => dispatch({ type: 'exitReplay' })}><Radio size={14} /> {t('Return to live')}</button>
+      <button className="btn-primary small" onClick={() => dispatch({ type: 'exitReplay' })}>
+        <Radio size={14} /> {t('Return to live')}
+      </button>
     </div>
   );
   if (hud) {
@@ -76,9 +82,15 @@ function Overview() {
   return (
     <div className={`overview pane-${pane}`}>
       <div className="mobile-tabs" role="tablist">
-        <button className={pane === 'queue' ? 'on' : ''} onClick={() => setPane('queue')}><List size={16} /> {t('Queue')}</button>
-        <button className={pane === 'map' ? 'on' : ''} onClick={() => setPane('map')}><MapIcon size={16} /> {t('Map')}</button>
-        <button className={pane === 'detail' ? 'on' : ''} onClick={() => setPane('detail')}><PanelRight size={16} /> {t('Details')}</button>
+        <button className={pane === 'queue' ? 'on' : ''} onClick={() => setPane('queue')}>
+          <List size={16} /> {t('Queue')}
+        </button>
+        <button className={pane === 'map' ? 'on' : ''} onClick={() => setPane('map')}>
+          <MapIcon size={16} /> {t('Map')}
+        </button>
+        <button className={pane === 'detail' ? 'on' : ''} onClick={() => setPane('detail')}>
+          <PanelRight size={16} /> {t('Details')}
+        </button>
       </div>
       <div className="ov-queue" onClick={(e) => (e.target as Element).closest('.inc-card') && setPane('detail')}>
         <IncidentQueue />

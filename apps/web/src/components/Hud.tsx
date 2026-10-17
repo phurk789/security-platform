@@ -141,10 +141,13 @@ export function FleetPanel() {
   const { s } = useStore();
   const t = useT();
   const [video, setVideo] = useState(true);
-  const fleet = Object.values(s.devices)
+  const [filter, setFilter] = useState<'all' | 'ugv' | 'uav' | 'online'>('all');
+  const all = Object.values(s.devices)
     .filter((d) => d.kind === 'ugv' || d.kind === 'uav')
     .sort((a, b) => (a.kind === b.kind ? a.id.localeCompare(b.id) : a.kind === 'ugv' ? -1 : 1));
-  const live = fleet.filter((d) => freshness(s, d) === 'live').length;
+  const live = all.filter((d) => freshness(s, d) === 'live').length;
+  const fleet = all.filter((d) => (filter === 'all' ? true : filter === 'online' ? freshness(s, d) === 'live' : d.kind === filter));
+  const counts = { all: all.length, ugv: all.filter((d) => d.kind === 'ugv').length, uav: all.filter((d) => d.kind === 'uav').length, online: live };
   return (
     <section className="panel hud-fleet">
       <div className="panel-head">
@@ -158,11 +161,18 @@ export function FleetPanel() {
           {t('Video')}
         </button>
       </div>
+      <div className="hud-filters" role="tablist" aria-label={t('Filter fleet')}>
+        {(['all', 'ugv', 'uav', 'online'] as const).map((k) => (
+          <button key={k} role="tab" aria-selected={filter === k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>
+            {k === 'all' ? t('All') : k === 'online' ? t('Online') : k.toUpperCase()} <small>{counts[k]}</small>
+          </button>
+        ))}
+      </div>
       <div className="hud-fleet-list">
         {fleet.map((d) => (
           <FleetCard key={d.id} d={d} video={video} />
         ))}
-        {!fleet.length && <p className="empty">{t('No vehicles registered.')}</p>}
+        {!fleet.length && <p className="empty">{all.length ? t('No vehicles match the filter.') : t('No vehicles registered.')}</p>}
       </div>
     </section>
   );

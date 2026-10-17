@@ -7,7 +7,10 @@ import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Subtitles, X } from 
 import { DEFAULT_ROUTE, freshnessAt, type AppState } from '@13store/shared';
 import { missionForIncident, type Msg } from '../domain/reducer';
 import { useT } from '../i18n';
+import { setSound, soundEnabled } from '../sound';
 import { useStore, type Session } from '../store';
+import { director, type Shot } from '../twin/director';
+import { isKiosk, setWall, useWall } from './Wall';
 import './booth.css';
 
 const INC = 'INC-024';
@@ -31,8 +34,12 @@ interface Step {
   /** The step counts as done when this holds; auto-play then waits `dwellMs` before moving on. */
   done: (s: AppState) => boolean;
   dwellMs?: number;
+  /** Where the 3D camera goes for this step (ignored while a visitor is moving the view). */
+  shot?: Shot;
 }
 
+const UAV = 'UAV-02';
+const GATE_POS = { x: 335, y: 236 };
 const inc = (s: AppState) => s.incidents.find((i) => i.id === INC);
 const mis = (s: AppState) => missionForIncident(s, INC);
 const cmdOf = (s: AppState, m: { id: string }, type: string) => s.commands.filter((c) => c.missionId === m.id && c.type === type).length;
@@ -40,6 +47,7 @@ const cmdOf = (s: AppState, m: { id: string }, type: string) => s.commands.filte
 const STEPS: Step[] = [
   {
     id: 'intro',
+    shot: { kind: 'idle' },
     who: 'u-alex',
     title: 'One view of the site',
     say: 'Map, cameras and vehicles in one place. Everything simulated is labelled SIM; only devices that are really ready count as ready.',
@@ -52,6 +60,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'camera',
+    shot: { kind: 'point', p: GATE_POS, dist: 110 },
     who: 'u-alex',
     title: 'Open the camera',
     say: 'An alert stays unverified until a person looks. The nearest camera has already turned to the alert by itself.',
@@ -64,6 +73,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'confirm',
+    shot: { kind: 'point', p: GATE_POS, dist: 90 },
     who: 'u-alex',
     title: 'Confirm the alert',
     say: 'The dispatcher confirms what the camera shows. Every decision is written to the timeline and the audit log with who and when.',
@@ -73,6 +83,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'draft',
+    shot: { kind: 'point', p: { x: 275, y: 227 }, dist: 175 },
     who: 'u-alex',
     title: 'Plan the UGV route',
     say: 'A patrol route to the gate for UGV-01. The draft is dashed: nothing moves until a supervisor approves it.',
@@ -84,6 +95,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'submit',
+    shot: { kind: 'point', p: { x: 275, y: 227 }, dist: 175 },
     who: 'u-alex',
     title: 'Submit for approval',
     say: 'Constraint checks run first: inside the demo area, device ready, operator assigned.',
@@ -96,6 +108,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'approve',
+    shot: { kind: 'point', p: { x: 275, y: 227 }, dist: 160 },
     who: 'u-nida',
     title: 'Supervisor approves',
     say: 'Only a supervisor can approve, and the API checks it too. Change the route afterwards and approval is withdrawn automatically.',
@@ -108,6 +121,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'accept',
+    shot: { kind: 'follow', id: UGV, dist: 85 },
     who: 'u-somchai',
     title: 'Operator takes control',
     say: 'One person holds control of the vehicle at a time. Handover is logged.',
@@ -120,6 +134,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'start',
+    shot: { kind: 'follow', id: UGV, dist: 70 },
     who: 'u-somchai',
     title: 'Send start',
     say: 'Sent, acknowledged, confirmed: the command shows success only when the vehicle actually moves.',
@@ -131,11 +146,26 @@ const STEPS: Step[] = [
     dwellMs: 8000,
   },
   {
+    id: 'drone',
+    shot: { kind: 'follow', id: UAV, dist: 95 },
+    who: 'u-somchai',
+    title: 'Drone overwatch (simulated)',
+    say: 'While the vehicle drives, the simulated drone is already on station above the alert for an aerial view. No real aircraft flies at the booth.',
+    run: ({ dispatch }) => dispatch({ type: 'selectDevice', id: UAV }),
+    done: (s) => {
+      const d = s.devices[UAV];
+      return !!d && Math.hypot(d.pos.x - GATE_POS.x, d.pos.y - GATE_POS.y) < 32;
+    },
+    dwellMs: 8000,
+  },
+  {
     id: 'module',
+    shot: { kind: 'follow', id: UGV, dist: 48 },
     who: 'u-somchai',
     title: 'Warning light and announcement',
     say: 'The 4-in-1 module on the vehicle: warning light, searchlight and a preset announcement, all from the console and all logged.',
     run: ({ s, dispatch }) => {
+      dispatch({ type: 'selectIncident', id: INC }); // back from the drone panel to the live mission
       if (!s.devices[UGV]?.gimbal?.beacon) dispatch({ type: 'cameraControl', deviceId: UGV, action: { action: 'beacon', on: true } });
       dispatch({ type: 'cameraControl', deviceId: UGV, action: { action: 'announce', message: 'This is a restricted area. Please leave now.' } });
     },
@@ -144,6 +174,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'cut',
+    shot: { kind: 'follow', id: UGV, dist: 70 },
     who: 'u-alex',
     title: 'Cut the network',
     say: 'Radio lost. Data goes STALE, new commands are held, and the vehicle stops itself after 1.5 seconds: its own failsafe, not ours.',
@@ -155,6 +186,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'restore',
+    shot: { kind: 'follow', id: UGV, dist: 70 },
     who: 'u-alex',
     title: 'Restore the network',
     say: 'Back online. Nothing queued is replayed; the mission is paused until the operator resumes it.',
@@ -166,6 +198,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'resume',
+    shot: { kind: 'follow', id: UGV, dist: 60 },
     who: 'u-somchai',
     title: 'Resume to the gate',
     say: 'The vehicle completes the route. A snapshot from its camera is attached to the incident with a checksum.',
@@ -178,18 +211,21 @@ const STEPS: Step[] = [
   },
   {
     id: 'resolve',
+    shot: { kind: 'point', p: GATE_POS, dist: 120 },
     who: 'u-alex',
     title: 'Record the outcome',
     say: 'Outcome recorded with the mission still linked. A false alarm is still a full record: who checked, what was seen, what was done.',
     run: ({ s, dispatch }) => {
       const i = inc(s);
-      if (i?.status === 'confirmed' || i?.status === 'responding') dispatch({ type: 'resolveIncident', incidentId: INC, outcome: 'False alarm: delivery contractor at the service gate. Gate secured.' });
+      if (i?.status === 'confirmed' || i?.status === 'responding')
+        dispatch({ type: 'resolveIncident', incidentId: INC, outcome: 'False alarm: delivery contractor at the service gate. Gate secured.' });
     },
     done: (s) => ['resolved', 'closed'].includes(inc(s)?.status ?? ''),
     dwellMs: 4000,
   },
   {
     id: 'close',
+    shot: { kind: 'point', p: GATE_POS, dist: 140 },
     who: 'u-alex',
     title: 'Close and report',
     say: 'The report lists the incident, mission, approver, commands and evidence. Every export is logged.',
@@ -201,6 +237,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'replay',
+    shot: { kind: 'home' },
     who: 'u-priya',
     title: 'Replay for the auditor',
     say: 'The auditor replays the last minutes. In replay every control is off, and the audit chain can be verified.',
@@ -228,6 +265,17 @@ export function BoothScript() {
   const doneAt = useRef<number | null>(null);
   const sRef = useRef(s);
   sRef.current = s;
+  const wall = useWall();
+
+  // `?kiosk`: wall display with the loop running, big text, no presenter panel (W / Esc to leave).
+  useEffect(() => {
+    if (!demoEnv || !isKiosk()) return;
+    setOpen(true);
+    setAuto(true);
+    setCaptions(true);
+    if (!sRef.current.presentation) dispatch({ type: 'togglePresentation' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoEnv]);
 
   const switchTo = useCallback(
     async (userId: string) => {
@@ -239,6 +287,7 @@ export function BoothScript() {
   );
 
   const reset = useCallback(async () => {
+    director.release();
     if (sRef.current.replay.active) dispatch({ type: 'exitReplay' });
     await switchTo('u-alex');
     dispatch({ type: 'demoReset' });
@@ -256,6 +305,7 @@ export function BoothScript() {
         // Role switch may replace the state: run against the latest.
         await new Promise((r) => setTimeout(r, 50));
         await step.run({ s: sRef.current, dispatch, session });
+        if (step.shot) director.cut(step.shot);
       } finally {
         setBusy(false);
       }
@@ -329,6 +379,10 @@ export function BoothScript() {
         void reset();
       } else if (e.key === 'p' || e.key === 'P') {
         dispatch({ type: 'togglePresentation' });
+      } else if (e.key === 'w' || e.key === 'W') {
+        setWall(!wall);
+      } else if (e.key === 's' || e.key === 'S') {
+        setSound(!soundEnabled());
       } else if (e.key === 'Escape') {
         setOpen(false);
         setAuto(false);
@@ -336,7 +390,7 @@ export function BoothScript() {
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, [demoEnv, open, next, back, reset, dispatch]);
+  }, [demoEnv, open, next, back, reset, dispatch, wall]);
 
   if (!demoEnv) return null;
   if (!open) return null;
@@ -346,7 +400,9 @@ export function BoothScript() {
     <>
       {captions && step && (
         <div className="booth-caption" aria-live="polite">
-          <span className="booth-cap-step">{i + 1}/{STEPS.length}</span>
+          <span className="booth-cap-step">
+            {i + 1}/{STEPS.length}
+          </span>
           <b>{t(step.title)}</b>
           <span>{t(step.say)}</span>
         </div>
@@ -359,14 +415,25 @@ export function BoothScript() {
               <i key={st.id} className={n < i ? 'done' : n === i ? (isDone ? 'done cur' : 'cur') : ''} />
             ))}
           </span>
-          <button className="icon-btn" aria-label={t('Close')} onClick={() => { setOpen(false); setAuto(false); }}><X size={16} /></button>
+          <button
+            className="icon-btn"
+            aria-label={t('Close')}
+            onClick={() => {
+              setOpen(false);
+              setAuto(false);
+            }}
+          >
+            <X size={16} />
+          </button>
         </div>
         <div className="booth-body">
           {step ? (
             <>
               <div className="booth-who">
                 <span className="booth-n">{i + 1}</span>
-                <span>{who?.name} · {who?.title}</span>
+                <span>
+                  {who?.name} · {who?.title}
+                </span>
                 <span className={`booth-state ${isDone ? 'ok' : ''}`}>{busy ? t('Working…') : isDone ? t('Done') : t('Waiting for effect…')}</span>
               </div>
               <h3>{t(step.title)}</h3>
@@ -375,12 +442,18 @@ export function BoothScript() {
           ) : (
             <>
               <h3>{t('Ready to start')}</h3>
-              <p>{t('Press Next (or Space) for each step: the role switches and the action runs for you. A = auto-play loop, R = reset, P = big screen, B = hide.')}</p>
+              <p>
+                {t(
+                  'Press Next (or Space) for each step: the role switches and the action runs for you. A = auto-play loop, R = reset, P = big text, W = wall display, S = sound, B = hide.',
+                )}
+              </p>
             </>
           )}
         </div>
         <div className="booth-foot">
-          <button className="btn-outline small" disabled={busy || i <= 0} onClick={back} aria-label={t('Back')}><ChevronLeft size={16} /></button>
+          <button className="btn-outline small" disabled={busy || i <= 0} onClick={back} aria-label={t('Back')}>
+            <ChevronLeft size={16} />
+          </button>
           <button className="btn-primary booth-next" disabled={busy} onClick={() => void next()}>
             {i >= STEPS.length - 1 ? t('Finish & reset') : t('Next')} <ChevronRight size={18} />
           </button>
@@ -390,7 +463,17 @@ export function BoothScript() {
           <button className={`btn-outline small${captions ? ' on' : ''}`} onClick={() => setCaptions((c) => !c)} aria-pressed={captions} title={t('Visitor captions')}>
             <Subtitles size={16} />
           </button>
-          <button className="btn-outline small" disabled={busy} onClick={() => { setAuto(false); void reset(); }} title={t('Reset demo dataset')}><RotateCcw size={16} /></button>
+          <button
+            className="btn-outline small"
+            disabled={busy}
+            onClick={() => {
+              setAuto(false);
+              void reset();
+            }}
+            title={t('Reset demo dataset')}
+          >
+            <RotateCcw size={16} />
+          </button>
         </div>
       </aside>
     </>

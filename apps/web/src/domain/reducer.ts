@@ -28,6 +28,9 @@ import {
   sampleLatency,
   stepMotion,
   stepSensors,
+  UAV_PATROL,
+  uavOnStation,
+  uavOrbitPoint,
   can,
   constraintChecks,
   currentUser,
@@ -37,20 +40,7 @@ import {
   type Action,
 } from './policy';
 import { initialState } from './scenario';
-import type {
-  AppState,
-  Command,
-  CommandStatus,
-  CommandType,
-  Incident,
-  Layers,
-  Device,
-  Mission,
-  Point,
-  TimelineEvent,
-  VehicleSim,
-  View,
-} from '@13store/shared';
+import type { AppState, Command, CommandStatus, CommandType, Incident, Layers, Device, Mission, Point, TimelineEvent, VehicleSim, View } from '@13store/shared';
 
 export type Msg =
   | { type: 'tick'; dt: number }
@@ -217,14 +207,29 @@ function autoAim(s: AppState, inc: Incident) {
   if (!pick) return;
   aimSim(s, pick.device, pick.aim);
   inc.cameraId ??= pick.device.id;
-  s.audit.push({ id: nextId(s, 'AUD'), at: s.now, actor: 'Auto camera', role: 'system', action: 'camera.control', object: pick.device.id, result: 'ok', detail: `auto-point at ${inc.id} (yaw ${pick.aim.yaw}°, pitch ${pick.aim.pitch}°, ${pick.aim.zoom}×)` });
+  s.audit.push({
+    id: nextId(s, 'AUD'),
+    at: s.now,
+    actor: 'Auto camera',
+    role: 'system',
+    action: 'camera.control',
+    object: pick.device.id,
+    result: 'ok',
+    detail: `auto-point at ${inc.id} (yaw ${pick.aim.yaw}°, pitch ${pick.aim.pitch}°, ${pick.aim.zoom}×)`,
+  });
   event(s, inc.id, `${pick.device.id} turned to the alert automatically`, {
     actor: 'Auto camera',
     detail: `${pick.aim.distanceM} m away, ${pick.aim.zoom}× zoom. Confirmed by the camera. Operators can take over at any time.`,
   });
 }
 
-const UAV_ORBIT = { cx: 318, cy: 52, rx: 34, ry: 26, rate: 0.08 };
+/** The incident a simulated UAV should watch: an open, verified incident, preferring one with a live mission. */
+function overwatchTarget(s: AppState): Incident | undefined {
+  const open = s.incidents.filter((i) => i.status === 'confirmed' || i.status === 'responding');
+  if (!open.length) return undefined;
+  const withMission = open.find((i) => s.missions.some((m) => m.incidentId === i.id && ['assigned', 'executing', 'paused'].includes(m.status)));
+  return withMission ?? open.sort((a, b) => b.createdAt - a.createdAt)[0];
+}
 
 function tick(s: AppState, dt: number) {
   s.now += dt;
@@ -247,9 +252,19 @@ function tick(s: AppState, dt: number) {
       }
       stepMotion(v.motion, sec);
     } else if (d.kind === 'uav') {
-      const a = (s.now / 1000) * UAV_ORBIT.rate;
-      const w = v.sensors.wind;
-      const next = { x: UAV_ORBIT.cx + Math.cos(a) * UAV_ORBIT.rx + w.x * 1.5, y: UAV_ORBIT.cy + Math.sin(a) * UAV_ORBIT.ry + w.y * 1.5 };
+      // Overwatch (simulated): the orbit moves over a verified incident and back to the patrol loop after.
+      const watch = d.capabilities.includes('overwatch') ? overwatchTarget(s) : undefined;
+      v.orbit ??= { x: UAV_PATROL.cx, y: UAV_PATROL.cy };
+      const next = uavOrbitPoint(v.orbit, watch ? watch.pos : null, s.now, sec, v.sensors.wind);
+      if (watch && v.overwatchFor !== watch.id && uavOnStation(v.orbit, watch.pos)) {
+        v.overwatchFor = watch.id;
+        event(s, watch.id, `${d.id} overwatch on station`, {
+          actor: d.id,
+          tone: 'info',
+          detail: 'Simulated flight: orbiting the alert at 40 m. Aerial view available on the device panel.',
+        });
+      }
+      if (!watch) v.overwatchFor = undefined;
       const moved = Math.hypot(next.x - v.motion.x, next.y - v.motion.y);
       if (sec > 0 && moved < 20) {
         v.motion.speed = moved / sec;
@@ -439,7 +454,10 @@ function applyCommand(s: AppState, c: Command) {
     case 'start':
       m.status = 'executing';
       m.note = undefined;
-      { const inc = incident(s, m.incidentId); if (inc && inc.status === 'confirmed') inc.status = 'responding'; }
+      {
+        const inc = incident(s, m.incidentId);
+        if (inc && inc.status === 'confirmed') inc.status = 'responding';
+      }
       event(s, m.incidentId, `Mission ${m.id} started`, { actor: d.id, tone: 'ok', detail: 'Start confirmed by the vehicle.' });
       break;
     case 'pause':
@@ -537,7 +555,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     case 'confirmIncident': {
       const inc = incident(s, msg.incidentId);
       if (!inc || !guard(s, 'incident.verify', msg.incidentId)) return s;
-      if (!['new', 'triaging'].includes(inc.status)) return reject(s, 'incident.verify', inc.id, 'Incident is not awaiting verification.'), s;
+      if (!['new', 'triaging'].includes(inc.status)) return (reject(s, 'incident.verify', inc.id, 'Incident is not awaiting verification.'), s);
       inc.status = 'confirmed';
       inc.owner = me.name;
       event(s, inc.id, 'Verified — action required', { tone: 'ok', detail: 'Verified by operator from camera review.' });
@@ -547,7 +565,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     case 'dismissIncident': {
       const inc = incident(s, msg.incidentId);
       if (!inc || !guard(s, 'incident.verify', msg.incidentId)) return s;
-      if (!msg.reason.trim()) return reject(s, 'incident.dismiss', inc.id, 'A reason is required.'), s;
+      if (!msg.reason.trim()) return (reject(s, 'incident.dismiss', inc.id, 'A reason is required.'), s);
       inc.status = 'dismissed';
       inc.outcome = msg.reason;
       event(s, inc.id, 'Dismissed as false alarm', { detail: msg.reason });
@@ -558,8 +576,8 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       const inc = incident(s, msg.incidentId);
       const into = incident(s, msg.intoId);
       if (!inc || !into || !guard(s, 'incident.verify', msg.incidentId)) return s;
-      if (!msg.reason.trim()) return reject(s, 'incident.merge', inc.id, 'A reason is required.'), s;
-      if (inc.id === into.id) return reject(s, 'incident.merge', inc.id, 'Cannot merge an incident into itself.'), s;
+      if (!msg.reason.trim()) return (reject(s, 'incident.merge', inc.id, 'A reason is required.'), s);
+      if (inc.id === into.id) return (reject(s, 'incident.merge', inc.id, 'Cannot merge an incident into itself.'), s);
       inc.status = 'duplicate';
       inc.duplicateOf = into.id;
       inc.outcome = msg.reason;
@@ -571,9 +589,9 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     case 'resolveIncident': {
       const inc = incident(s, msg.incidentId);
       if (!inc || !guard(s, 'incident.resolve', msg.incidentId)) return s;
-      if (!['confirmed', 'responding'].includes(inc.status)) return reject(s, 'incident.resolve', inc.id, 'Only confirmed or responding incidents can be resolved.'), s;
+      if (!['confirmed', 'responding'].includes(inc.status)) return (reject(s, 'incident.resolve', inc.id, 'Only confirmed or responding incidents can be resolved.'), s);
       const active = s.missions.find((m) => m.incidentId === inc.id && ['executing', 'paused'].includes(m.status));
-      if (active) return reject(s, 'incident.resolve', inc.id, `Mission ${active.id} is still active. End it first.`), s;
+      if (active) return (reject(s, 'incident.resolve', inc.id, `Mission ${active.id} is still active. End it first.`), s);
       inc.status = 'resolved';
       inc.outcome = msg.outcome;
       event(s, inc.id, 'Resolved', { tone: 'ok', detail: msg.outcome });
@@ -583,7 +601,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     case 'closeIncident': {
       const inc = incident(s, msg.incidentId);
       if (!inc || !guard(s, 'incident.close', msg.incidentId)) return s;
-      if (inc.status !== 'resolved') return reject(s, 'incident.close', inc.id, 'Resolve the incident before closing it.'), s;
+      if (inc.status !== 'resolved') return (reject(s, 'incident.close', inc.id, 'Resolve the incident before closing it.'), s);
       inc.status = 'closed';
       event(s, inc.id, 'Closed', { tone: 'ok' });
       audit(s, 'incident.close', inc.id, 'ok');
@@ -623,8 +641,8 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       const inc = incident(s, msg.incidentId);
       const d = s.devices[msg.deviceId];
       if (!inc || !d || !guard(s, 'mission.prepare', msg.incidentId)) return s;
-      if (inc.status !== 'confirmed') return reject(s, 'mission.prepare', inc.id, 'Verify the incident before preparing a mission.'), s;
-      if (!isReady(s, d)) return reject(s, 'mission.prepare', d.id, `${d.id} is not ready.`), s;
+      if (inc.status !== 'confirmed') return (reject(s, 'mission.prepare', inc.id, 'Verify the incident before preparing a mission.'), s);
+      if (!isReady(s, d)) return (reject(s, 'mission.prepare', d.id, `${d.id} is not ready.`), s);
       const m: Mission = {
         id: nextId(s, 'MSN'),
         incidentId: inc.id,
@@ -645,7 +663,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       const m = mission(s, msg.missionId);
       if (!m || !guard(s, 'mission.prepare', msg.missionId)) return s;
       if (!['draft', 'pending_approval', 'approved', 'assigned', 'rejected'].includes(m.status))
-        return reject(s, 'mission.edit', m.id, 'Route cannot be changed while the mission is running.'), s;
+        return (reject(s, 'mission.edit', m.id, 'Route cannot be changed while the mission is running.'), s);
       m.checkpoints = msg.checkpoints.map((p) => ({ ...p }));
       m.planVersion += 1;
       if (m.status === 'approved' || m.status === 'assigned') {
@@ -661,7 +679,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     case 'submitMission': {
       const m = mission(s, msg.missionId);
       if (!m || !guard(s, 'mission.prepare', msg.missionId)) return s;
-      if (!['draft', 'rejected'].includes(m.status)) return reject(s, 'mission.submit', m.id, 'Mission is not a draft.'), s;
+      if (!['draft', 'rejected'].includes(m.status)) return (reject(s, 'mission.submit', m.id, 'Mission is not a draft.'), s);
       m.status = 'pending_approval';
       event(s, m.incidentId, 'Approval requested', { detail: `Mission ${m.id} plan v${m.planVersion} sent to supervisor.` });
       audit(s, 'mission.submit', m.id, 'ok');
@@ -670,9 +688,9 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     case 'approveMission': {
       const m = mission(s, msg.missionId);
       if (!m || !guard(s, 'mission.approve', msg.missionId)) return s;
-      if (m.status !== 'pending_approval') return reject(s, 'mission.approve', m.id, 'Mission is not awaiting approval.'), s;
+      if (m.status !== 'pending_approval') return (reject(s, 'mission.approve', m.id, 'Mission is not awaiting approval.'), s);
       const failed = constraintChecks(s, m).filter((c) => c.hard && !c.ok);
-      if (failed.length) return reject(s, 'mission.approve', m.id, `Cannot approve: ${failed.map((f) => f.label).join(', ')}.`), s;
+      if (failed.length) return (reject(s, 'mission.approve', m.id, `Cannot approve: ${failed.map((f) => f.label).join(', ')}.`), s);
       m.status = 'approved';
       m.approvedVersion = m.planVersion;
       m.approvedBy = me.id;
@@ -683,8 +701,8 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     case 'rejectMission': {
       const m = mission(s, msg.missionId);
       if (!m || !guard(s, 'mission.approve', msg.missionId)) return s;
-      if (m.status !== 'pending_approval') return reject(s, 'mission.reject', m.id, 'Mission is not awaiting approval.'), s;
-      if (!msg.reason.trim()) return reject(s, 'mission.reject', m.id, 'A reason is required.'), s;
+      if (m.status !== 'pending_approval') return (reject(s, 'mission.reject', m.id, 'Mission is not awaiting approval.'), s);
+      if (!msg.reason.trim()) return (reject(s, 'mission.reject', m.id, 'A reason is required.'), s);
       m.status = 'rejected';
       m.note = msg.reason;
       event(s, m.incidentId, 'Mission rejected', { tone: 'warn', detail: msg.reason });
@@ -695,7 +713,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       const m = mission(s, msg.missionId);
       if (!m || !guard(s, 'mission.prepare', msg.missionId)) return s;
       if (!['draft', 'pending_approval', 'approved', 'assigned', 'rejected'].includes(m.status))
-        return reject(s, 'mission.cancel', m.id, 'A running mission must be stopped by its operator.'), s;
+        return (reject(s, 'mission.cancel', m.id, 'A running mission must be stopped by its operator.'), s);
       m.status = 'cancelled';
       const d = s.devices[m.deviceId];
       if (d.controlOwner === m.operatorId) d.controlOwner = undefined;
@@ -706,10 +724,11 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     case 'acceptMission': {
       const m = mission(s, msg.missionId);
       if (!m || !guard(s, 'mission.accept', msg.missionId)) return s;
-      if (m.operatorId !== me.id) return reject(s, 'mission.accept', m.id, 'This mission is assigned to another operator.'), s;
-      if (m.status !== 'approved' || m.approvedVersion !== m.planVersion) return reject(s, 'mission.accept', m.id, 'Mission needs an approved plan first.'), s;
+      if (m.operatorId !== me.id) return (reject(s, 'mission.accept', m.id, 'This mission is assigned to another operator.'), s);
+      if (m.status !== 'approved' || m.approvedVersion !== m.planVersion) return (reject(s, 'mission.accept', m.id, 'Mission needs an approved plan first.'), s);
       const d = s.devices[m.deviceId];
-      if (d.controlOwner && d.controlOwner !== me.id) return reject(s, 'mission.accept', d.id, `Control of ${d.id} is held by ${userName(s, d.controlOwner)}. A handover is required.`), s;
+      if (d.controlOwner && d.controlOwner !== me.id)
+        return (reject(s, 'mission.accept', d.id, `Control of ${d.id} is held by ${userName(s, d.controlOwner)}. A handover is required.`), s);
       d.controlOwner = me.id;
       m.status = 'assigned';
       event(s, m.incidentId, 'Operator accepted mission', { detail: `${me.name} confirmed readiness and holds control of ${d.id}.` });
@@ -878,7 +897,9 @@ function issueCommand(s: AppState, missionId: string, type: CommandType, key: st
 
   if (!d.commands.includes(type)) return fail(`${d.id} adapter does not support ${type}.`);
   if (d.controlOwner !== me.id)
-    return fail(d.controlOwner ? `Control of ${d.id} is held by ${userName(s, d.controlOwner)}. A handover is required.` : `You do not hold control of ${d.id}. Accept the mission first.`);
+    return fail(
+      d.controlOwner ? `Control of ${d.id} is held by ${userName(s, d.controlOwner)}. A handover is required.` : `You do not hold control of ${d.id}. Accept the mission first.`,
+    );
 
   const valid: Record<CommandType, Mission['status'][]> = {
     start: ['assigned'],
@@ -890,8 +911,7 @@ function issueCommand(s: AppState, missionId: string, type: CommandType, key: st
   if (type === 'start' && m.approvedVersion !== m.planVersion) return fail('Plan changed since approval. Re-approval required.');
 
   const fresh = freshness(s, d);
-  if ((type === 'start' || type === 'resume') && fresh !== 'live')
-    return fail(`Telemetry is ${fresh}. New ${type} commands are held until data is fresh.`);
+  if ((type === 'start' || type === 'resume') && fresh !== 'live') return fail(`Telemetry is ${fresh}. New ${type} commands are held until data is fresh.`);
 
   const pending = s.commands.find((c) => c.missionId === m.id && !isTerminal(c));
   if (pending && type !== 'stop') return fail(`Waiting for ${pending.type} (${pending.id}) to finish.`);

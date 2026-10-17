@@ -143,7 +143,9 @@ export interface SrvDemo {
   t: 'demo';
   /** A device id, or '*' for every adapter on the gateway. */
   deviceId: string;
-  action: 'cut_link' | 'restore_link' | 'reset';
+  action: 'cut_link' | 'restore_link' | 'reset' | 'overwatch';
+  /** `overwatch`: where a simulated UAV should orbit (null = back to its patrol loop). */
+  target?: Point | null;
 }
 
 export interface SrvWelcome {

@@ -1,9 +1,10 @@
 // Simulated UAV. Static display model at the booth: position and video are simulated, no commands.
-// It loiters on an overwatch orbit with wind drift, small altitude hold error and battery drain.
-import { gaussian, newSensors, readSensors, stepSensors, type Device, type Point, type SensorState } from '@13store/shared';
+// It loiters on a patrol orbit with wind drift, small altitude hold error and battery drain, and
+// moves its orbit over an incident when the platform asks for overwatch (demo message).
+import { UAV_PATROL, gaussian, newSensors, readSensors, stepSensors, uavOrbitPoint, type Device, type Point, type SensorState, type SrvDemo } from '@13store/shared';
 import { SimDevice, type SimOptions } from './base';
 
-const ORBIT = { cx: 318, cy: 52, rx: 34, ry: 26, rate: 0.08 };
+const ORBIT = UAV_PATROL;
 
 export class SimUav extends SimDevice {
   pos: Point = { x: ORBIT.cx + ORBIT.rx, y: ORBIT.cy };
@@ -12,6 +13,9 @@ export class SimUav extends SimDevice {
   alt = 40;
   sensors!: SensorState;
   private placed = false;
+  /** Current orbit centre and where it is heading (incident under overwatch, or the patrol loop). */
+  private centre: Point = { x: ORBIT.cx, y: ORBIT.cy };
+  private target: Point | null = null;
 
   constructor(seed: Device, opts: SimOptions = {}) {
     super(seed, opts);
@@ -26,13 +30,22 @@ export class SimUav extends SimDevice {
     this.sensors = newSensors(this.seed.battery ?? 100, 'uav');
     this.alt = this.seed.alt ?? 40;
     this.placed = false;
+    this.centre = { x: ORBIT.cx, y: ORBIT.cy };
+    this.target = null;
+  }
+
+  onDemo(action: SrvDemo['action'], target?: SrvDemo['target']) {
+    if (action === 'overwatch') {
+      this.target = target ?? null;
+      return;
+    }
+    super.onDemo(action, target);
   }
 
   protected step(dt: number, now: number) {
     stepSensors(this.sensors, dt, 'uav', this.speed);
-    const a = (now / 1000) * ORBIT.rate;
     const w = this.sensors.wind;
-    const next = { x: ORBIT.cx + Math.cos(a) * ORBIT.rx + w.x * 1.5, y: ORBIT.cy + Math.sin(a) * ORBIT.ry + w.y * 1.5 };
+    const next = uavOrbitPoint(this.centre, this.target, now, dt, w);
     if (!this.placed) {
       this.placed = true;
     } else if (dt > 0) {

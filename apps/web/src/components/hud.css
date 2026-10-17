@@ -279,3 +279,10 @@ html[lang='th'] .theme-hud .sidenav button { letter-spacing: 0.01em; }
 /* rendered vehicle picture on the fleet card */
 .fc-thumb { width: 66px; height: 42px; object-fit: contain; flex: none; border-radius: 5px; background: radial-gradient(60% 70% at 50% 60%, rgba(56, 225, 255, 0.16), transparent 75%); }
 :root[data-theme='light'] .fc-thumb { background: radial-gradient(60% 70% at 50% 60%, rgba(2, 132, 199, 0.12), transparent 75%); }
+
+/* fleet filter chips (All / UGV / UAV / Online) */
+.hud-filters { display: flex; gap: 4px; padding: 0 10px 8px; }
+.hud-filters button { flex: 1; background: none; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; color: var(--text-3); font-family: var(--hud-font); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.hud-filters button small { font-weight: 400; color: var(--text-3); margin-left: 2px; }
+.hud-filters button.on { color: var(--cyan); border-color: var(--cyan); background: rgba(56, 225, 255, 0.08); }
+:root[data-theme='light'] .hud-filters button.on { background: rgba(2, 132, 199, 0.08); }

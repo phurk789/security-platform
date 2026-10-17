@@ -56,16 +56,13 @@ export interface Adapter {
   /** A command from the server for this device. */
   onCommand(cmd: SrvCommand): void;
   /** Demo/presenter control (simulators only; real adapters may ignore it). */
-  onDemo(action: SrvDemo['action']): void;
+  onDemo(action: SrvDemo['action'], target?: SrvDemo['target']): void;
   /** Camera control, for adapters that declare the 'gimbal' / 'zoom' / 'photo' capabilities. */
   onCamera?(requestId: string, action: CameraAction): void;
 }
 
 /** Outcome of checking an incoming command against the ledger. */
-export type LedgerCheck =
-  | { kind: 'new' }
-  | { kind: 'duplicate'; status: GwCommandUpdate['status'] | 'received'; detail?: string }
-  | { kind: 'expired' };
+export type LedgerCheck = { kind: 'new' } | { kind: 'duplicate'; status: GwCommandUpdate['status'] | 'received'; detail?: string } | { kind: 'expired' };
 
 /**
  * Tracks commands by idempotency key so a retried request never executes twice,

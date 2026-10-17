@@ -123,7 +123,7 @@ export abstract class SimDevice implements Adapter {
     this.ctx.commandUpdate({ commandId: cmd.commandId, status: 'rejected', detail });
   }
 
-  onDemo(action: SrvDemo['action']) {
+  onDemo(action: SrvDemo['action'], _target?: SrvDemo['target']) {
     if (action === 'cut_link') {
       if (this.linkCut) return;
       this.linkCut = true;

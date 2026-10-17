@@ -204,3 +204,41 @@ export function sampleLatency(signal: number) {
 function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
+
+// ---------------------------------------------------------------------------
+// simulated UAV: patrol loop, and an overwatch orbit over an incident
+// ---------------------------------------------------------------------------
+
+/** Patrol loop over the north-east of the site (centre, radii in metres, angular rate rad/s). */
+export const UAV_PATROL = { cx: 318, cy: 52, rx: 34, ry: 26, rate: 0.08 };
+/** Tighter, faster orbit when watching an incident. */
+export const UAV_WATCH = { rx: 20, ry: 16, rate: 0.14 };
+/** How fast the orbit centre relocates (m/s). */
+export const UAV_TRANSIT_MPS = 9;
+
+/**
+ * Advance the orbit centre towards `target` (or back to the patrol loop when null) and return the
+ * aircraft position on the orbit for this instant. `centre` is mutated.
+ */
+export function uavOrbitPoint(centre: Point, target: Point | null, nowMs: number, dt: number, wind: Point): Point {
+  const goal = target ?? { x: UAV_PATROL.cx, y: UAV_PATROL.cy };
+  const dx = goal.x - centre.x;
+  const dy = goal.y - centre.y;
+  const d = Math.hypot(dx, dy);
+  if (d > 0.01) {
+    const step = Math.min(d, UAV_TRANSIT_MPS * Math.max(0, dt));
+    centre.x += (dx / d) * step;
+    centre.y += (dy / d) * step;
+  }
+  const watching = !!target && d < 30;
+  const rx = watching ? UAV_WATCH.rx : UAV_PATROL.rx;
+  const ry = watching ? UAV_WATCH.ry : UAV_PATROL.ry;
+  const rate = watching ? UAV_WATCH.rate : UAV_PATROL.rate;
+  const a = (nowMs / 1000) * rate;
+  return { x: centre.x + Math.cos(a) * rx + wind.x * 1.5, y: centre.y + Math.sin(a) * ry + wind.y * 1.5 };
+}
+
+/** True once the orbit centre is over the target (within a few metres). */
+export function uavOnStation(centre: Point, target: Point) {
+  return Math.hypot(target.x - centre.x, target.y - centre.y) < 4;
+}
