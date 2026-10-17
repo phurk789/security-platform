@@ -1,4 +1,4 @@
-import { SEED_USERS, seedDevices, seedEvidence, seedIncidents, seedTimeline } from '@13store/shared';
+import { DEFAULT_LAYERS, SEED_USERS, seedDevices, seedEvidence, seedIncidents, seedTimeline } from '@13store/shared';
 import type { AppState } from '@13store/shared';
 
 export { DEFAULT_ROUTE } from '@13store/shared';
@@ -14,7 +14,7 @@ export function initialState(): AppState {
     users: SEED_USERS.filter((u) => ['dispatcher', 'supervisor', 'operator', 'auditor'].includes(u.role)),
     view: 'overview',
     mapMode: '3d',
-    layers: { cctv: true, ugv: true, uav: true, zones: true, accuracy: true },
+    layers: { ...DEFAULT_LAYERS },
     selectedIncidentId: 'INC-024',
     selectedDeviceId: null,
     selectedBuildingId: null,

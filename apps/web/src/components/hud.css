@@ -242,3 +242,35 @@ html[lang='th'] .theme-hud .sidenav button { letter-spacing: 0.01em; }
 @media (max-width: 1199px) {
   .theme-toggle { display: none; }
 }
+
+/* ---------- city-twin chrome (CityOS-style) ---------- */
+.theme-hud .top-tabs { font-family: var(--hud-font); letter-spacing: 0.1em; text-transform: uppercase; }
+.theme-hud .top-tabs button.on { box-shadow: var(--hud-glow); }
+.theme-hud .minimap { background: rgba(6, 16, 30, 0.84); border-color: var(--line-2); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.theme-hud .map-search input { font-family: var(--hud-font); letter-spacing: 0.03em; }
+.theme-hud .co-card { border-radius: 6px; font-family: var(--hud-font); }
+.theme-hud .co-title b { letter-spacing: 0.06em; }
+.theme-hud .co-card dt { letter-spacing: 0.04em; font-size: 11px; }
+.theme-hud .kpi-clock b { font-size: 1.35rem; }
+.overview.hud .minimap { left: calc(var(--view-l) + 56px); bottom: calc(var(--view-b) + 4px); }
+.overview.hud .kpis { max-width: calc(100% - var(--view-l) - var(--view-r) - 380px); }
+.overview.hud .map-tools { max-width: calc(100% - var(--view-l) - var(--view-r) - 12px); }
+.theme-hud .so-stack .panel::before { opacity: 0.6; }
+@media (max-width: 1500px) {
+  .overview.hud .kpis { max-width: calc(100% - var(--view-l) - var(--view-r) - 300px); }
+  .overview.hud .map-search { min-width: 150px; }
+}
+
+/* Twin HUD at 1500–1800 px: compact KPI chips in one row, icon-only search until focused,
+   site name moves from the top bar into the clock chip. */
+@media (max-width: 1799px) {
+  .theme-hud .top-mid .site-select { display: none; }
+  .theme-hud .topbar .clock { display: none; }
+  .overview.hud .kpis { gap: 6px; flex-wrap: nowrap; max-width: calc(100% - var(--view-l) - var(--view-r) - 260px); }
+  .overview.hud .kpi { min-width: 0; padding: 6px 10px; gap: 8px; }
+  .overview.hud .kpi > svg, .overview.hud .kpi b .muted { display: none; }
+  .overview.hud .kpi small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+@media (max-width: 1500px) {
+  .overview.hud .kpi-clock .site { display: none; }
+}

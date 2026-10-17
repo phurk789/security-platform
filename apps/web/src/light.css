@@ -153,3 +153,29 @@
 /* appearance switch */
 .appearance-toggle { display: inline-grid; place-items: center; width: 34px; height: 32px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); color: var(--text-2); flex: none; }
 .appearance-toggle:hover { color: var(--cyan); border-color: var(--cyan); }
+
+/* ---------- city-twin chrome on white ---------- */
+:root[data-theme='light'] .co-card { background: rgba(255, 255, 255, 0.92); border-color: rgba(2, 132, 199, 0.35); box-shadow: 0 14px 36px rgba(15, 40, 70, 0.18); color: var(--text); }
+:root[data-theme='light'] .co-card.t-warn { border-color: rgba(180, 83, 9, 0.45); }
+:root[data-theme='light'] .co-card.t-bad { border-color: rgba(220, 38, 38, 0.45); }
+:root[data-theme='light'] .t3-callout .co-dot { background: #0ea5e9; box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.25), 0 0 10px rgba(14, 165, 233, 0.6); }
+:root[data-theme='light'] .t3-callout .co-lead line { stroke: #0ea5e9; }
+:root[data-theme='light'] .co-ico { background: #e0f2fe; }
+:root[data-theme='light'] .co-status { background: #ecfdf3; }
+:root[data-theme='light'] .co-status.s-warn { background: #fff7e6; }
+:root[data-theme='light'] .co-status.s-bad { background: #fef2f2; }
+:root[data-theme='light'] .co-status.s-info { background: #e0f2fe; }
+:root[data-theme='light'] .minimap { background: rgba(255, 255, 255, 0.94); box-shadow: 0 4px 14px rgba(15, 40, 70, 0.12); }
+:root[data-theme='light'] .mm-ground { fill: #e3eadf; }
+:root[data-theme='light'] .mm-road { fill: #aab3bd; }
+:root[data-theme='light'] .mm-lot { fill: #c9d1d9; }
+:root[data-theme='light'] .mm-bld { fill: #b9c5d3; stroke: #8fa0b3; }
+:root[data-theme='light'] .mm-bld.sel { fill: #bae6fd; stroke: #0284c7; }
+:root[data-theme='light'] .mm-wedge { fill: rgba(2, 132, 199, 0.14); stroke: rgba(2, 132, 199, 0.6); }
+:root[data-theme='light'] .mm-rect { fill: rgba(2, 132, 199, 0.08); }
+:root[data-theme='light'] .mm-dev.k-cctv { fill: #5b6b80; }
+:root[data-theme='light'] .mm-dev.sel, :root[data-theme='light'] .mm-inc.sel { stroke: #0f1b2d; }
+:root[data-theme='light'] .t3-poi { background: rgba(255, 255, 255, 0.92); }
+:root[data-theme='light'] .top-tabs button.on { color: #fff; }
+:root[data-theme='light'] .map-search input { color: var(--text); }
+:root[data-theme='light'] .so-chart rect { opacity: 0.7; }

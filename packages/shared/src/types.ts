@@ -31,41 +31,13 @@ export interface Assignment {
   zone?: string;
 }
 
-export type IncidentStatus =
-  | 'new'
-  | 'triaging'
-  | 'confirmed'
-  | 'responding'
-  | 'resolved'
-  | 'closed'
-  | 'duplicate'
-  | 'dismissed';
+export type IncidentStatus = 'new' | 'triaging' | 'confirmed' | 'responding' | 'resolved' | 'closed' | 'duplicate' | 'dismissed';
 
-export type MissionStatus =
-  | 'draft'
-  | 'pending_approval'
-  | 'approved'
-  | 'assigned'
-  | 'executing'
-  | 'paused'
-  | 'completed'
-  | 'rejected'
-  | 'cancelled'
-  | 'failed';
+export type MissionStatus = 'draft' | 'pending_approval' | 'approved' | 'assigned' | 'executing' | 'paused' | 'completed' | 'rejected' | 'cancelled' | 'failed';
 
 export type CommandType = 'start' | 'pause' | 'resume' | 'stop';
 
-export type CommandStatus =
-  | 'requested'
-  | 'authorized'
-  | 'sent'
-  | 'acknowledged'
-  | 'executing'
-  | 'succeeded'
-  | 'rejected'
-  | 'failed'
-  | 'timed_out'
-  | 'unknown';
+export type CommandStatus = 'requested' | 'authorized' | 'sent' | 'acknowledged' | 'executing' | 'succeeded' | 'rejected' | 'failed' | 'timed_out' | 'unknown';
 
 /** How fresh a feed or telemetry stream is (UXUI §7). */
 export type Freshness = 'live' | 'stale' | 'offline';
@@ -291,7 +263,19 @@ export interface Layers {
   uav: boolean;
   zones: boolean;
   accuracy: boolean;
+  /** Building models (off: outlines only, so devices behind them stay visible). */
+  buildings: boolean;
+  /** Ambient road traffic and parked cars. */
+  traffic: boolean;
+  /** Mission routes and checkpoints. */
+  routes: boolean;
+  /** Points of interest: entrances, fire exits, hydrants. */
+  poi: boolean;
+  /** Name labels on devices, buildings and zones. */
+  labels: boolean;
 }
+
+export const DEFAULT_LAYERS: Layers = { cctv: true, ugv: true, uav: true, zones: true, accuracy: true, buildings: true, traffic: true, routes: true, poi: false, labels: true };
 
 export interface AppState {
   now: number;

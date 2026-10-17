@@ -1,5 +1,6 @@
 // WebGL view of the digital twin. Orbit with drag, zoom with wheel/pinch, click a device or incident.
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
@@ -7,19 +8,35 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import type { Point } from '@13store/shared';
 import { getQuality, useQuality } from '../twin/quality';
 import { useStore } from '../store';
+import { fromWorld } from '../twin/layout';
 import { getWorld, subscribeFrame } from '../twin/world';
 import { useAppearance, useTheme } from './Hud';
+import { TwinCallout } from './TwinCallout';
 
 export interface Twin3DApi {
   zoom(factor: number): void;
   focusSelection(): void;
+  /** Glide the orbit centre to a site point (minimap click). */
+  lookAt(p: Point): void;
+}
+
+/** Where the camera looks, in site coordinates — for the minimap. */
+export interface ViewInfo {
+  heading: number;
+  target: Point;
+  from: Point;
+  dist: number;
 }
 
 const HOME = { pos: new THREE.Vector3(-175, 235, 320), target: new THREE.Vector3(22, 0, 18) };
 
-export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void; /** Keep this device centred (camera follows it). */ follow?: string }>(function Twin3D({ onHeading, follow }, ref) {
+export const Twin3D = forwardRef<
+  Twin3DApi,
+  { onHeading?: (deg: number) => void; onView?: (v: ViewInfo) => void; /** Keep this device centred (camera follows it). */ follow?: string }
+>(function Twin3D({ onHeading, onView, follow }, ref) {
   const { s, dispatch } = useStore();
   const host = useRef<HTMLDivElement>(null);
   const ctl = useRef<{ camera: THREE.PerspectiveCamera; controls: OrbitControls; goal?: { target: THREE.Vector3; dist: number } } | null>(null);
@@ -37,6 +54,8 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
   qualityRef.current = quality;
   const headingRef = useRef(onHeading);
   headingRef.current = onHeading;
+  const viewRef = useRef(onView);
+  viewRef.current = onView;
   const followRef = useRef(follow);
   followRef.current = follow;
 
@@ -76,6 +95,7 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
     controls.update();
     ctl.current = { camera, controls };
 
+    const insets = { l: 0, r: 0, t: 0, b: 0 };
     const resize = () => {
       const w = el.clientWidth || 1;
       const h = el.clientHeight || 1;
@@ -88,8 +108,9 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
       // between them by shifting the projection, not the camera. Insets come from CSS variables.
       const css = getComputedStyle(el);
       const px = (n: string) => parseFloat(css.getPropertyValue(n)) || 0;
-      const offX = (px('--view-r') - px('--view-l')) / 2;
-      const offY = (px('--view-b') - px('--view-t')) / 2;
+      Object.assign(insets, { l: px('--view-l'), r: px('--view-r'), t: px('--view-t'), b: px('--view-b') });
+      const offX = (insets.r - insets.l) / 2;
+      const offY = (insets.b - insets.t) / 2;
       if (offX || offY) camera.setViewOffset(w, h, offX, offY, w, h);
       else camera.clearViewOffset();
       // Narrow gap between panels: pull back so the whole site still fits (tuned on 1920 px).
@@ -119,6 +140,7 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
     renderer.domElement.addEventListener('pointerup', onUp);
 
     let lastHeading = 999;
+    const lastView = { x: Infinity, z: Infinity, d: Infinity, az: Infinity };
     const unsub = subscribeFrame((dt) => {
       const c = ctl.current!;
       if (c.goal) {
@@ -146,10 +168,29 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
         world.setComposed(false);
       } else renderer.render(world.scene, camera);
       labels.render(world.scene, camera);
+      // Keep the info callout inside the view: flip it to the left of the anchor on the right half
+      // of the map, and below the anchor near the top edge.
+      const cp = world.calloutPos();
+      if (cp) {
+        const ndc = cp.project(camera);
+        const w = el.clientWidth;
+        const h = el.clientHeight;
+        const sx = ((ndc.x + 1) / 2) * w;
+        const sy = ((1 - ndc.y) / 2) * h;
+        // card is ~240 px wide and ~230 px tall, 32 px / 36 px off the anchor
+        world.calloutEl.classList.toggle('flip', sx + 280 > w - insets.r);
+        world.calloutEl.classList.toggle('below', sy - 280 < insets.t + 110);
+      }
       const az = THREE.MathUtils.radToDeg(controls.getAzimuthalAngle());
       if (Math.abs(az - lastHeading) > 0.5) {
         lastHeading = az;
         headingRef.current?.(az);
+      }
+      const tg = controls.target;
+      const dist = camera.position.distanceTo(tg);
+      if (viewRef.current && (Math.abs(tg.x - lastView.x) > 0.5 || Math.abs(tg.z - lastView.z) > 0.5 || Math.abs(dist - lastView.d) > 1 || Math.abs(az - lastView.az) > 0.5)) {
+        Object.assign(lastView, { x: tg.x, z: tg.z, d: dist, az });
+        viewRef.current({ heading: az, target: fromWorld(tg.x, tg.z), from: fromWorld(camera.position.x, camera.position.z), dist });
       }
     });
 
@@ -176,6 +217,12 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
   }, [follow, world]);
 
   useImperativeHandle(ref, () => ({
+    lookAt(p: Point) {
+      const c = ctl.current;
+      if (!c) return;
+      const off = c.camera.position.clone().sub(c.controls.target);
+      c.goal = { target: world.worldOf(p), dist: c.goal?.dist ?? off.length() };
+    },
     zoom(f: number) {
       const c = ctl.current;
       if (!c) return;
@@ -199,5 +246,9 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
     },
   }));
 
-  return <div ref={host} className="t3-host" role="img" aria-label="3D digital twin" />;
+  return (
+    <div ref={host} className="t3-host" role="img" aria-label="3D digital twin">
+      {createPortal(<TwinCallout />, world.calloutEl)}
+    </div>
+  );
 });

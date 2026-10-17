@@ -33,6 +33,7 @@ import { Badge, CommandBadge, FreshBadge, IncidentBadge, IntegrationBadge, Missi
 import { ReasonDialog } from './Dialog';
 import { TelemetryPanel } from './TelemetryPanel';
 import { BuildingPanel } from './BuildingPanel';
+import { SiteOverview } from './SiteOverview';
 import { BUILDINGS, floorPlan, roomAt } from '@13store/shared';
 import { ago, useT } from '../i18n';
 
@@ -59,19 +60,12 @@ function routeId(pts: Point[]) {
 
 export function RightPanel() {
   const { s } = useStore();
-  const t = useT();
   const bld = s.selectedBuildingId ? BUILDINGS.find((b) => b.id === s.selectedBuildingId) : undefined;
   if (bld) return <BuildingPanel b={bld} />;
   const dev = s.selectedDeviceId ? s.devices[s.selectedDeviceId] : undefined;
   if (dev) return <DevicePanel d={dev} />;
   const inc = s.incidents.find((i) => i.id === s.selectedIncidentId);
-  if (!inc)
-    return (
-      <aside className="panel right empty-state">
-        <MapPin size={28} />
-        <p>{t('Select an incident in the queue or on the map.')}</p>
-      </aside>
-    );
+  if (!inc) return <SiteOverview />;
   return <IncidentPanel inc={inc} />;
 }
 
@@ -92,29 +86,61 @@ function IncidentPanel({ inc }: { inc: Incident }) {
     <aside className="panel right">
       <div className="panel-head">
         <h2>{t('Incident details')}</h2>
-        <button className="icon-btn" aria-label={t('More')}><Ellipsis size={18} /></button>
+        <div className="row">
+          <button className="icon-btn" aria-label={t('More')}>
+            <Ellipsis size={18} />
+          </button>
+          <button className="icon-btn" aria-label={t('Deselect incident')} title={t('Back to the site overview')} onClick={() => dispatch({ type: 'selectIncident', id: null })}>
+            <X size={18} />
+          </button>
+        </div>
       </div>
       <div className="inc-head">
         <div className="row gap">
           <span className="inc-big-id">{inc.id}</span>
           {inc.status === 'new' || inc.status === 'triaging' ? (
-            <Badge tone="amber"><CircleAlert size={13} /> {t('Unverified')}</Badge>
+            <Badge tone="amber">
+              <CircleAlert size={13} /> {t('Unverified')}
+            </Badge>
           ) : (
             <IncidentBadge status={inc.status} />
           )}
         </div>
         <h3>{inc.title}</h3>
-        <div className="muted row gap-s"><MapPin size={14} /> {inc.place} <span className="sep">|</span> {inc.zone}</div>
+        <div className="muted row gap-s">
+          <MapPin size={14} /> {inc.place} <span className="sep">|</span> {inc.zone}
+        </div>
         <dl className="meta">
-          <div><dt>{t('Source')}</dt><dd>{inc.source}</dd></div>
-          <div><dt>{t('Received')}</dt><dd>{fmtTime(inc.createdAt, true)} · {ago(s.now - inc.createdAt)}</dd></div>
-          <div><dt>{t('Owner')}</dt><dd>{inc.owner ?? t('Unassigned')}</dd></div>
-          <div><dt>{t('Status')}</dt><dd><IncidentBadge status={inc.status} /></dd></div>
+          <div>
+            <dt>{t('Source')}</dt>
+            <dd>{inc.source}</dd>
+          </div>
+          <div>
+            <dt>{t('Received')}</dt>
+            <dd>
+              {fmtTime(inc.createdAt, true)} · {ago(s.now - inc.createdAt)}
+            </dd>
+          </div>
+          <div>
+            <dt>{t('Owner')}</dt>
+            <dd>{inc.owner ?? t('Unassigned')}</dd>
+          </div>
+          <div>
+            <dt>{t('Status')}</dt>
+            <dd>
+              <IncidentBadge status={inc.status} />
+            </dd>
+          </div>
           <div>
             <dt>{t('Severity')}</dt>
             <dd>
               {mode === 'remote' && can(me.role, 'incident.edit') && !replay ? (
-                <select id={`sev-${inc.id}`} className="sev" value={inc.severity} onChange={(e) => dispatch({ type: 'editIncident', incidentId: inc.id, severity: e.target.value as Incident['severity'] })}>
+                <select
+                  id={`sev-${inc.id}`}
+                  className="sev"
+                  value={inc.severity}
+                  onChange={(e) => dispatch({ type: 'editIncident', incidentId: inc.id, severity: e.target.value as Incident['severity'] })}
+                >
                   <option value="low">{t('Low')}</option>
                   <option value="medium">{t('Medium')}</option>
                   <option value="high">{t('High')}</option>
@@ -124,19 +150,28 @@ function IncidentPanel({ inc }: { inc: Incident }) {
               )}
             </dd>
           </div>
-          <div><dt>{t('Type')}</dt><dd>{inc.type}</dd></div>
+          <div>
+            <dt>{t('Type')}</dt>
+            <dd>{inc.type}</dd>
+          </div>
         </dl>
       </div>
 
       {(cam || showUgvFeed) && videoOk !== true && (
-        <div className="feed-wrap"><NoVideo why={videoOk === null ? t('Opening video…') : t('Your role cannot view video. Ask a supervisor if you need access.')} /></div>
+        <div className="feed-wrap">
+          <NoVideo why={videoOk === null ? t('Opening video…') : t('Your role cannot view video. Ask a supervisor if you need access.')} />
+        </div>
       )}
       {(cam || showUgvFeed) && videoOk === true && (
         <div className="feed-wrap">
           {live && ugv && (
             <div className="tabs small">
-              <button className={feedTab === 'cctv' ? 'on' : ''} onClick={() => setFeedTab('cctv')}>{cam?.id ?? 'CCTV'}</button>
-              <button className={feedTab === 'ugv' ? 'on' : ''} onClick={() => setFeedTab('ugv')}>{t('{id} camera', { id: ugv.id })}</button>
+              <button className={feedTab === 'cctv' ? 'on' : ''} onClick={() => setFeedTab('cctv')}>
+                {cam?.id ?? 'CCTV'}
+              </button>
+              <button className={feedTab === 'ugv' ? 'on' : ''} onClick={() => setFeedTab('ugv')}>
+                {t('{id} camera', { id: ugv.id })}
+              </button>
             </div>
           )}
           {showUgvFeed ? (
@@ -190,7 +225,9 @@ function RoleHint({ s, inc, m, role }: { s: AppState; inc: Incident; m?: Mission
   else if (inc.status === 'confirmed' && !m) text = 'Approval required before dispatch.';
   if (!text) return null;
   return (
-    <p className="hint"><CircleAlert size={16} /> {t(text)}</p>
+    <p className="hint">
+      <CircleAlert size={16} /> {t(text)}
+    </p>
   );
 }
 
@@ -211,7 +248,11 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
           <h4>{t('Step 1 · Verify the alert')}</h4>
           <p className="muted">{t('New alert. Not yet confirmed by an operator. Review the camera before deciding.')}</p>
           {inc.status === 'new' ? (
-            <button className="btn-primary wide" disabled={!can(me.role, 'incident.triage') || s.replay.active} onClick={() => dispatch({ type: 'openCamera', incidentId: inc.id })}>
+            <button
+              className="btn-primary wide"
+              disabled={!can(me.role, 'incident.triage') || s.replay.active}
+              onClick={() => dispatch({ type: 'openCamera', incidentId: inc.id })}
+            >
               <Video size={18} /> {t('Open camera & start review')}
             </button>
           ) : (
@@ -220,8 +261,19 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
             </button>
           )}
           <div className="row gap-s">
-            <button className="btn-secondary grow" disabled={!canVerify} onClick={() => setDlg('dismiss')}><Ban size={16} /> {t('False alarm')}</button>
-            <button className="btn-secondary grow" disabled={!canVerify || !others.length} onClick={() => { setMergeInto(others[0]?.id ?? ''); setDlg('merge'); }}><Merge size={16} /> {t('Merge duplicate')}</button>
+            <button className="btn-secondary grow" disabled={!canVerify} onClick={() => setDlg('dismiss')}>
+              <Ban size={16} /> {t('False alarm')}
+            </button>
+            <button
+              className="btn-secondary grow"
+              disabled={!canVerify || !others.length}
+              onClick={() => {
+                setMergeInto(others[0]?.id ?? '');
+                setDlg('merge');
+              }}
+            >
+              <Merge size={16} /> {t('Merge duplicate')}
+            </button>
           </div>
         </section>
         <ReadyDevices />
@@ -232,7 +284,10 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
             confirmLabel={t('Dismiss alert')}
             danger
             onClose={() => setDlg(null)}
-            onConfirm={(r) => { dispatch({ type: 'dismissIncident', incidentId: inc.id, reason: r }); setDlg(null); }}
+            onConfirm={(r) => {
+              dispatch({ type: 'dismissIncident', incidentId: inc.id, reason: r });
+              setDlg(null);
+            }}
           />
         )}
         {dlg === 'merge' && (
@@ -245,12 +300,19 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
               <label className="field">
                 <span>{t('Merge into')}</span>
                 <select value={mergeInto} onChange={(e) => setMergeInto(e.target.value)}>
-                  {others.map((o) => <option key={o.id} value={o.id}>{o.id} · {o.title}</option>)}
+                  {others.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.id} · {o.title}
+                    </option>
+                  ))}
                 </select>
                 <small className="muted">{t('Original evidence stays attached to {id}.', { id: inc.id })}</small>
               </label>
             }
-            onConfirm={(r) => { dispatch({ type: 'mergeIncident', incidentId: inc.id, intoId: mergeInto, reason: r }); setDlg(null); }}
+            onConfirm={(r) => {
+              dispatch({ type: 'mergeIncident', incidentId: inc.id, intoId: mergeInto, reason: r });
+              setDlg(null);
+            }}
           />
         )}
       </>
@@ -268,7 +330,11 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
   if (inc.status === 'confirmed' && (!m || ['cancelled', 'failed'].includes(m.status))) {
     return (
       <>
-        {m && <p className="banner info">{t('Previous mission {id}:', { id: m.id })} <MissionBadge status={m.status} /></p>}
+        {m && (
+          <p className="banner info">
+            {t('Previous mission {id}:', { id: m.id })} <MissionBadge status={m.status} />
+          </p>
+        )}
         <PrepareMission inc={inc} />
         <details className="step">
           <summary>{t('Resolve without a mission')}</summary>
@@ -282,7 +348,11 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
     return (
       <section className="step">
         <h4>{t('Step 4 · Record the outcome')}</h4>
-        {m && <p className="muted">{t('Mission {id}:', { id: m.id })} <MissionBadge status={m.status} /></p>}
+        {m && (
+          <p className="muted">
+            {t('Mission {id}:', { id: m.id })} <MissionBadge status={m.status} />
+          </p>
+        )}
         <Outcome inc={inc} />
       </section>
     );
@@ -294,8 +364,16 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
         <h4>{t('Resolved')}</h4>
         <p>{inc.outcome}</p>
         <div className="row gap-s">
-          <button className="btn-primary grow" disabled={!can(me.role, 'incident.close') || s.replay.active} onClick={() => dispatch({ type: 'closeIncident', incidentId: inc.id })}><Lock size={16} /> {t('Close incident')}</button>
-          <button className="btn-secondary grow" onClick={() => dispatch({ type: 'setView', view: 'reports' })}><FileText size={16} /> {t('Report')}</button>
+          <button
+            className="btn-primary grow"
+            disabled={!can(me.role, 'incident.close') || s.replay.active}
+            onClick={() => dispatch({ type: 'closeIncident', incidentId: inc.id })}
+          >
+            <Lock size={16} /> {t('Close incident')}
+          </button>
+          <button className="btn-secondary grow" onClick={() => dispatch({ type: 'setView', view: 'reports' })}>
+            <FileText size={16} /> {t('Report')}
+          </button>
         </div>
       </section>
     );
@@ -305,7 +383,9 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
     <section className="step">
       <h4>{inc.status === 'closed' ? t('Closed') : inc.status === 'duplicate' ? t('Duplicate of {id}', { id: inc.duplicateOf }) : t('Dismissed')}</h4>
       {inc.outcome && <p>{inc.outcome}</p>}
-      <button className="btn-secondary wide" onClick={() => dispatch({ type: 'setView', view: 'reports' })}><FileText size={16} /> {t('Open report')}</button>
+      <button className="btn-secondary wide" onClick={() => dispatch({ type: 'setView', view: 'reports' })}>
+        <FileText size={16} /> {t('Open report')}
+      </button>
       <Reopen inc={inc} />
     </section>
   );
@@ -320,9 +400,18 @@ function Outcome({ inc }: { inc: Incident }) {
     <>
       <label className="field">
         <span>{t('Outcome')}</span>
-        <textarea rows={3} value={outcome} onChange={(e) => setOutcome(e.target.value)} placeholder={t('e.g. Gate found closed and locked. No one present. Sensor flagged for maintenance.')} />
+        <textarea
+          rows={3}
+          value={outcome}
+          onChange={(e) => setOutcome(e.target.value)}
+          placeholder={t('e.g. Gate found closed and locked. No one present. Sensor flagged for maintenance.')}
+        />
       </label>
-      <button className="btn-primary wide" disabled={!outcome.trim() || !can(me.role, 'incident.resolve') || s.replay.active} onClick={() => dispatch({ type: 'resolveIncident', incidentId: inc.id, outcome })}>
+      <button
+        className="btn-primary wide"
+        disabled={!outcome.trim() || !can(me.role, 'incident.resolve') || s.replay.active}
+        onClick={() => dispatch({ type: 'resolveIncident', incidentId: inc.id, outcome })}
+      >
         <Check size={18} /> {t('Resolve incident')}
       </button>
     </>
@@ -363,14 +452,25 @@ function DeviceCard({ d, onPick, picked }: { d: Device; onPick?: (id: string) =>
               <rect x="14" y="20" width="52" height="16" rx="4" fill="#2f3a48" stroke="#5c6b7d" />
               <rect x="34" y="8" width="4" height="12" fill="#5c6b7d" />
               <rect x="30" y="4" width="12" height="6" rx="2" fill="#38bdf8" opacity=".7" />
-              {[18, 34, 50].map((x) => <circle key={x} cx={x + 4} cy="40" r="7" fill="#151d27" stroke="#4b5868" />)}
+              {[18, 34, 50].map((x) => (
+                <circle key={x} cx={x + 4} cy="40" r="7" fill="#151d27" stroke="#4b5868" />
+              ))}
             </g>
           ) : (
             <g stroke="#5c6b7d" fill="#2f3a48">
               <rect x="30" y="22" width="20" height="12" rx="3" />
-              <line x1="30" y1="24" x2="12" y2="14" /><line x1="50" y1="24" x2="68" y2="14" />
-              <line x1="30" y1="32" x2="12" y2="42" /><line x1="50" y1="32" x2="68" y2="42" />
-              {[[12, 14], [68, 14], [12, 42], [68, 42]].map(([x, y]) => <ellipse key={`${x}${y}`} cx={x} cy={y} rx="9" ry="2.5" fill="#38bdf8" opacity=".35" />)}
+              <line x1="30" y1="24" x2="12" y2="14" />
+              <line x1="50" y1="24" x2="68" y2="14" />
+              <line x1="30" y1="32" x2="12" y2="42" />
+              <line x1="50" y1="32" x2="68" y2="42" />
+              {[
+                [12, 14],
+                [68, 14],
+                [12, 42],
+                [68, 42],
+              ].map(([x, y]) => (
+                <ellipse key={`${x}${y}`} cx={x} cy={y} rx="9" ry="2.5" fill="#38bdf8" opacity=".35" />
+              ))}
             </g>
           )}
         </svg>
@@ -378,15 +478,30 @@ function DeviceCard({ d, onPick, picked }: { d: Device; onPick?: (id: string) =>
       <div className="dev-info">
         <div className="row between">
           <strong>{d.id}</strong>
-          {d.battery !== undefined && <span className="batt"><BatteryMedium size={16} /> {Math.round(d.battery)}%</span>}
+          {d.battery !== undefined && (
+            <span className="batt">
+              <BatteryMedium size={16} /> {Math.round(d.battery)}%
+            </span>
+          )}
         </div>
         <div className="row gap-s wrap">
           <IntegrationBadge i={d.integration} />
           <FreshBadge f={f} />
         </div>
-        <small className="muted">{t('Updated {ago}', { ago: ago(ageMs(s, d)) })} · {d.capabilities.slice(0, 2).map((c) => t(c.replace('_', ' '))).join(' · ')}</small>
+        <small className="muted">
+          {t('Updated {ago}', { ago: ago(ageMs(s, d)) })} ·{' '}
+          {d.capabilities
+            .slice(0, 2)
+            .map((c) => t(c.replace('_', ' ')))
+            .join(' · ')}
+        </small>
         {!canPatrol && <small className="warn-text">{t('Display only — no commands supported')}</small>}
-        {canPatrol && !ready && <small className="warn-text">{t('Not ready')}{d.controlOwner ? ` · ${t('held by {name}', { name: userName(s, d.controlOwner) })}` : ''}</small>}
+        {canPatrol && !ready && (
+          <small className="warn-text">
+            {t('Not ready')}
+            {d.controlOwner ? ` · ${t('held by {name}', { name: userName(s, d.controlOwner) })}` : ''}
+          </small>
+        )}
       </div>
     </button>
   );
@@ -428,30 +543,63 @@ function PrepareMission({ inc }: { inc: Incident }) {
       <section className="step">
         <h4>{t('Step 2 · Prepare mission')}</h4>
         <ol className="stepper">
-          <li className="on">{t('Device')}</li><li className="on">{t('Route & operator')}</li><li>{t('Checks')}</li><li>{t('Approval')}</li>
+          <li className="on">{t('Device')}</li>
+          <li className="on">{t('Route & operator')}</li>
+          <li>{t('Checks')}</li>
+          <li>{t('Approval')}</li>
         </ol>
       </section>
       <ReadyDevices onPick={setDeviceId} picked={deviceId} />
       <section className="step">
         <label className="field">
-          <span><RouteIcon size={14} /> {t('Route')}</span>
+          <span>
+            <RouteIcon size={14} /> {t('Route')}
+          </span>
           <select value={route} onChange={(e) => setRoute(e.target.value)}>
-            {indoorPlan && <option value="indoor">{t('Floor patrol · {b} level {n} · {k} checkpoints', { b: t(BUILDINGS.find((x) => x.id === indoorPlan.buildingId)?.name ?? ''), n: indoorPlan.level, k: indoorPlan.patrolRoute.length })}</option>}
-            {ROUTES.map((r) => <option key={r.id} value={r.id}>{t(r.label)}</option>)}
+            {indoorPlan && (
+              <option value="indoor">
+                {t('Floor patrol · {b} level {n} · {k} checkpoints', {
+                  b: t(BUILDINGS.find((x) => x.id === indoorPlan.buildingId)?.name ?? ''),
+                  n: indoorPlan.level,
+                  k: indoorPlan.patrolRoute.length,
+                })}
+              </option>
+            )}
+            {ROUTES.map((r) => (
+              <option key={r.id} value={r.id}>
+                {t(r.label)}
+              </option>
+            ))}
           </select>
         </label>
         <label className="field">
-          <span><UserCheck size={14} /> {t('Operator')}</span>
+          <span>
+            <UserCheck size={14} /> {t('Operator')}
+          </span>
           <select value={op} onChange={(e) => setOp(e.target.value)}>
-            {operators.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.title}</option>)}
+            {operators.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} · {u.title}
+              </option>
+            ))}
           </select>
         </label>
         <div className="row gap-s">
-          <button className="btn-secondary" onClick={() => setOpen(false)}>{t('Cancel')}</button>
+          <button className="btn-secondary" onClick={() => setOpen(false)}>
+            {t('Cancel')}
+          </button>
           <button
             className="btn-primary grow"
             disabled={!allowed || !deviceId}
-            onClick={() => dispatch({ type: 'createMission', incidentId: inc.id, deviceId, operatorId: op, checkpoints: route === 'indoor' && indoorPlan ? indoorPlan.patrolRoute : (ROUTES.find((r) => r.id === route) ?? ROUTES[0]).pts })}
+            onClick={() =>
+              dispatch({
+                type: 'createMission',
+                incidentId: inc.id,
+                deviceId,
+                operatorId: op,
+                checkpoints: route === 'indoor' && indoorPlan ? indoorPlan.patrolRoute : (ROUTES.find((r) => r.id === route) ?? ROUTES[0]).pts,
+              })
+            }
           >
             {t('Save draft & run checks')}
           </button>
@@ -477,19 +625,45 @@ function Planner({ m }: { m: Mission }) {
     <>
       <section className="step">
         <div className="row between">
-          <h4>{m.status === 'draft' || m.status === 'rejected' ? t('Step 2 · Mission draft') : m.status === 'pending_approval' ? t('Step 3 · Approval') : t('Step 3 · Operator acceptance')}</h4>
+          <h4>
+            {m.status === 'draft' || m.status === 'rejected'
+              ? t('Step 2 · Mission draft')
+              : m.status === 'pending_approval'
+                ? t('Step 3 · Approval')
+                : t('Step 3 · Operator acceptance')}
+          </h4>
           <MissionBadge status={m.status} />
         </div>
         {reapproval && <p className="banner warn">{t('Route changed. Re-approval required (plan v{v}, approved v{a}).', { v: m.planVersion, a: m.approvedVersion })}</p>}
-        {m.status === 'rejected' && m.note && <p className="banner warn">{t('Rejected:')} {m.note}</p>}
+        {m.status === 'rejected' && m.note && (
+          <p className="banner warn">
+            {t('Rejected:')} {m.note}
+          </p>
+        )}
         <dl className="meta">
-          <div><dt>{t('Mission')}</dt><dd>{m.id} · {t('plan v{v}', { v: m.planVersion })}</dd></div>
-          <div><dt>{t('Device')}</dt><dd>{m.deviceId}</dd></div>
-          <div><dt>{t('Operator')}</dt><dd>{userName(s, m.operatorId)}</dd></div>
-          <div><dt>{t('Approved by')}</dt><dd>{m.approvedBy && m.approvedVersion === m.planVersion ? userName(s, m.approvedBy) : '—'}</dd></div>
+          <div>
+            <dt>{t('Mission')}</dt>
+            <dd>
+              {m.id} · {t('plan v{v}', { v: m.planVersion })}
+            </dd>
+          </div>
+          <div>
+            <dt>{t('Device')}</dt>
+            <dd>{m.deviceId}</dd>
+          </div>
+          <div>
+            <dt>{t('Operator')}</dt>
+            <dd>{userName(s, m.operatorId)}</dd>
+          </div>
+          <div>
+            <dt>{t('Approved by')}</dt>
+            <dd>{m.approvedBy && m.approvedVersion === m.planVersion ? userName(s, m.approvedBy) : '—'}</dd>
+          </div>
         </dl>
         <label className="field">
-          <span><RouteIcon size={14} /> {t('Route')} {m.approvedVersion === m.planVersion ? t('(approved — solid on map)') : t('(draft — dashed on map)')}</span>
+          <span>
+            <RouteIcon size={14} /> {t('Route')} {m.approvedVersion === m.planVersion ? t('(approved — solid on map)') : t('(draft — dashed on map)')}
+          </span>
           <select
             value={rid}
             disabled={!canPrep}
@@ -498,7 +672,11 @@ function Planner({ m }: { m: Mission }) {
               if (r) dispatch({ type: 'editRoute', missionId: m.id, checkpoints: r.pts });
             }}
           >
-            {ROUTES.map((r) => <option key={r.id} value={r.id}>{t(r.label)}</option>)}
+            {ROUTES.map((r) => (
+              <option key={r.id} value={r.id}>
+                {t(r.label)}
+              </option>
+            ))}
             {rid === 'custom' && <option value="custom">{t('Custom route')}</option>}
           </select>
         </label>
@@ -521,12 +699,16 @@ function Planner({ m }: { m: Mission }) {
             <button className="btn-primary wide big" disabled={!canPrep || hardFail} onClick={() => dispatch({ type: 'submitMission', missionId: m.id })}>
               <Send size={18} /> {t('Submit for approval')}
             </button>
-            <button className="btn-secondary wide" disabled={!canPrep} onClick={() => dispatch({ type: 'cancelMission', missionId: m.id })}>{t('Discard draft')}</button>
+            <button className="btn-secondary wide" disabled={!canPrep} onClick={() => dispatch({ type: 'cancelMission', missionId: m.id })}>
+              {t('Discard draft')}
+            </button>
           </>
         )}
         {m.status === 'pending_approval' && (
           <div className="row gap-s">
-            <button className="btn-secondary grow" disabled={!canApprove} onClick={() => setDlg(true)}>{t('Reject')}</button>
+            <button className="btn-secondary grow" disabled={!canApprove} onClick={() => setDlg(true)}>
+              {t('Reject')}
+            </button>
             <button className="btn-primary grow" disabled={!canApprove || hardFail} onClick={() => dispatch({ type: 'approveMission', missionId: m.id })}>
               <ShieldCheck size={18} /> {t('Approve plan v{v}', { v: m.planVersion })}
             </button>
@@ -549,7 +731,10 @@ function Planner({ m }: { m: Mission }) {
           confirmLabel={t('Reject plan')}
           danger
           onClose={() => setDlg(false)}
-          onConfirm={(r) => { dispatch({ type: 'rejectMission', missionId: m.id, reason: r }); setDlg(false); }}
+          onConfirm={(r) => {
+            dispatch({ type: 'rejectMission', missionId: m.id, reason: r });
+            setDlg(false);
+          }}
         />
       )}
     </>
@@ -563,7 +748,10 @@ export function LiveMission({ m }: { m: Mission }) {
   const d = s.devices[m.deviceId];
   const f = freshness(s, d);
   const age = ageMs(s, d);
-  const cmds = s.commands.filter((c) => c.missionId === m.id).slice().reverse();
+  const cmds = s.commands
+    .filter((c) => c.missionId === m.id)
+    .slice()
+    .reverse();
   const pending = cmds.find((c) => !isTerminal(c));
   const holder = d.controlOwner;
   const iHold = holder === me.id;
@@ -587,16 +775,28 @@ export function LiveMission({ m }: { m: Mission }) {
           {iHold && <span className="muted"> {t('(you)')}</span>}
         </div>
         <dl className="meta">
-          <div><dt>{t('Telemetry')}</dt><dd><FreshBadge f={f} age={ago(age)} /></dd></div>
-          <div><dt>{t('Battery')}</dt><dd>{Math.round(d.battery ?? 0)}%</dd></div>
-          <div><dt>{t('Progress')}</dt><dd>{t('Checkpoint {n} of {total}', { n: Math.min(m.nextCp + 1, m.checkpoints.length), total: m.checkpoints.length })}</dd></div>
-          <div><dt>{t('Speed')}</dt><dd>{f === 'live' ? `${d.speed.toFixed(1)} m/s` : t('unknown')}</dd></div>
+          <div>
+            <dt>{t('Telemetry')}</dt>
+            <dd>
+              <FreshBadge f={f} age={ago(age)} />
+            </dd>
+          </div>
+          <div>
+            <dt>{t('Battery')}</dt>
+            <dd>{Math.round(d.battery ?? 0)}%</dd>
+          </div>
+          <div>
+            <dt>{t('Progress')}</dt>
+            <dd>{t('Checkpoint {n} of {total}', { n: Math.min(m.nextCp + 1, m.checkpoints.length), total: m.checkpoints.length })}</dd>
+          </div>
+          <div>
+            <dt>{t('Speed')}</dt>
+            <dd>{f === 'live' ? `${d.speed.toFixed(1)} m/s` : t('unknown')}</dd>
+          </div>
         </dl>
         <TelemetryPanel deviceId={d.id} />
         {f !== 'live' && (
-          <p className="banner warn">
-            {t('Last data {ago}. New start/resume commands are held. Vehicle state is uncertain — check with the field operator.', { ago: ago(age) })}
-          </p>
+          <p className="banner warn">{t('Last data {ago}. New start/resume commands are held. Vehicle state is uncertain — check with the field operator.', { ago: ago(age) })}</p>
         )}
         {m.note && <p className="banner info">{m.note}</p>}
       </section>
@@ -606,7 +806,9 @@ export function LiveMission({ m }: { m: Mission }) {
           <p className="banner info">
             {t('Only {name} can command {id}.', { name: userName(s, holder), id: d.id })}
             {can(me.role, 'control.handover') && !off && (
-              <button className="link" onClick={() => dispatch({ type: 'handover', deviceId: d.id, toUserId: me.id })}>{t('Take over control (logged)')}</button>
+              <button className="link" onClick={() => dispatch({ type: 'handover', deviceId: d.id, toUserId: me.id })}>
+                {t('Take over control (logged)')}
+              </button>
             )}
           </p>
         )}
@@ -648,7 +850,12 @@ export function LiveMission({ m }: { m: Mission }) {
                 <CommandBadge status={c.status} />
               </div>
               <small className="muted mono">
-                {t('{id} · sent {time} by {name} · key {key}', { id: c.id, time: fmtTime(c.issuedAt, true), name: userName(s, c.issuer), key: c.idempotencyKey.split(':').slice(1).join(':') })}
+                {t('{id} · sent {time} by {name} · key {key}', {
+                  id: c.id,
+                  time: fmtTime(c.issuedAt, true),
+                  name: userName(s, c.issuer),
+                  key: c.idempotencyKey.split(':').slice(1).join(':'),
+                })}
               </small>
               {c.detail && <small className={c.status === 'succeeded' ? 'muted' : 'warn-text'}>{c.detail}</small>}
             </li>
@@ -668,12 +875,19 @@ function DevicePanel({ d }: { d: Device }) {
     <aside className="panel right">
       <div className="panel-head">
         <h2>{t('Device')}</h2>
-        <button className="icon-btn" aria-label={t('Close device')} onClick={() => dispatch({ type: 'selectDevice', id: null })}><X size={18} /></button>
+        <button className="icon-btn" aria-label={t('Close device')} onClick={() => dispatch({ type: 'selectDevice', id: null })}>
+          <X size={18} />
+        </button>
       </div>
       <div className="inc-head">
-        <div className="row gap"><span className="inc-big-id">{d.id}</span><IntegrationBadge i={d.integration} /></div>
+        <div className="row gap">
+          <span className="inc-big-id">{d.id}</span>
+          <IntegrationBadge i={d.integration} />
+        </div>
         <h3>{d.model}</h3>
-        <div className="row gap-s"><FreshBadge f={f} age={ago(ageMs(s, d))} /></div>
+        <div className="row gap-s">
+          <FreshBadge f={f} age={ago(ageMs(s, d))} />
+        </div>
       </div>
       {d.kind === 'cctv' && (
         <div className="feed-wrap">
@@ -682,14 +896,30 @@ function DevicePanel({ d }: { d: Device }) {
       )}
       {d.kind !== 'cctv' && d.capabilities.includes('camera') && (
         <div className="feed-wrap">
-          <CameraFeed scene="ugv" label={t('{id} onboard', { id: d.id })} deviceId={d.id} time={f === 'live' ? s.now : d.lastSeen} freshness={f} replay={s.replay.active} controls />
+          <CameraFeed
+            scene="ugv"
+            label={t('{id} onboard', { id: d.id })}
+            deviceId={d.id}
+            time={f === 'live' ? s.now : d.lastSeen}
+            freshness={f}
+            replay={s.replay.active}
+            controls
+          />
         </div>
       )}
       <div className="panel-body">
         <section className="step">
           <dl className="meta">
-            <div><dt>{t('Zone')}</dt><dd>{d.zone}</dd></div>
-            <div><dt>{t('Position')}</dt><dd>{d.pos.x.toFixed(0)}, {d.pos.y.toFixed(0)} m ± {d.accuracyM} m</dd></div>
+            <div>
+              <dt>{t('Zone')}</dt>
+              <dd>{d.zone}</dd>
+            </div>
+            <div>
+              <dt>{t('Position')}</dt>
+              <dd>
+                {d.pos.x.toFixed(0)}, {d.pos.y.toFixed(0)} m ± {d.accuracyM} m
+              </dd>
+            </div>
             {d.indoor && (
               <div>
                 <dt>{t('Indoor')}</dt>
@@ -697,20 +927,46 @@ function DevicePanel({ d }: { d: Device }) {
                   {t(BUILDINGS.find((b) => b.id === d.indoor!.buildingId)?.name ?? d.indoor.buildingId)} · {t('Level {n}', { n: d.indoor.level })}
                   {d.indoor.positioning && d.indoor.positioning !== 'fixed' ? ` · ${{ slam: t('LiDAR SLAM'), uwb: 'UWB', vision: t('visual SLAM') }[d.indoor.positioning]}` : ''}
                   {(() => {
-                    const r = roomAt(floorPlan(d.indoor.buildingId, d.indoor.level) ?? { walls: [], rooms: [], doors: [], noGo: [], patrolRoute: [], buildingId: '', level: 0, name: '' }, d.pos);
+                    const r = roomAt(
+                      floorPlan(d.indoor.buildingId, d.indoor.level) ?? { walls: [], rooms: [], doors: [], noGo: [], patrolRoute: [], buildingId: '', level: 0, name: '' },
+                      d.pos,
+                    );
                     return r ? ` · ${t(r.name.replace(/ \d+\.\d+$/, ''))}` : '';
-                  })()}
-                  {' '}
-                  <button className="link" onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: d.indoor!.buildingId, level: d.indoor!.level } })}>{t('Floor plan')}</button>
+                  })()}{' '}
+                  <button className="link" onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: d.indoor!.buildingId, level: d.indoor!.level } })}>
+                    {t('Floor plan')}
+                  </button>
                 </dd>
               </div>
             )}
-            {d.alt !== undefined && <div><dt>{t('Altitude')}</dt><dd>{t('{alt} m (site datum, simulated)', { alt: d.alt })}</dd></div>}
-            {d.battery !== undefined && <div><dt>{t('Battery')}</dt><dd>{Math.round(d.battery)}%</dd></div>}
-            <div><dt>{t('Adapter')}</dt><dd>{d.adapterVersion}</dd></div>
-            <div><dt>{t('Firmware tested')}</dt><dd>{d.firmwareTested}</dd></div>
-            <div><dt>{t('Control')}</dt><dd>{userName(s, d.controlOwner)}</dd></div>
-            <div><dt>{t('Commands')}</dt><dd>{d.commands.length ? d.commands.join(', ') : t('none (view only)')}</dd></div>
+            {d.alt !== undefined && (
+              <div>
+                <dt>{t('Altitude')}</dt>
+                <dd>{t('{alt} m (site datum, simulated)', { alt: d.alt })}</dd>
+              </div>
+            )}
+            {d.battery !== undefined && (
+              <div>
+                <dt>{t('Battery')}</dt>
+                <dd>{Math.round(d.battery)}%</dd>
+              </div>
+            )}
+            <div>
+              <dt>{t('Adapter')}</dt>
+              <dd>{d.adapterVersion}</dd>
+            </div>
+            <div>
+              <dt>{t('Firmware tested')}</dt>
+              <dd>{d.firmwareTested}</dd>
+            </div>
+            <div>
+              <dt>{t('Control')}</dt>
+              <dd>{userName(s, d.controlOwner)}</dd>
+            </div>
+            <div>
+              <dt>{t('Commands')}</dt>
+              <dd>{d.commands.length ? d.commands.join(', ') : t('none (view only)')}</dd>
+            </div>
           </dl>
           {d.kind !== 'cctv' && <TelemetryPanel deviceId={d.id} />}
           <p className="muted">{d.limitations}</p>
@@ -764,10 +1020,18 @@ function FieldTasks({ inc }: { inc: Incident }) {
   const [pick, setPick] = useState('');
   if (mode !== 'remote' || (!tasks.length && !can(me.role, 'incident.assign'))) return null;
   const open = !['closed', 'dismissed', 'duplicate', 'resolved'].includes(inc.status);
-  const label = { assigned: t('Waiting to accept'), accepted: t('Accepted · en route'), on_scene: t('On scene'), reported: t('Report received'), cancelled: t('Cancelled') } as const;
+  const label = {
+    assigned: t('Waiting to accept'),
+    accepted: t('Accepted · en route'),
+    on_scene: t('On scene'),
+    reported: t('Report received'),
+    cancelled: t('Cancelled'),
+  } as const;
   return (
     <section className="step">
-      <h4><Users size={14} /> {t('Field responders')}</h4>
+      <h4>
+        <Users size={14} /> {t('Field responders')}
+      </h4>
       {tasks.map((a) => (
         <div key={a.id} className="row between">
           <span>{userName(s, a.responderId)}</span>
@@ -779,9 +1043,22 @@ function FieldTasks({ inc }: { inc: Incident }) {
         <div className="row gap-s">
           <select id={`assign-${inc.id}`} className="grow" value={pick} onChange={(e) => setPick(e.target.value)}>
             <option value="">{t('Send a field responder…')}</option>
-            {responders.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.title}</option>)}
+            {responders.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} · {u.title}
+              </option>
+            ))}
           </select>
-          <button className="btn-secondary" disabled={!pick || s.replay.active} onClick={() => { dispatch({ type: 'assignResponder', incidentId: inc.id, responderId: pick }); setPick(''); }}>{t('Assign')}</button>
+          <button
+            className="btn-secondary"
+            disabled={!pick || s.replay.active}
+            onClick={() => {
+              dispatch({ type: 'assignResponder', incidentId: inc.id, responderId: pick });
+              setPick('');
+            }}
+          >
+            {t('Assign')}
+          </button>
         </div>
       )}
     </section>
@@ -795,14 +1072,19 @@ function Reopen({ inc }: { inc: Incident }) {
   if (mode !== 'remote' || !can(currentUser(s).role, 'incident.reopen')) return null;
   return (
     <>
-      <button className="btn-secondary wide" disabled={s.replay.active} onClick={() => setOpen(true)}><RotateCcw size={16} /> {t('Reopen')}</button>
+      <button className="btn-secondary wide" disabled={s.replay.active} onClick={() => setOpen(true)}>
+        <RotateCcw size={16} /> {t('Reopen')}
+      </button>
       {open && (
         <ReasonDialog
           title={t('Reopen {id}', { id: inc.id })}
           hint={t('e.g. Sensor triggered again; needs another look.')}
           confirmLabel={t('Reopen')}
           onClose={() => setOpen(false)}
-          onConfirm={(r) => { dispatch({ type: 'reopenIncident', incidentId: inc.id, reason: r }); setOpen(false); }}
+          onConfirm={(r) => {
+            dispatch({ type: 'reopenIncident', incidentId: inc.id, reason: r });
+            setOpen(false);
+          }}
         />
       )}
     </>

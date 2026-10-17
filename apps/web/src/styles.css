@@ -596,3 +596,93 @@ html:lang(th) .meta dt { font-size: 0.78rem; }
 :root[data-theme='light'] .indoor-bar { background: rgba(255, 255, 255, 0.94); }
 .indoor-name { font-size: 0.78rem; font-weight: 600; color: var(--text-2); padding: 0 8px; white-space: nowrap; }
 .indoor-seg button { padding: 6px 9px; }
+
+/* ---------- map search (in the map tools) ---------- */
+.map-search { position: relative; display: flex; align-items: center; gap: 6px; padding: 0 8px; min-width: 230px; color: var(--text-3); border-right: 1px solid var(--line); margin-right: 2px; }
+.map-search input { flex: 1; min-width: 0; background: none; border: 0; color: var(--text); font-size: 0.84rem; padding: 6px 0; outline: none; }
+.map-search input::placeholder { color: var(--text-3); }
+.map-search input::-webkit-search-cancel-button { display: none; }
+.ms-clear { background: none; border: 0; color: var(--text-3); display: grid; place-items: center; padding: 2px; }
+.ms-pop { left: 0; top: 40px; min-width: 300px; max-height: 320px; overflow-y: auto; }
+.ms-pop button { gap: 10px; }
+.ms-pop .ms-t { font-weight: 600; }
+.ms-pop small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+
+/* ---------- minimap ---------- */
+.minimap { position: absolute; left: 70px; bottom: 34px; z-index: 5; width: 168px; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; background: rgba(14, 23, 41, 0.9); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); }
+.minimap svg { display: block; width: 100%; aspect-ratio: 420 / 290; cursor: crosshair; }
+.mm-ground { fill: #10233a; }
+.mm-road { fill: #1c2a3c; }
+.mm-lot { fill: #182940; }
+.mm-zone { fill: none; stroke: rgba(159, 176, 198, 0.35); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.mm-bld { fill: #2c4566; stroke: #3f5d85; stroke-width: 1.5; }
+.mm-bld.sel { fill: rgba(56, 225, 255, 0.35); stroke: var(--cyan); }
+.mm-wedge { fill: rgba(56, 225, 255, 0.14); stroke: rgba(56, 225, 255, 0.55); stroke-width: 1.5; }
+.mm-rect { fill: rgba(56, 225, 255, 0.1); stroke: var(--cyan); stroke-width: 2; }
+.mm-focus { fill: none; stroke: var(--cyan); stroke-width: 2; }
+.mm-dev { fill: var(--cyan); }
+.mm-dev.k-cctv { fill: #9fb0c6; }
+.mm-dev.k-uav { fill: var(--violet); }
+.mm-dev.sel, .mm-inc.sel { stroke: #fff; stroke-width: 1.5; }
+.mm-inc { fill: var(--amber); }
+
+/* ---------- map layers: ghost buildings, POI, labels off ---------- */
+.bld-2d.ghost { fill: none; stroke-dasharray: 4 3; }
+.poi-e { fill: var(--cyan); stroke: #fff; stroke-width: 0.6; }
+.poi-e.k-fire { fill: var(--green); }
+.poi-e.k-service { fill: var(--amber); }
+.poi-h { fill: var(--red); stroke: #fff; stroke-width: 0.5; }
+.map.no-labels .dev-chip, .map.no-labels .dev-chip + text, .map.no-labels .bld-label, .map.no-labels .zone .chip, .map.no-labels .zone .chip-t, .map.no-labels .sim-chip, .map.no-labels .sim-t { display: none; }
+.t3-poi { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; padding: 1px 5px; border-radius: 3px; background: rgba(8, 14, 26, 0.85); color: var(--cyan); border: 1px solid rgba(56, 189, 248, 0.5); }
+.t3-poi.k-fire { color: var(--green); border-color: rgba(74, 222, 128, 0.5); }
+.t3-poi.k-service { color: var(--amber); border-color: rgba(251, 191, 36, 0.5); }
+
+/* ---------- anchored callout card (3D) ---------- */
+.t3-callout { width: 0; height: 0; position: absolute; }
+.t3-callout .co-dot { position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 3px rgba(56, 225, 255, 0.25), 0 0 12px rgba(56, 225, 255, 0.7); }
+.t3-callout .co-lead { position: absolute; left: 0; bottom: 0; overflow: visible; }
+.t3-callout .co-lead line { stroke: var(--cyan); stroke-width: 1.5; }
+.co-card { position: absolute; left: 32px; bottom: 36px; width: 236px; padding: 10px 12px 9px; border-radius: 10px; background: rgba(10, 20, 36, 0.86); border: 1px solid rgba(56, 225, 255, 0.4); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(56, 225, 255, 0.08); -webkit-backdrop-filter: blur(12px) saturate(130%); backdrop-filter: blur(12px) saturate(130%); color: var(--text); font-size: 12px; line-height: 1.3; }
+.co-card header { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.co-ico { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; background: rgba(56, 225, 255, 0.14); color: var(--cyan); }
+.co-title { min-width: 0; }
+.co-title b { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.co-title small { display: block; color: var(--text-2); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.co-status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 6px; border-radius: 999px; font-size: 11px; font-weight: 600; margin-bottom: 7px; background: rgba(74, 222, 128, 0.12); color: var(--green); }
+.co-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.co-status.s-warn { background: rgba(251, 191, 36, 0.14); color: var(--amber); }
+.co-status.s-bad { background: rgba(248, 113, 113, 0.14); color: var(--red); }
+.co-status.s-info { background: rgba(56, 225, 255, 0.12); color: var(--cyan); }
+.co-status .badge { margin: -2px -6px -2px -4px; }
+.co-card dl { margin: 0; display: flex; flex-direction: column; gap: 3px; }
+.co-card dl div { display: flex; justify-content: space-between; gap: 10px; }
+.co-card dt { color: var(--text-2); }
+.co-card dd { margin: 0; font-weight: 600; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.co-foot { display: block; margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line-2); font-size: 10.5px; color: var(--text-3); letter-spacing: 0.04em; }
+.co-card.t-warn { border-color: rgba(251, 191, 36, 0.5); }
+.co-card.t-bad { border-color: rgba(248, 113, 113, 0.5); }
+
+/* ---------- top bar workspace tabs (Twin HUD) ---------- */
+.top-tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line-2); flex: none; }
+.top-tabs button { background: none; border: 0; padding: 6px 16px; border-radius: 999px; color: var(--text-2); font-weight: 600; font-size: 0.84rem; letter-spacing: 0.04em; }
+.top-tabs button.on { background: var(--cyan); color: #04121d; }
+.kpi-clock b { font-variant-numeric: tabular-nums; }
+/* Under 1800 px the search collapses to its icon until focused; the clock chip is a HUD feature. */
+@media (max-width: 1799px) {
+  .map-search { min-width: 0; padding: 0 6px; }
+  .map-search input { width: 0; padding-left: 0; transition: width 0.2s; }
+  .map-search:focus-within input, .map-search.has-q input { width: 170px; }
+}
+.theme-classic .kpi-clock { display: none; }
+@media (max-width: 1500px) {
+  .top-tabs button { padding: 5px 11px; font-size: 0.78rem; }
+  .theme-hud .top-mid .site-select { display: none; }
+  .map-search { min-width: 170px; }
+}
+
+/* callout flipped to the left / below the anchor near the view edges */
+.t3-callout.flip .co-card { left: auto; right: 32px; }
+.t3-callout.flip .co-lead { left: auto; right: 0; transform: scaleX(-1); }
+.t3-callout.below .co-card { bottom: auto; top: 36px; }
+.t3-callout.below .co-lead { bottom: auto; top: 0; transform: scaleY(-1); }
+.t3-callout.flip.below .co-lead { transform: scale(-1, -1); }

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from 'react';
-import { Bot, Cctv, Drone, Layers, LocateFixed, Minus, Plus, TriangleAlert } from 'lucide-react';
-import { BUILDINGS, FENCE_Y, GATE, PARKING, PLAZA, ROAD, SITE, ZONES, floorPlan, floorPlansOf, type FloorPlan } from '@13store/shared';
+import { Bot, Building2, Cctv, Drone, Layers, LocateFixed, Minus, Plus, Search, TriangleAlert, X } from 'lucide-react';
+import { BUILDINGS, FENCE_Y, FLOOR_PLANS, GATE, PARKING, PLAZA, ROAD, SITE, ZONES, floorPlan, floorPlansOf, type FloorPlan } from '@13store/shared';
 import { freshness, ageMs } from '../domain/policy';
 import { missionForIncident } from '../domain/reducer';
 import type { AppState, Device, Layers as LayerState, Point } from '@13store/shared';
 import { useStore } from '../store';
-import { Twin3D, type Twin3DApi } from './Twin3D';
+import { Twin3D, type Twin3DApi, type ViewInfo } from './Twin3D';
 import { webglAvailable } from '../twin/world';
 import { setQuality, useQuality } from '../twin/quality';
 import { ago, tr, useT } from '../i18n';
@@ -76,7 +76,13 @@ export function TwinMap() {
   const svgRef = useRef<SVGSVGElement>(null);
   const api3d = useRef<Twin3DApi>(null);
   const [heading, setHeading] = useState(0);
+  const [view, setView] = useState<ViewInfo | null>(null);
   const gl = mode === '3d' && webglAvailable();
+  const goTo = (p: Point, z = 1.8) => {
+    if (gl) return api3d.current?.lookAt(p);
+    setZoom(z);
+    setPan([SITE.width / 2 - p.x, mode === '3d' ? (SITE.height / 2 - p.y) * K : SITE.height / 2 - p.y]);
+  };
 
   const replay = s.replay.active;
   const at = replay ? s.replay.at : s.now;
@@ -84,9 +90,7 @@ export function TwinMap() {
   const mission = selInc ? missionForIncident(s, selInc.id) : undefined;
 
   const positions = useMemo(() => devicePositions(s, at), [s, at]);
-  const visibleIncidents = s.incidents.filter(
-    (i) => i.createdAt <= at && !['closed', 'duplicate', 'dismissed'].includes(i.status) || i.id === s.selectedIncidentId,
-  );
+  const visibleIncidents = s.incidents.filter((i) => (i.createdAt <= at && !['closed', 'duplicate', 'dismissed'].includes(i.status)) || i.id === s.selectedIncidentId);
 
   const onWheel = (e: RWheelEvent) => {
     setZoom((z) => Math.min(3, Math.max(0.7, z * (e.deltaY > 0 ? 0.9 : 1.1))));
@@ -109,94 +113,138 @@ export function TwinMap() {
   const L = s.layers;
 
   return (
-    <div className={`map map-${mode}${replay ? " replay" : ""}${gl ? ' map-gl' : ''}`}>
+    <div className={`map map-${mode}${replay ? ' replay' : ''}${gl ? ' map-gl' : ''}${L.labels ? '' : ' no-labels'}`}>
       {gl ? (
-        <Twin3D ref={api3d} onHeading={setHeading} />
+        <Twin3D ref={api3d} onHeading={setHeading} onView={setView} />
       ) : (
-      <svg
-        ref={svgRef}
-        viewBox={VB[mode]}
-        preserveAspectRatio="xMidYMid meet"
-        onWheel={onWheel}
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        role="img"
-        aria-label={t('{site} digital twin, {mode} view', { site: SITE.name, mode: mode.toUpperCase() })}
-      >
-        <defs>
-          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="2.2" result="b" />
-            <feMerge>
-              <feMergeNode in="b" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
-        <g transform={tf} key={mode}>
-          <Ground P={P} />
-          {L.zones && <ZonesLayer P={P} selZone={selInc?.zone} />}
-          {mode === '2d' ? TREES.map((t, i) => <circle key={i} cx={t.x} cy={t.y} r={4} className="tree" />) : null}
-          {mode === '2d' && BUILDINGS.map((b) => <rect key={b.id} x={b.x} y={b.y} width={b.w} height={b.d} className={`bld-2d click${s.selectedBuildingId === b.id ? ' sel' : ''}`} rx={1} onClick={() => dispatch({ type: 'selectBuilding', id: b.id })} />)}
-          {mode === '3d' && <Buildings3D trees />}
-          {mode === '2d' && s.indoorView && <FloorPlanLayer P={P} plan={floorPlan(s.indoorView.buildingId, s.indoorView.level)} />}
-          {mode === '2d' && BUILDINGS.filter((b) => b.id !== s.indoorView?.buildingId).map((b) => <BuildingLabel key={b.id} P={P} b={b} />)}
-          {mission && !['cancelled', 'rejected', 'completed'].includes(mission.status) && (
-            <Route P={P} pts={[positions[mission.deviceId] ?? s.devices[mission.deviceId].pos, ...mission.checkpoints.slice(mission.nextCp)]} cps={mission.checkpoints} next={mission.nextCp} draft={mission.approvedVersion !== mission.planVersion} />
-          )}
-          {Object.values(s.devices).map((d) =>
-            show(L, d) ? (
-              <DeviceMarker
-                key={d.id}
-                d={d}
-                k={1 / Math.max(1, zoom)}
-                pos={positions[d.id] ?? d.pos}
+        <svg
+          ref={svgRef}
+          viewBox={VB[mode]}
+          preserveAspectRatio="xMidYMid meet"
+          onWheel={onWheel}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          role="img"
+          aria-label={t('{site} digital twin, {mode} view', { site: SITE.name, mode: mode.toUpperCase() })}
+        >
+          <defs>
+            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="2.2" result="b" />
+              <feMerge>
+                <feMergeNode in="b" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          <g transform={tf} key={mode}>
+            <Ground P={P} />
+            {L.zones && <ZonesLayer P={P} selZone={selInc?.zone} />}
+            {mode === '2d' ? TREES.map((t, i) => <circle key={i} cx={t.x} cy={t.y} r={4} className="tree" />) : null}
+            {(mode === '2d' || !L.buildings) &&
+              BUILDINGS.map((b) => (
+                <rect
+                  key={b.id}
+                  x={b.x}
+                  y={b.y}
+                  width={b.w}
+                  height={b.d}
+                  className={`bld-2d click${s.selectedBuildingId === b.id ? ' sel' : ''}${L.buildings ? '' : ' ghost'}`}
+                  rx={1}
+                  onClick={() => dispatch({ type: 'selectBuilding', id: b.id })}
+                />
+              ))}
+            {mode === '3d' && L.buildings && <Buildings3D trees />}
+            {L.poi && <PoiLayer P={P} />}
+            {mode === '2d' && s.indoorView && <FloorPlanLayer P={P} plan={floorPlan(s.indoorView.buildingId, s.indoorView.level)} />}
+            {mode === '2d' && BUILDINGS.filter((b) => b.id !== s.indoorView?.buildingId).map((b) => <BuildingLabel key={b.id} P={P} b={b} />)}
+            {L.routes && mission && !['cancelled', 'rejected', 'completed'].includes(mission.status) && (
+              <Route
                 P={P}
-                s={s}
-                replay={replay}
-                selected={s.selectedDeviceId === d.id}
-                onClick={() => dispatch({ type: 'selectDevice', id: d.id })}
+                pts={[positions[mission.deviceId] ?? s.devices[mission.deviceId].pos, ...mission.checkpoints.slice(mission.nextCp)]}
+                cps={mission.checkpoints}
+                next={mission.nextCp}
+                draft={mission.approvedVersion !== mission.planVersion}
               />
-            ) : null,
-          )}
-          {visibleIncidents.map((i) => {
-            const [x, y] = P(i.pos.x, i.pos.y);
-            const sel = i.id === s.selectedIncidentId;
-            const tone = i.status === 'new' || i.status === 'triaging' ? 'amber' : i.severity === 'high' ? 'red' : 'cyan';
-            return (
-              <g key={i.id} data-hit className={`inc inc-${tone}${sel ? ' sel' : ''}`} onClick={() => dispatch({ type: 'selectIncident', id: i.id })} transform={`translate(${x} ${y}) scale(${1 / Math.max(1, zoom)})`}>
-                {sel && <circle r={13} className="inc-pulse" />}
-                <circle r={7} className="inc-dot" />
-                <text y={3} textAnchor="middle" className="inc-mark">!</text>
-                {(sel || mode === '2d') && (
-                  <g transform={sel ? 'translate(-37 -36)' : 'translate(10 -22)'}>
-                    <rect width={sel ? 74 : 40} height={sel ? 22 : 12} rx={3} className="inc-callout" />
-                    <text x={5} y={sel ? 9 : 8.5} className="inc-id">{i.id}</text>
-                    {sel && <text x={5} y={18} className="inc-title">{i.title}</text>}
-                  </g>
-                )}
-              </g>
-            );
-          })}
-        </g>
-      </svg>
+            )}
+            {Object.values(s.devices).map((d) =>
+              show(L, d) ? (
+                <DeviceMarker
+                  key={d.id}
+                  d={d}
+                  k={1 / Math.max(1, zoom)}
+                  pos={positions[d.id] ?? d.pos}
+                  P={P}
+                  s={s}
+                  replay={replay}
+                  selected={s.selectedDeviceId === d.id}
+                  onClick={() => dispatch({ type: 'selectDevice', id: d.id })}
+                />
+              ) : null,
+            )}
+            {visibleIncidents.map((i) => {
+              const [x, y] = P(i.pos.x, i.pos.y);
+              const sel = i.id === s.selectedIncidentId;
+              const tone = i.status === 'new' || i.status === 'triaging' ? 'amber' : i.severity === 'high' ? 'red' : 'cyan';
+              return (
+                <g
+                  key={i.id}
+                  data-hit
+                  className={`inc inc-${tone}${sel ? ' sel' : ''}`}
+                  onClick={() => dispatch({ type: 'selectIncident', id: i.id })}
+                  transform={`translate(${x} ${y}) scale(${1 / Math.max(1, zoom)})`}
+                >
+                  {sel && <circle r={13} className="inc-pulse" />}
+                  <circle r={7} className="inc-dot" />
+                  <text y={3} textAnchor="middle" className="inc-mark">
+                    !
+                  </text>
+                  {(sel || mode === '2d') && (
+                    <g transform={sel ? 'translate(-37 -36)' : 'translate(10 -22)'}>
+                      <rect width={sel ? 74 : 40} height={sel ? 22 : 12} rx={3} className="inc-callout" />
+                      <text x={5} y={sel ? 9 : 8.5} className="inc-id">
+                        {i.id}
+                      </text>
+                      {sel && (
+                        <text x={5} y={18} className="inc-title">
+                          {i.title}
+                        </text>
+                      )}
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        </svg>
       )}
 
-        {s.indoorView && (
-          <div className="seg indoor-seg indoor-bar" role="group" aria-label={t('Floor plan')}>
-            <span className="indoor-name">{t(BUILDINGS.find((b) => b.id === s.indoorView!.buildingId)?.name ?? s.indoorView.buildingId)}</span>
-            {floorPlansOf(s.indoorView.buildingId).map((pl) => (
-              <button key={pl.level} className={pl.level === s.indoorView!.level ? 'on' : ''} onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: s.indoorView!.buildingId, level: pl.level } })}>
-                L{pl.level}
-              </button>
-            ))}
-            <button aria-label={t('Close floor plan')} onClick={() => dispatch({ type: 'setIndoor', view: null })}>×</button>
-          </div>
-        )}
+      {s.indoorView && (
+        <div className="seg indoor-seg indoor-bar" role="group" aria-label={t('Floor plan')}>
+          <span className="indoor-name">{t(BUILDINGS.find((b) => b.id === s.indoorView!.buildingId)?.name ?? s.indoorView.buildingId)}</span>
+          {floorPlansOf(s.indoorView.buildingId).map((pl) => (
+            <button
+              key={pl.level}
+              className={pl.level === s.indoorView!.level ? 'on' : ''}
+              onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: s.indoorView!.buildingId, level: pl.level } })}
+            >
+              L{pl.level}
+            </button>
+          ))}
+          <button aria-label={t('Close floor plan')} onClick={() => dispatch({ type: 'setIndoor', view: null })}>
+            ×
+          </button>
+        </div>
+      )}
       <div className="map-tools">
+        <MapSearch onGo={goTo} />
         <div className="seg" role="group" aria-label={t('Map view')}>
-          <button className={mode === '2d' ? 'on' : ''} onClick={() => dispatch({ type: 'setMapMode', mode: '2d' })}>2D</button>
-          <button className={mode === '3d' ? 'on' : ''} onClick={() => dispatch({ type: 'setMapMode', mode: '3d' })}>3D</button>
+          <button className={mode === '2d' ? 'on' : ''} onClick={() => dispatch({ type: 'setMapMode', mode: '2d' })}>
+            2D
+          </button>
+          <button className={mode === '3d' ? 'on' : ''} onClick={() => dispatch({ type: 'setMapMode', mode: '3d' })}>
+            3D
+          </button>
         </div>
         <div className="layers">
           <button className="btn-ghost" onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen}>
@@ -204,10 +252,23 @@ export function TwinMap() {
           </button>
           {layersOpen && (
             <div className="pop">
-              {(['cctv', 'ugv', 'uav', 'zones', 'accuracy'] as (keyof LayerState)[]).map((k) => (
+              {(['buildings', 'traffic', 'cctv', 'ugv', 'uav', 'routes', 'poi', 'zones', 'labels', 'accuracy'] as (keyof LayerState)[]).map((k) => (
                 <label key={k}>
-                  <input type="checkbox" checked={L[k]} onChange={() => dispatch({ type: 'toggleLayer', layer: k })} />
-                  {t({ cctv: 'CCTV', ugv: 'UGV', uav: 'UAV (simulated)', zones: 'Zones', accuracy: 'Position accuracy' }[k])}
+                  <input type="checkbox" checked={L[k] !== false} onChange={() => dispatch({ type: 'toggleLayer', layer: k })} />
+                  {t(
+                    {
+                      buildings: 'Buildings',
+                      traffic: 'Roads & traffic',
+                      cctv: 'CCTV',
+                      ugv: 'UGV',
+                      uav: 'UAV',
+                      routes: 'Mission routes',
+                      poi: 'POI (entrances, hydrants)',
+                      zones: 'Safety zones',
+                      labels: 'Labels',
+                      accuracy: 'Position accuracy',
+                    }[k],
+                  )}
                 </label>
               ))}
               <hr />
@@ -222,8 +283,12 @@ export function TwinMap() {
       </div>
 
       <div className="zoom">
-        <button aria-label={t('Zoom in')} onClick={() => (gl ? api3d.current?.zoom(0.7) : setZoom((z) => Math.min(3, z * 1.25)))}><Plus size={18} /></button>
-        <button aria-label={t('Zoom out')} onClick={() => (gl ? api3d.current?.zoom(1.4) : setZoom((z) => Math.max(0.7, z / 1.25)))}><Minus size={18} /></button>
+        <button aria-label={t('Zoom in')} onClick={() => (gl ? api3d.current?.zoom(0.7) : setZoom((z) => Math.min(3, z * 1.25)))}>
+          <Plus size={18} />
+        </button>
+        <button aria-label={t('Zoom out')} onClick={() => (gl ? api3d.current?.zoom(1.4) : setZoom((z) => Math.max(0.7, z / 1.25)))}>
+          <Minus size={18} />
+        </button>
         <button
           aria-label={t('Center on selection')}
           onClick={() => {
@@ -238,11 +303,239 @@ export function TwinMap() {
       </div>
       <div className="compass" aria-hidden style={gl ? { transform: `rotate(${heading}deg)` } : undefined}>
         <span>N</span>
-        <svg viewBox="0 0 20 20" width="18" height="18"><path d="M10 2 L15 17 L10 13 L5 17 Z" fill="currentColor" /></svg>
+        <svg viewBox="0 0 20 20" width="18" height="18">
+          <path d="M10 2 L15 17 L10 13 L5 17 Z" fill="currentColor" />
+        </svg>
       </div>
+      <Minimap view={gl ? view : null} zoom={zoom} pan={pan} mode={mode} positions={positions} incidents={visibleIncidents} onGo={goTo} />
       <div className="map-source">
         {t('Site model: placeholder geometry')} · {SITE.crs}
       </div>
+    </div>
+  );
+}
+
+// --- search ------------------------------------------------------------------
+
+interface Hit {
+  kind: 'device' | 'building' | 'incident' | 'room';
+  id: string;
+  title: string;
+  sub: string;
+  pos: Point;
+  go: () => void;
+}
+
+function MapSearch({ onGo }: { onGo: (p: Point) => void }) {
+  const { s, dispatch } = useStore();
+  const t = useT();
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const needle = q.trim().toLowerCase();
+  const hits: Hit[] = [];
+  if (needle) {
+    const match = (...xs: (string | undefined)[]) => xs.some((x) => x && x.toLowerCase().includes(needle));
+    for (const d of Object.values(s.devices))
+      if (match(d.id, d.model, d.catalogId, d.zone, t(d.kind.toUpperCase())))
+        hits.push({
+          kind: 'device',
+          id: d.id,
+          title: d.id,
+          sub: `${d.kind.toUpperCase()} · ${d.catalogId ?? d.model}`,
+          pos: d.pos,
+          go: () => dispatch({ type: 'selectDevice', id: d.id }),
+        });
+    for (const b of BUILDINGS)
+      if (match(b.id, b.name, t(b.name), b.use, t(b.use), ...b.bim.assets))
+        hits.push({
+          kind: 'building',
+          id: b.id,
+          title: `${t(b.name)} (${b.id})`,
+          sub: t(b.use),
+          pos: { x: b.x + b.w / 2, y: b.y + b.d / 2 },
+          go: () => dispatch({ type: 'selectBuilding', id: b.id }),
+        });
+    for (const i of s.incidents)
+      if (match(i.id, i.title, i.place, i.zone))
+        hits.push({ kind: 'incident', id: i.id, title: i.id, sub: i.title, pos: i.pos, go: () => dispatch({ type: 'selectIncident', id: i.id }) });
+    for (const pl of FLOOR_PLANS)
+      for (const r of pl.rooms)
+        if (match(r.name, t(r.name.replace(/ \d+\.\d+$/, '')))) {
+          const c = r.poly.reduce((a, p) => ({ x: a.x + p.x / r.poly.length, y: a.y + p.y / r.poly.length }), { x: 0, y: 0 });
+          hits.push({
+            kind: 'room',
+            id: r.id,
+            title: r.name,
+            sub: `${t(BUILDINGS.find((b) => b.id === pl.buildingId)?.name ?? pl.buildingId)} · L${pl.level}`,
+            pos: c,
+            go: () => {
+              dispatch({ type: 'selectBuilding', id: pl.buildingId });
+              dispatch({ type: 'setIndoor', view: { buildingId: pl.buildingId, level: pl.level } });
+            },
+          });
+        }
+  }
+  // best matches first: title starts with the query, then title contains it, then other fields
+  hits.sort((a, b) => rank(a, needle) - rank(b, needle));
+  const pick = (h: Hit) => {
+    h.go();
+    onGo(h.pos);
+    setQ('');
+    setOpen(false);
+  };
+  const Icon = { device: Bot, building: Building2, incident: TriangleAlert, room: Layers } as const;
+  return (
+    <div className={`map-search${q ? ' has-q' : ''}`}>
+      <Search size={15} />
+      <input
+        type="search"
+        value={q}
+        placeholder={t('Search devices, buildings, rooms…')}
+        aria-label={t('Search the map')}
+        onChange={(e) => {
+          setQ(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && hits[0]) pick(hits[0]);
+          if (e.key === 'Escape') {
+            setQ('');
+            setOpen(false);
+          }
+        }}
+      />
+      {q && (
+        <button className="ms-clear" aria-label={t('Clear')} onMouseDown={(e) => e.preventDefault()} onClick={() => setQ('')}>
+          <X size={13} />
+        </button>
+      )}
+      {open && needle && (
+        <div className="pop ms-pop">
+          {hits.slice(0, 8).map((h) => {
+            const I = Icon[h.kind];
+            return (
+              <button key={`${h.kind}:${h.id}`} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(h)}>
+                <I size={14} /> <span className="ms-t">{h.title}</span>
+                <small>{h.sub}</small>
+              </button>
+            );
+          })}
+          {!hits.length && <p className="pop-h">{t('No matches')}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function rank(h: Hit, needle: string) {
+  const t = h.title.toLowerCase();
+  const id = h.id.toLowerCase();
+  if (t.startsWith(needle) || id.startsWith(needle)) return 0;
+  if (t.includes(needle) || id.includes(needle)) return 1;
+  return 2;
+}
+
+// --- points of interest (2D) ---------------------------------------------------
+
+function PoiLayer({ P }: { P: Proj }) {
+  return (
+    <g className="poi">
+      {BUILDINGS.map((b) => (
+        <g key={b.id}>
+          {b.bim.entrances.map((e) => {
+            const [x, y] = P(e.x, e.y);
+            return (
+              <circle key={e.id} cx={x} cy={y} r={2.4} className={`poi-e k-${e.kind}`}>
+                <title>{e.name}</title>
+              </circle>
+            );
+          })}
+          {b.bim.hydrants.map((h, i) => {
+            const [x, y] = P(h.x, h.y);
+            return <rect key={i} x={x - 1.6} y={y - 1.6} width={3.2} height={3.2} className="poi-h" />;
+          })}
+        </g>
+      ))}
+    </g>
+  );
+}
+
+// --- minimap -------------------------------------------------------------------
+
+function Minimap({
+  view,
+  zoom,
+  pan,
+  mode,
+  positions,
+  incidents,
+  onGo,
+}: {
+  view: ViewInfo | null;
+  zoom: number;
+  pan: [number, number];
+  mode: '2d' | '3d';
+  positions: Record<string, Point>;
+  incidents: { id: string; pos: Point }[];
+  onGo: (p: Point) => void;
+}) {
+  const { s } = useStore();
+  const t = useT();
+  const W = SITE.width;
+  const H = SITE.height;
+  // visible area: a view wedge from the 3D camera, or the 2D viewport rectangle
+  let shape: JSX.Element | null = null;
+  if (view) {
+    const dx = view.target.x - view.from.x;
+    const dy = view.target.y - view.from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const half = Math.tan((36 / 2) * (Math.PI / 180)) * 1.25;
+    const reach = Math.max(60, Math.min(len * 2.2, 700));
+    const a = { x: view.from.x, y: view.from.y };
+    const b = { x: a.x + (ux - uy * half) * reach, y: a.y + (uy + ux * half) * reach };
+    const c = { x: a.x + (ux + uy * half) * reach, y: a.y + (uy - ux * half) * reach };
+    shape = (
+      <>
+        <polygon points={`${a.x},${a.y} ${b.x},${b.y} ${c.x},${c.y}`} className="mm-wedge" />
+        <circle cx={view.target.x} cy={view.target.y} r={5} className="mm-focus" />
+      </>
+    );
+  } else {
+    const vw = (mode === '3d' ? 476 : 440) / zoom;
+    const vh = (mode === '3d' ? 268 / K : 302) / zoom;
+    const cx = W / 2 - pan[0];
+    const cy = H / 2 - (mode === '3d' ? pan[1] / K : pan[1]);
+    shape = <rect x={cx - vw / 2} y={cy - vh / 2} width={vw} height={vh} className="mm-rect" />;
+  }
+  const click = (e: React.MouseEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    onGo({ x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H });
+  };
+  return (
+    <div className="minimap" title={t('Click to look there')}>
+      <svg viewBox={`0 0 ${W} ${H}`} onClick={click} role="img" aria-label={t('Minimap')}>
+        <rect x={0} y={0} width={W} height={H} className="mm-ground" />
+        <rect x={0} y={ROAD.y} width={W} height={ROAD.h} className="mm-road" />
+        <rect x={PARKING.x} y={PARKING.y} width={PARKING.w} height={PARKING.d} className="mm-lot" />
+        {ZONES.map((z) => (
+          <polygon key={z.id} points={z.poly.map((p) => p.join(',')).join(' ')} className="mm-zone" />
+        ))}
+        {BUILDINGS.map((b) => (
+          <rect key={b.id} x={b.x} y={b.y} width={b.w} height={b.d} className={`mm-bld${s.selectedBuildingId === b.id ? ' sel' : ''}`} />
+        ))}
+        {shape}
+        {Object.values(s.devices).map((d) => {
+          const p = positions[d.id] ?? d.pos;
+          return <circle key={d.id} cx={p.x} cy={p.y} r={s.selectedDeviceId === d.id ? 5 : 3.2} className={`mm-dev k-${d.kind}${s.selectedDeviceId === d.id ? ' sel' : ''}`} />;
+        })}
+        {incidents.map((i) => (
+          <circle key={i.id} cx={i.pos.x} cy={i.pos.y} r={s.selectedIncidentId === i.id ? 5 : 3.2} className={`mm-inc${s.selectedIncidentId === i.id ? ' sel' : ''}`} />
+        ))}
+      </svg>
     </div>
   );
 }
@@ -272,7 +565,12 @@ function poly(P: Proj, pts: [number, number][], z = 0) {
 }
 
 function rectPts(x: number, y: number, w: number, d: number): [number, number][] {
-  return [[x, y], [x + w, y], [x + w, y + d], [x, y + d]];
+  return [
+    [x, y],
+    [x + w, y],
+    [x + w, y + d],
+    [x, y + d],
+  ];
 }
 
 /** Indoor view: walls, rooms, doors, stairs and lifts of one floor, drawn over the building footprint. */
@@ -292,7 +590,12 @@ function FloorPlanLayer({ P, plan }: { P: Proj; plan?: FloorPlan }) {
         return (
           <g key={r.id}>
             <polygon points={pts(r.poly)} className={corridor ? 'fp-corr' : 'fp-room'} />
-            {!corridor && <text x={cx} y={cy} className="fp-label" textAnchor="middle">{t(r.name.replace(/ \d+\.\d+$/, ''))}{r.name.match(/ (\d+\.\d+)$/)?.[0] ?? ''}</text>}
+            {!corridor && (
+              <text x={cx} y={cy} className="fp-label" textAnchor="middle">
+                {t(r.name.replace(/ \d+\.\d+$/, ''))}
+                {r.name.match(/ (\d+\.\d+)$/)?.[0] ?? ''}
+              </text>
+            )}
           </g>
         );
       })}
@@ -301,7 +604,9 @@ function FloorPlanLayer({ P, plan }: { P: Proj; plan?: FloorPlan }) {
         return (
           <g key={r.id}>
             <polygon points={pts(r.poly)} className="fp-nogo" />
-            <text x={cx} y={cy} className="fp-label nogo" textAnchor="middle">{t(r.name)}</text>
+            <text x={cx} y={cy} className="fp-label nogo" textAnchor="middle">
+              {t(r.name)}
+            </text>
           </g>
         );
       })}
@@ -363,7 +668,9 @@ function ZonesLayer({ P, selZone }: { P: Proj; selZone?: string }) {
             <polygon points={poly(P, z.poly)} />
             <g transform={`translate(${lx} ${ly})`}>
               <rect x={-20} y={-8} width={40} height={14} rx={3} className="chip" />
-              <text textAnchor="middle" y={2.5} className="chip-t">{z.name}</text>
+              <text textAnchor="middle" y={2.5} className="chip-t">
+                {z.name}
+              </text>
             </g>
           </g>
         );
@@ -377,8 +684,12 @@ function BuildingLabel({ P, b }: { P: Proj; b: (typeof BUILDINGS)[number] }) {
   return (
     <g transform={`translate(${x} ${y})`} className="bld-label">
       <rect x={-27} y={-10} width={54} height={20} rx={3} />
-      <text textAnchor="middle" y={-1.5} className="t1">{b.name}</text>
-      <text textAnchor="middle" y={6.5} className="t2">{b.use}</text>
+      <text textAnchor="middle" y={-1.5} className="t1">
+        {b.name}
+      </text>
+      <text textAnchor="middle" y={6.5} className="t2">
+        {b.use}
+      </text>
     </g>
   );
 }
@@ -450,7 +761,9 @@ function Route({ P, pts, cps, next, draft }: { P: Proj; pts: Point[]; cps: Point
         return (
           <g key={i} transform={`translate(${x} ${y})`} className={i < next ? 'cp done' : 'cp'}>
             <circle r={3.6} />
-            <text y={1.6} textAnchor="middle">{i + 1}</text>
+            <text y={1.6} textAnchor="middle">
+              {i + 1}
+            </text>
           </g>
         );
       })}
@@ -458,9 +771,27 @@ function Route({ P, pts, cps, next, draft }: { P: Proj; pts: Point[]; cps: Point
   );
 }
 
-function DeviceMarker({ d, pos, P, s, selected, onClick, replay, k = 1 }: { d: Device; pos: Point; P: Proj; s: AppState; selected: boolean; onClick: () => void; replay: boolean; /** Counter-scale so markers keep their screen size when the map is zoomed in. */ k?: number }) {
+function DeviceMarker({
+  d,
+  pos,
+  P,
+  s,
+  selected,
+  onClick,
+  replay,
+  k = 1,
+}: {
+  d: Device;
+  pos: Point;
+  P: Proj;
+  s: AppState;
+  selected: boolean;
+  onClick: () => void;
+  replay: boolean;
+  /** Counter-scale so markers keep their screen size when the map is zoomed in. */ k?: number;
+}) {
   const f = replay ? 'live' : freshness(s, d);
-  const z = d.kind === 'uav' ? (P === P3 ? d.alt ?? 0 : 0) : 0;
+  const z = d.kind === 'uav' ? (P === P3 ? (d.alt ?? 0) : 0) : 0;
   const [gx, gy] = P(pos.x, pos.y);
   const [x, y] = P(pos.x, pos.y, z);
   const Icon = d.kind === 'cctv' ? Cctv : d.kind === 'ugv' ? Bot : Drone;
@@ -469,9 +800,7 @@ function DeviceMarker({ d, pos, P, s, selected, onClick, replay, k = 1 }: { d: D
   const sim = d.integration === 'simulated';
   return (
     <g data-hit className={`dev dev-${d.kind} f-${f}${selected ? ' sel' : ''}`} onClick={onClick}>
-      {s.layers.accuracy && d.kind !== 'cctv' && (
-        <ellipse cx={gx} cy={gy} rx={Math.max(3, acc * 2)} ry={Math.max(3, acc * 2) * (P === P3 ? K : 1)} className="acc" />
-      )}
+      {s.layers.accuracy && d.kind !== 'cctv' && <ellipse cx={gx} cy={gy} rx={Math.max(3, acc * 2)} ry={Math.max(3, acc * 2) * (P === P3 ? K : 1)} className="acc" />}
       {z > 0 && <line x1={gx} y1={gy} x2={x} y2={y} className="tether" />}
       {z > 0 && <ellipse cx={gx} cy={gy} rx={4} ry={2} className="tree-shadow" />}
       <g className="dev-pos" style={{ transform: `translate(${x}px, ${y}px) scale(${k})` }}>
@@ -479,11 +808,15 @@ function DeviceMarker({ d, pos, P, s, selected, onClick, replay, k = 1 }: { d: D
         <Icon x={-5} y={-5} width={10} height={10} className="dev-icon" strokeWidth={2} />
         <g transform="translate(10 -6)">
           <rect width={d.id.length * 4.6 + (sim ? 22 : 6)} height={12} rx={3} className="dev-chip" />
-          <text x={3} y={8.6} className="dev-t">{d.id}</text>
+          <text x={3} y={8.6} className="dev-t">
+            {d.id}
+          </text>
           {sim && (
             <g transform={`translate(${d.id.length * 4.6 + 3} 2)`}>
               <rect width={17} height={8} rx={2} className="sim-chip" />
-              <text x={8.5} y={6.1} textAnchor="middle" className="sim-t">SIM</text>
+              <text x={8.5} y={6.1} textAnchor="middle" className="sim-t">
+                SIM
+              </text>
             </g>
           )}
         </g>
