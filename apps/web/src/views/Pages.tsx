@@ -3,13 +3,14 @@ import { useState } from 'react';
 import { ageMs, can, currentUser, fmtDate, fmtTime, freshness, userName } from '../domain/policy';
 import { missionForIncident } from '../domain/reducer';
 import { SITE, componentSummary } from '@13store/shared';
-import type { AppState, Incident } from '@13store/shared';
+import type { Device, AppState, Incident } from '@13store/shared';
 import { useStore } from '../store';
 import { age, ago, roleLabel, useT } from '../i18n';
 import { CommandBadge, FreshBadge, INCIDENT_LABEL, IncidentBadge, IntegrationBadge, MissionBadge } from '../components/Badges';
 import { CameraFeed } from '../components/CameraFeed';
 import { TwinMap } from '../components/TwinMap';
 import { RecordingsCard } from '../components/Recordings';
+import { PatrolsCard } from '../components/Patrols';
 
 function Page({ title, sub, children, actions }: { title: string; sub?: string; children: React.ReactNode; actions?: React.ReactNode }) {
   return (
@@ -154,6 +155,7 @@ export function MissionsPage() {
   const t = useT();
   return (
     <Page title={t('Missions')} sub={t('Plans, approvals and command results. A sent command is not a completed one.')}>
+      <PatrolsCard />
       {s.missions.length === 0 && <p className="empty">{t('No missions yet. Verify an incident and prepare a mission from the Overview.')}</p>}
       {s.missions
         .slice()
@@ -254,6 +256,8 @@ export function DevicesPage() {
               <th>{t('Link')}</th>
               <th>{t('Last seen')}</th>
               <th>{t('Battery')}</th>
+              <th>{t('Usage')}</th>
+              <th>{t('Service')}</th>
               <th>{t('Control')}</th>
               <th>{t('Adapter')}</th>
               <th>{t('Firmware tested')}</th>
@@ -295,6 +299,24 @@ export function DevicesPage() {
                   </td>
                   <td className="mono">{ago(ageMs(s, d))}</td>
                   <td>{d.battery !== undefined ? `${Math.round(d.battery)}%` : '—'}</td>
+                  <td>
+                    {d.stats ? (
+                      <>
+                        {fmtKm(d.stats.odometerM)} · {fmtHours(d.stats.runtimeS)} · {t('{n} missions', { n: d.stats.missions })}
+                        {d.stats.docked && (
+                          <>
+                            <br />
+                            <span className="badge badge-green">{t('Docked')}</span>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <ServiceCell d={d} />
+                  </td>
                   <td>{userName(s, d.controlOwner)}</td>
                   <td className="mono">{d.adapterVersion}</td>
                   <td>{d.firmwareTested}</td>
@@ -599,5 +621,53 @@ export function ReportsPage() {
         </section>
       </div>
     </Page>
+  );
+}
+
+function fmtKm(m: number) {
+  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+}
+
+function fmtHours(sec: number) {
+  return sec >= 3600 ? `${(sec / 3600).toFixed(1)} h` : `${Math.round(sec / 60)} min`;
+}
+
+/** Wear since the last service against the interval, with the service button for administrators. */
+function ServiceCell({ d }: { d: Device }) {
+  const { s, session } = useStore();
+  const t = useT();
+  const me = currentUser(s);
+  const st = d.stats;
+  if (!st || (d.kind !== 'ugv' && d.kind !== 'uav')) return <>—</>;
+  const sinceM = st.odometerM - st.serviceOdometerM;
+  const sinceH = (st.runtimeS - st.serviceRuntimeS) / 3600;
+  const pctM = st.serviceIntervalM > 0 ? sinceM / st.serviceIntervalM : 0;
+  const pctH = st.serviceIntervalH > 0 ? sinceH / st.serviceIntervalH : 0;
+  const pct = Math.max(pctM, pctH);
+  const due = pct >= 1;
+  const soon = pct >= 0.8;
+  return (
+    <span className="service-cell">
+      <span className={`badge ${due ? 'badge-red solid' : soon ? 'badge-amber' : 'badge-green'}`}>{due ? t('Service due') : soon ? t('Service soon') : t('OK')}</span>
+      <br />
+      <small className="muted">
+        {t('{m} · {h} since service', { m: fmtKm(sinceM), h: fmtHours(sinceH * 3600) })}
+        {st.lastServiceAt ? ` · ${fmtDate(st.lastServiceAt)}` : ''}
+      </small>
+      {session && can(me.role, 'device.service') && (
+        <>
+          <br />
+          <button
+            className="btn-ghost small"
+            onClick={() => {
+              const note = window.prompt(t('Service note (what was done)'), '');
+              if (note !== null) void session.recordService(d.id, note);
+            }}
+          >
+            {t('Record service')}
+          </button>
+        </>
+      )}
+    </span>
   );
 }

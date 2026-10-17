@@ -1,5 +1,7 @@
 // Domain model for the prototype. Names follow PRD R1 §4 and §6.
 import type { GimbalState, SimGimbal, StreamInfo } from './camera';
+import type { Geofence } from './routing';
+import type { Patrol } from './protocol';
 import type { CameraMount } from './aim';
 
 export type Role = 'dispatcher' | 'supervisor' | 'operator' | 'responder' | 'auditor' | 'admin';
@@ -125,6 +127,8 @@ export interface Device {
   mount?: CameraMount;
   /** Equipment fitted to the device, with interface status (Equipment tab). */
   components?: DeviceComponent[];
+  /** Usage counters and service state (vehicles). */
+  stats?: DeviceStats;
   /** Catalogue model (VEHICLE_CATALOG) and fitted payload modules (PAYLOAD_CATALOG). */
   catalogId?: string;
   payloads?: string[];
@@ -154,11 +158,36 @@ export interface Incident {
   duplicateOf?: string;
   outcome?: string;
   thumb: 'gate' | 'path' | 'equipment' | 'lot';
+  /** Set when the incident is a scheduled patrol run rather than an alert. */
+  patrolId?: string;
+}
+
+/** Odometer, runtime and service counters kept by the platform from telemetry. */
+export interface DeviceStats {
+  /** Metres driven or flown since registration. */
+  odometerM: number;
+  /** Seconds in motion since registration. */
+  runtimeS: number;
+  /** Missions completed. */
+  missions: number;
+  lastServiceAt?: number;
+  /** Odometer and runtime at the last service, to measure wear since then. */
+  serviceOdometerM: number;
+  serviceRuntimeS: number;
+  /** Service interval: metres and hours in motion (0 = not tracked). */
+  serviceIntervalM: number;
+  serviceIntervalH: number;
+  /** Home / charging position on the site grid. */
+  dock?: Point;
+  /** Set when a vehicle sits at its dock and is not on a mission. */
+  docked?: boolean;
 }
 
 export interface Mission {
   id: string;
   incidentId: string;
+  /** Set when the mission was raised by a patrol schedule. */
+  patrolId?: string;
   deviceId: string;
   operatorId: string;
   checkpoints: Point[];
@@ -302,13 +331,27 @@ export interface Layers {
   traffic: boolean;
   /** Mission routes and checkpoints. */
   routes: boolean;
+  /** Geofences: keep-out, caution and no-fly zones. */
+  geofences: boolean;
   /** Points of interest: entrances, fire exits, hydrants. */
   poi: boolean;
   /** Name labels on devices, buildings and zones. */
   labels: boolean;
 }
 
-export const DEFAULT_LAYERS: Layers = { cctv: true, ugv: true, uav: true, zones: true, accuracy: true, buildings: true, traffic: true, routes: true, poi: false, labels: true };
+export const DEFAULT_LAYERS: Layers = {
+  cctv: true,
+  ugv: true,
+  uav: true,
+  zones: true,
+  accuracy: true,
+  buildings: true,
+  traffic: true,
+  routes: true,
+  geofences: true,
+  poi: false,
+  labels: true,
+};
 
 export interface AppState {
   now: number;
@@ -340,6 +383,10 @@ export interface AppState {
   replay: { active: boolean; at: number };
   /** Field responder tasks. */
   assignments: Assignment[];
+  /** Keep-out, caution and no-fly zones for this site. */
+  geofences: Geofence[];
+  /** Scheduled patrols (server only; empty in the offline demo). */
+  patrols: Patrol[];
   /** Page-level data label from the server (SIMULATION / MIXED DEMO / LIVE). */
   dataLabel: 'SIMULATION' | 'MIXED DEMO' | 'LIVE' | 'OFFLINE DEMO';
   toasts: Toast[];

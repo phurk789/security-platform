@@ -26,5 +26,5 @@ export function isReady(s: AppState, d: Device) {
 }
 
 export function constraintChecks(s: AppState, m: Mission) {
-  return constraintChecksAt(s.now, s.devices[m.deviceId], m, (id) => userName(s, id));
+  return constraintChecksAt(s.now, s.devices[m.deviceId], m, (id) => userName(s, id), s.geofences);
 }

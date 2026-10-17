@@ -110,7 +110,10 @@ CREATE TABLE IF NOT EXISTS detections (
 );
 CREATE INDEX IF NOT EXISTS detections_org_time ON detections(org_id, at);
 CREATE INDEX IF NOT EXISTS detections_device ON detections(device_id, type, at);
-CREATE UNIQUE INDEX IF NOT EXISTS detections_external ON detections(org_id, external_id) WHERE external_id IS NOT NULL;`);
+CREATE UNIQUE INDEX IF NOT EXISTS detections_external ON detections(org_id, external_id) WHERE external_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS geofences (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, site_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS patrols (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, site_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS device_stats (device_id TEXT PRIMARY KEY, data TEXT NOT NULL);`);
 }
 
 export function tx<T>(db: DB, fn: () => T): T {

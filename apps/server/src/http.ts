@@ -64,6 +64,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     if (e.type === 'audit') metrics.inc('ps_audit_events_total');
   });
   p.bus.on('detection', (m: { detection: { type: string; outcome: string } }) => metrics.inc('ps_detections_total', { type: m.detection.type, outcome: m.detection.outcome }));
+  p.bus.on('geofence', (m: { fence: { kind: string }; breach: boolean }) => metrics.inc('ps_geofence_events_total', { kind: m.fence.kind, breach: String(m.breach) }));
 
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 12 * 1024 * 1024, trustProxy: true });
   await app.register(fastifyWebsocket, { options: { maxPayload: 1024 * 1024 } });
@@ -227,6 +228,19 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   );
   app.get('/api/v1/detections/stats', async (req: Req) => p.detectionStats(A(req), num(req.query.from, p.now() - 30 * 86_400_000)!, num(req.query.to, p.now())!));
   app.get('/api/v1/incidents/:id', async (req: Req) => p.getIncident(A(req), req.params.id));
+  app.get('/api/v1/incidents/:id/suggest', async (req: Req) => p.suggestUnits(A(req), req.params.id));
+  // Route planning and site geofences.
+  app.post('/api/v1/routes/plan', async (req: Req) => p.planRouteFor(A(req), body(req) as any));
+  app.get('/api/v1/geofences', async (req: Req) => p.listGeofences(A(req), req.query.siteId || undefined));
+  app.post('/api/v1/geofences', async (req: Req) => p.saveGeofence(A(req), body(req) as any));
+  app.patch('/api/v1/geofences/:id', async (req: Req) => p.saveGeofence(A(req), body(req) as any, req.params.id));
+  app.delete('/api/v1/geofences/:id', async (req: Req) => p.deleteGeofence(A(req), req.params.id));
+  // Scheduled patrols.
+  app.get('/api/v1/patrols', async (req: Req) => p.listPatrols(A(req)).map(({ siteId: _s, ...x }) => x));
+  app.post('/api/v1/patrols', async (req: Req) => p.upsertPatrol(A(req), body(req) as any));
+  app.patch('/api/v1/patrols/:id', async (req: Req) => p.upsertPatrol(A(req), body(req) as any, req.params.id));
+  app.delete('/api/v1/patrols/:id', async (req: Req) => p.deletePatrol(A(req), req.params.id));
+  app.post('/api/v1/patrols/:id/run', async (req: Req) => p.runPatrol(A(req), req.params.id));
   app.patch('/api/v1/incidents/:id', async (req: Req) => p.editIncident(A(req), req.params.id, body(req)));
   app.post('/api/v1/incidents/:id/triage', async (req: Req) => p.triage(A(req), req.params.id));
   app.post('/api/v1/incidents/:id/confirm', async (req: Req) => p.confirm(A(req), req.params.id));
@@ -285,6 +299,8 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   });
   app.post('/api/v1/devices', async (req: Req) => p.registerDevice(A(req), body(req) as any));
   app.post('/api/v1/devices/:id/handover', async (req: Req) => p.handover(A(req), req.params.id, String(body(req).toUserId ?? '')));
+  app.post('/api/v1/devices/:id/service', async (req: Req) => p.recordService(A(req), req.params.id, String(body(req).note ?? '')));
+  app.patch('/api/v1/devices/:id/stats', async (req: Req) => p.updateDeviceStats(A(req), req.params.id, body(req) as any));
   app.post('/api/v1/devices/:id/release', async (req: Req) => p.release(A(req), req.params.id));
   app.get('/api/v1/devices/:id/telemetry', async (req: Req) => p.telemetryHistory(A(req), req.params.id, num(req.query.from, p.now() - 3600_000)!, num(req.query.to, p.now())!));
   app.post('/api/v1/devices/:id/camera', async (req: Req) => p.cameraControl(A(req), req.params.id, body(req)));

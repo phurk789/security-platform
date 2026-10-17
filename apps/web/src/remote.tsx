@@ -11,8 +11,11 @@ import {
   type ConsoleMessage,
   type Device,
   type Evidence,
+  type Geofence,
   type Incident,
   type Meta,
+  type Patrol,
+  type Point,
   type Mission,
   type SessionUser,
   type Snapshot,
@@ -20,7 +23,7 @@ import {
 } from '@13store/shared';
 import { Api, ApiError, saveBlob } from './api';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
-import { StoreCtx, useToastTimer, type CameraResult, type ClipLink, type MediaSession, type Recordings, type Session } from './store';
+import { StoreCtx, useToastTimer, type CameraResult, type ClipLink, type MediaSession, type Recordings, type RoutePlan, type Session, type UnitSuggestion } from './store';
 import { StepUpDialog } from './components/StepUp';
 import { tr } from './i18n';
 
@@ -71,6 +74,8 @@ function fromSnapshot(prev: AppState, snap: Snapshot, user: SessionUser, offset:
     timeline: snap.timeline,
     evidence: snap.evidence,
     assignments: snap.assignments,
+    geofences: snap.geofences ?? [],
+    patrols: snap.patrols ?? [],
     dataLabel: snap.meta.dataLabel,
     selectedIncidentId: selected,
   };
@@ -106,6 +111,8 @@ export function RemoteProvider({
       evidence: [],
       audit: [],
       assignments: [],
+      geofences: [],
+      patrols: [],
       telemetry: [],
       toasts: [],
       linkCut: {},
@@ -162,6 +169,10 @@ export function RemoteProvider({
             return { ...p, evidence: upsert<Evidence>(p.evidence, m.evidence) };
           case 'device':
             return { ...p, devices: { ...p.devices, [m.device.id]: m.device } };
+          case 'geofence':
+            return { ...p, geofences: m.deleted ? p.geofences.filter((g) => g.id !== m.geofence.id) : upsert<Geofence>(p.geofences, m.geofence) };
+          case 'patrol':
+            return { ...p, patrols: m.deleted ? p.patrols.filter((x) => x.id !== m.patrol.id) : upsert<Patrol>(p.patrols, m.patrol) };
           case 'telemetry': {
             const d = p.devices[m.deviceId];
             if (!d) return p;
@@ -179,6 +190,7 @@ export function RemoteProvider({
               satellites: m.satellites ?? d.satellites,
               temperatureC: m.temperatureC ?? d.temperatureC,
               gimbal: m.gimbal ?? d.gimbal,
+              stats: m.stats ?? d.stats,
             };
             const sample: TelemetrySample = {
               deviceId: m.deviceId,
@@ -400,6 +412,20 @@ export function RemoteProvider({
     [api, call, onSwitch, toast],
   );
 
+  /** Runs a session action; a step-up prompt retries it, any other failure becomes a toast. */
+  const guarded = useCallback(
+    async <T,>(fn: () => Promise<T>, retry: () => void): Promise<T | undefined> => {
+      try {
+        return await fn();
+      } catch (e) {
+        if (e instanceof ApiError && e.code === 'step_up_required') setStepUp({ retry });
+        else toast('warn', e instanceof Error ? e.message : String(e));
+        return undefined;
+      }
+    },
+    [toast],
+  );
+
   const session: Session = useMemo(
     () => ({
       api,
@@ -440,6 +466,53 @@ export function RemoteProvider({
           return { ok: false, confirmed: false, detail: e instanceof Error ? e.message : String(e) };
         }
       },
+      suggestUnits(incidentId: string) {
+        return api.get<UnitSuggestion[]>(`/incidents/${encodeURIComponent(incidentId)}/suggest`);
+      },
+      planRoute(deviceId: string, target: { incidentId: string } | Point) {
+        return api.post<RoutePlan>('/routes/plan', { deviceId, ...('incidentId' in target ? { incidentId: target.incidentId } : { to: target }) });
+      },
+      saveGeofence: (g: Partial<Geofence>, id?: string) =>
+        guarded(
+          () => (id ? api.patch<Geofence>(`/geofences/${encodeURIComponent(id)}`, g) : api.post<Geofence>('/geofences', g)),
+          () => void session.saveGeofence(g, id),
+        ),
+      deleteGeofence: (id: string) =>
+        guarded(
+          () => api.del(`/geofences/${encodeURIComponent(id)}`),
+          () => void session.deleteGeofence(id),
+        ),
+      savePatrol: (x: Partial<Patrol>, id?: string) =>
+        guarded(
+          () => (id ? api.patch<Patrol>(`/patrols/${encodeURIComponent(id)}`, x) : api.post<Patrol>('/patrols', x)),
+          () => void session.savePatrol(x, id),
+        ),
+      deletePatrol: (id: string) =>
+        guarded(
+          () => api.del(`/patrols/${encodeURIComponent(id)}`),
+          () => void session.deletePatrol(id),
+        ),
+      runPatrol: (id: string) =>
+        guarded(
+          async () => {
+            const r = await api.post<{ incidentId: string; missionId: string; started: boolean }>(`/patrols/${encodeURIComponent(id)}/run`);
+            toast(
+              'info',
+              r.started
+                ? tr('Patrol started: {inc} · {msn}', { inc: r.incidentId, msn: r.missionId })
+                : tr('Patrol raised: {inc} · {msn} waits for the operator to accept.', { inc: r.incidentId, msn: r.missionId }),
+            );
+          },
+          () => void session.runPatrol(id),
+        ),
+      recordService: (deviceId: string, note: string) =>
+        guarded(
+          async () => {
+            await api.post(`/devices/${encodeURIComponent(deviceId)}/service`, { note });
+            toast('ok', tr('Service recorded for {id}.', { id: deviceId }));
+          },
+          () => void session.recordService(deviceId, note),
+        ),
       recordings(deviceId: string, from: number, to: number) {
         return api.get<Recordings>(`/media/${encodeURIComponent(deviceId)}/recordings?from=${Math.round(from)}&to=${Math.round(to)}`);
       },
@@ -456,7 +529,7 @@ export function RemoteProvider({
         }
       },
     }),
-    [api, user, meta, onLogout, onSwitch, reload, toast],
+    [api, user, meta, onLogout, onSwitch, reload, toast, guarded],
   );
 
   return (

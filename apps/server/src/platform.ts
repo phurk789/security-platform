@@ -69,6 +69,16 @@ import {
   type Detection,
   type DetectionOutcome,
   DETECTION_LABEL,
+  type Geofence,
+  type Patrol,
+  type DeviceStats,
+  DEFAULT_GEOFENCES,
+  GEOFENCE_KIND_LABEL,
+  fencesAt,
+  planRoute,
+  rankUnits,
+  routeViolations,
+  insideDemoArea,
   type ComponentKind,
   type ComponentStatus,
   type ComponentUpdate,
@@ -157,6 +167,14 @@ export class Platform {
   private devices = new Map<string, Device & { orgId: string; siteId: string }>();
   private lastFresh = new Map<string, Freshness>();
   private lastSeq = new Map<string, number>();
+  /** Geofences per site (loaded on first use; defaults seeded for a new site). */
+  private fenceCache = new Map<string, Geofence[]>();
+  /** Fence ids each vehicle is currently inside of. */
+  private insideFences = new Map<string, Set<string>>();
+  /** Last telemetry position per vehicle, for odometer and runtime. */
+  private lastFix = new Map<string, { pos: Point; at: number }>();
+  private lastStatsSave = new Map<string, number>();
+  private patrolTimer?: NodeJS.Timeout;
   /** When an operator last moved each camera; auto-aim leaves it alone for a while after. */
   private manualCamera = new Map<string, number>();
   private cameraWaits = new Map<string, { orgId: string; deviceId: string; done: (r: CameraResult) => void }>();
@@ -186,10 +204,13 @@ export class Platform {
       this.backupTimer = setInterval(() => this.runScheduledBackup(), this.cfg.backupIntervalH * 3600_000);
       this.backupTimer.unref?.();
     }
+    this.patrolTimer = setInterval(() => this.runPatrols(), 10_000);
+    this.patrolTimer.unref?.();
   }
 
   stop() {
     if (this.sweepTimer) clearInterval(this.sweepTimer);
+    if (this.patrolTimer) clearInterval(this.patrolTimer);
     if (this.purgeTimer) clearInterval(this.purgeTimer);
     if (this.backupTimer) clearInterval(this.backupTimer);
   }
@@ -837,6 +858,14 @@ export class Platform {
     m.status = to;
   }
 
+  /** A route a vehicle may drive: it must not enter an active keep-out zone (or no-fly zone for aircraft). */
+  private clearRoute(orgId: string, d: Device & { siteId: string }, pts: Point[]) {
+    if (d.kind !== 'ugv' && d.kind !== 'uav') return pts;
+    const hits = routeViolations(pts, d.pos, this.geofencesOf(orgId, d.siteId), d.kind);
+    if (hits.length) fail(409, 'conflict', `Route enters ${hits.map((h) => `${GEOFENCE_KIND_LABEL[h.kind].toLowerCase()} zone "${h.name}"`).join(' and ')}. Plan around it.`);
+    return pts;
+  }
+
   private validRoute(pts: Point[]) {
     if (!Array.isArray(pts) || pts.length < 1 || pts.length > 50) fail(400, 'invalid', 'Route needs 1–50 checkpoints.');
     for (const p of pts)
@@ -857,7 +886,7 @@ export class Platform {
       incidentId: inc.id,
       deviceId: d.id,
       operatorId: input.operatorId,
-      checkpoints: this.validRoute(input.checkpoints),
+      checkpoints: this.clearRoute(a.orgId, d, this.validRoute(input.checkpoints)),
       planVersion: 1,
       status: 'draft',
       nextCp: 0,
@@ -877,7 +906,7 @@ export class Platform {
     this.require(a, 'mission.prepare', id);
     const { m, siteId } = this.getMission(a, id);
     if (!['draft', 'pending_approval', 'approved', 'assigned', 'rejected'].includes(m.status)) fail(409, 'conflict', 'Route cannot be changed while the mission is running.');
-    m.checkpoints = this.validRoute(checkpoints);
+    m.checkpoints = this.clearRoute(a.orgId, this.getDevice(a, m.deviceId), this.validRoute(checkpoints));
     m.planVersion += 1;
     tx(this.db, () => {
       if (m.status === 'approved' || m.status === 'assigned') {
@@ -911,9 +940,9 @@ export class Platform {
   }
 
   checks(a: Actor, id: string) {
-    const { m } = this.getMission(a, id);
+    const { m, siteId } = this.getMission(a, id);
     const d = this.getDevice(a, m.deviceId);
-    return constraintChecksAt(this.now(), d, m, (u) => this.userName(a.orgId, u));
+    return constraintChecksAt(this.now(), d, m, (u) => this.userName(a.orgId, u), this.geofencesOf(a.orgId, siteId));
   }
 
   approveMission(a: Actor, id: string) {
@@ -1252,6 +1281,10 @@ export class Platform {
     // Source → received delay. Clamp at 0 in case the device clock runs slightly ahead.
     d.latencyMs = Math.max(0, now - t.sourceTime);
     d.lastSeen = now;
+    if (d.kind === 'ugv' || d.kind === 'uav') {
+      this.trackStats(d, now);
+      this.trackFences(d, now);
+    }
     this.devices.set(d.id, d);
     this.db.prepare('UPDATE devices SET data = ? WHERE id = ?').run(JSON.stringify(this.publicDevice(d)), d.id);
     this.db
@@ -1301,6 +1334,7 @@ export class Platform {
         satellites: d.satellites,
         temperatureC: d.temperatureC,
         gimbal: d.gimbal,
+        stats: d.stats,
       },
     });
   }
@@ -1519,6 +1553,7 @@ export class Platform {
               at: e.at,
               detail: 'Arrival confirmed by vehicle telemetry.',
             });
+            this.onMissionCompleted(orgId, d.siteId, m, e.at);
           }
           break;
         case 'checkpoint':
@@ -2207,6 +2242,486 @@ export class Platform {
     return { base: st.playback.replace(/\/+$/, ''), path };
   }
 
+  // ---- geofences ----------------------------------------------------------------
+
+  /** Fences of a site. A site without any gets the demo defaults so the console has something to show. */
+  geofencesOf(orgId: string, siteId: string): Geofence[] {
+    const cached = this.fenceCache.get(siteId);
+    if (cached) return cached;
+    let rows = this.db.prepare('SELECT data FROM geofences WHERE org_id = ? AND site_id = ?').all(orgId, siteId) as { data: string }[];
+    if (!rows.length) {
+      const ins = this.db.prepare('INSERT OR IGNORE INTO geofences (id, org_id, site_id, data) VALUES (?,?,?,?)');
+      for (const g of DEFAULT_GEOFENCES) {
+        const id = `${this.prefix(orgId)}${g.id}`;
+        ins.run(id, orgId, siteId, JSON.stringify({ ...g, id, createdBy: 'Site setup', createdAt: this.now() }));
+      }
+      rows = this.db.prepare('SELECT data FROM geofences WHERE org_id = ? AND site_id = ?').all(orgId, siteId) as { data: string }[];
+    }
+    const list = rows.map((r) => JSON.parse(r.data) as Geofence);
+    this.fenceCache.set(siteId, list);
+    return list;
+  }
+
+  listGeofences(a: Actor, siteId?: string) {
+    const site = this.site(a, siteId);
+    return this.geofencesOf(a.orgId, site.id);
+  }
+
+  saveGeofence(a: Actor, input: Partial<Geofence> & { siteId?: string }, id?: string): Geofence {
+    this.require(a, 'site.geofences', id ?? 'geofence');
+    const site = this.site(a, input.siteId);
+    const existing = id ? this.geofencesOf(a.orgId, site.id).find((g) => g.id === id) : undefined;
+    if (id && !existing) fail(404, 'not_found', 'Geofence not found.');
+    const name = String(input.name ?? existing?.name ?? '').trim();
+    if (!name || name.length > 80) fail(400, 'invalid', 'A name of up to 80 characters is required.');
+    const kind = (input.kind ?? existing?.kind ?? 'keep_out') as Geofence['kind'];
+    if (!['keep_out', 'caution', 'no_fly'].includes(kind)) fail(400, 'invalid', 'kind must be keep_out, caution or no_fly.');
+    const poly = (input.poly ?? existing?.poly ?? []) as Point[];
+    if (
+      !Array.isArray(poly) ||
+      poly.length < 3 ||
+      poly.length > 30 ||
+      poly.some((p) => typeof p?.x !== 'number' || typeof p?.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y))
+    )
+      fail(400, 'invalid', 'poly needs 3–30 {x, y} points.');
+    if (!poly.some(insideDemoArea)) fail(400, 'invalid', 'The zone must touch the site.');
+    const appliesTo = ((input.appliesTo ?? existing?.appliesTo ?? ['ugv', 'uav']) as string[]).filter((k) => k === 'ugv' || k === 'uav') as Geofence['appliesTo'];
+    if (!appliesTo.length) fail(400, 'invalid', 'appliesTo must include ugv and/or uav.');
+    const g: Geofence = {
+      id: id ?? `${this.prefix(a.orgId)}GF-${String(nextNumber(this.db, a.orgId, 'geofence', 10)).padStart(3, '0')}`,
+      name,
+      kind,
+      poly: poly.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })),
+      active: input.active ?? existing?.active ?? true,
+      appliesTo: [...new Set(appliesTo)],
+      reason: typeof input.reason === 'string' ? input.reason.trim().slice(0, 160) || undefined : existing?.reason,
+      createdBy: existing?.createdBy ?? a.name,
+      createdAt: existing?.createdAt ?? this.now(),
+    };
+    this.db
+      .prepare('INSERT INTO geofences (id, org_id, site_id, data) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+      .run(g.id, a.orgId, site.id, JSON.stringify(g));
+    this.fenceCache.delete(site.id);
+    this.audit(a, existing ? 'geofence.update' : 'geofence.create', g.id, 'ok', `${g.kind} "${g.name}" ${g.active ? 'active' : 'inactive'} for ${g.appliesTo.join('/')}`);
+    this.publish({ orgId: a.orgId, siteId: site.id, event: { type: 'geofence', geofence: g } });
+    return g;
+  }
+
+  deleteGeofence(a: Actor, id: string) {
+    this.require(a, 'site.geofences', id);
+    const row = this.db.prepare('SELECT site_id, data FROM geofences WHERE id = ? AND org_id = ?').get(id, a.orgId) as { site_id: string; data: string } | undefined;
+    if (!row || !this.inScope(a, a.orgId, row.site_id)) return fail(404, 'not_found', 'Geofence not found.');
+    this.db.prepare('DELETE FROM geofences WHERE id = ?').run(id);
+    this.fenceCache.delete(row.site_id);
+    const g = JSON.parse(row.data) as Geofence;
+    this.audit(a, 'geofence.delete', id, 'ok', g.name);
+    this.publish({ orgId: a.orgId, siteId: row.site_id, event: { type: 'geofence', geofence: g, deleted: true } });
+    return { ok: true };
+  }
+
+  /** Live geofence tracking: entering a keep-out or no-fly zone is a breach; caution zones are noted. */
+  private trackFences(d: Device & { orgId: string; siteId: string }, now: number) {
+    if (d.kind !== 'ugv' && d.kind !== 'uav') return;
+    const fences = this.geofencesOf(d.orgId, d.siteId);
+    const nowIn = new Set(fencesAt(d.pos, fences, d.kind).map((f) => f.id));
+    const was = this.insideFences.get(d.id) ?? new Set<string>();
+    const m = this.activeMission(d.id);
+    for (const id of nowIn) {
+      if (was.has(id)) continue;
+      const f = fences.find((x) => x.id === id)!;
+      const breach = f.kind !== 'caution' && (d.kind === 'uav' || f.kind === 'keep_out');
+      const text = `${d.id} entered ${GEOFENCE_KIND_LABEL[f.kind].toLowerCase()} zone "${f.name}"`;
+      if (m) this.event(null, d.orgId, d.siteId, m.incidentId, text, { actor: d.id, tone: breach ? 'alert' : 'warn', at: now, detail: f.reason });
+      this.audit(this.systemActor(d.orgId, 'system', 'Geofence'), 'geofence.breach', d.id, breach ? 'error' : 'ok', `${f.id} ${f.name}${m ? ` during ${m.id}` : ''}`);
+      this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: breach ? 'error' : 'warn', text: `${text}.${f.reason ? ` ${f.reason}` : ''}` } });
+      this.bus.emit('geofence', { orgId: d.orgId, deviceId: d.id, fence: f, breach });
+    }
+    for (const id of was) {
+      if (nowIn.has(id)) continue;
+      const f = fences.find((x) => x.id === id);
+      if (f && f.kind !== 'caution') this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: 'info', text: `${d.id} left zone "${f.name}".` } });
+    }
+    this.insideFences.set(d.id, nowIn);
+  }
+
+  // ---- usage counters, service, docking ---------------------------------------------
+
+  private statsOf(d: Device): DeviceStats {
+    if (d.stats) return d.stats;
+    const row = this.db.prepare('SELECT data FROM device_stats WHERE device_id = ?').get(d.id) as { data: string } | undefined;
+    d.stats = row
+      ? (JSON.parse(row.data) as DeviceStats)
+      : {
+          odometerM: 0,
+          runtimeS: 0,
+          missions: 0,
+          serviceOdometerM: 0,
+          serviceRuntimeS: 0,
+          serviceIntervalM: d.kind === 'uav' ? 0 : 500_000,
+          serviceIntervalH: d.kind === 'uav' ? 100 : 250,
+          // First fix carries GNSS noise: the dock is the parking spot to the nearest metre.
+          dock: { x: Math.round(d.pos.x), y: Math.round(d.pos.y) },
+        };
+    return d.stats;
+  }
+
+  private saveStats(d: Device, force = false) {
+    const st = this.statsOf(d);
+    const now = this.now();
+    if (!force && now - (this.lastStatsSave.get(d.id) ?? 0) < 5000) return;
+    this.lastStatsSave.set(d.id, now);
+    this.db.prepare('INSERT INTO device_stats (device_id, data) VALUES (?,?) ON CONFLICT(device_id) DO UPDATE SET data = excluded.data').run(d.id, JSON.stringify(st));
+  }
+
+  /** Odometer and runtime from consecutive fixes; docked when parked at the home position with no mission. */
+  private trackStats(d: Device & { orgId: string; siteId: string }, now: number) {
+    const st = this.statsOf(d);
+    const prev = this.lastFix.get(d.id);
+    if (prev) {
+      const dt = Math.min(10, Math.max(0, (now - prev.at) / 1000));
+      const dist = Math.hypot(d.pos.x - prev.pos.x, d.pos.y - prev.pos.y);
+      if (d.speed > 0.3 && dist < 30) {
+        st.odometerM = Math.round((st.odometerM + dist) * 10) / 10;
+        st.runtimeS = Math.round((st.runtimeS + dt) * 10) / 10;
+      }
+    }
+    this.lastFix.set(d.id, { pos: { ...d.pos }, at: now });
+    const docked = !!st.dock && d.speed < 0.1 && Math.hypot(d.pos.x - st.dock.x, d.pos.y - st.dock.y) < 4 && !this.activeMission(d.id);
+    st.docked = docked;
+    this.saveStats(d);
+  }
+
+  private onMissionCompleted(orgId: string, siteId: string, m: Mission, at: number) {
+    const d = this.devices.get(m.deviceId);
+    if (d) {
+      const st = this.statsOf(d);
+      st.missions += 1;
+      this.saveStats(d, true);
+    }
+    if (m.patrolId) this.finishPatrolRun(orgId, siteId, m, at);
+  }
+
+  /** Marks a service visit: wear counters restart from here. */
+  recordService(a: Actor, deviceId: string, note: string) {
+    this.require(a, 'device.service', deviceId);
+    const d = this.getDevice(a, deviceId);
+    const st = this.statsOf(d);
+    st.lastServiceAt = this.now();
+    st.serviceOdometerM = st.odometerM;
+    st.serviceRuntimeS = st.runtimeS;
+    this.saveStats(d, true);
+    this.saveDevice(d);
+    this.audit(a, 'device.service', d.id, 'ok', `${note?.trim() || 'service recorded'} · odometer ${Math.round(st.odometerM)} m · runtime ${Math.round(st.runtimeS / 360) / 10} h`);
+    return st;
+  }
+
+  updateDeviceStats(a: Actor, deviceId: string, patch: { serviceIntervalM?: number; serviceIntervalH?: number; dock?: Point | null }) {
+    this.require(a, 'admin.devices', deviceId);
+    const d = this.getDevice(a, deviceId);
+    const st = this.statsOf(d);
+    const num = (v: unknown, max: number): number | undefined => {
+      if (v === undefined) return undefined;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > max) return fail(400, 'invalid', `Value must be between 0 and ${max}.`);
+      return v;
+    };
+    const im = num(patch.serviceIntervalM, 10_000_000);
+    const ih = num(patch.serviceIntervalH, 100_000);
+    if (im !== undefined) st.serviceIntervalM = im;
+    if (ih !== undefined) st.serviceIntervalH = ih;
+    if (patch.dock === null) st.dock = undefined;
+    else if (patch.dock) {
+      if (!Number.isFinite(patch.dock.x) || !Number.isFinite(patch.dock.y) || !insideDemoArea(patch.dock)) fail(400, 'invalid', 'dock must be {x, y} inside the site.');
+      st.dock = { x: patch.dock.x, y: patch.dock.y };
+    }
+    this.saveStats(d, true);
+    this.saveDevice(d);
+    this.audit(a, 'admin.device_update', d.id, 'ok', `service interval ${st.serviceIntervalM} m / ${st.serviceIntervalH} h${st.dock ? `, dock ${st.dock.x},${st.dock.y}` : ''}`);
+    return st;
+  }
+
+  // ---- route planning and unit suggestion --------------------------------------------
+
+  /** Plans a route for a vehicle to a place or an incident, around buildings and keep-out zones. */
+  planRouteFor(a: Actor, input: { deviceId: string; to?: Point; incidentId?: string; via?: Point[] }) {
+    this.require(a, 'mission.prepare', 'route', { mutating: false });
+    const d = this.getDevice(a, String(input.deviceId ?? ''));
+    if (d.kind !== 'ugv' && d.kind !== 'uav') fail(400, 'invalid', `${d.id} is not a vehicle.`);
+    const to = input.incidentId ? this.getIncident(a, input.incidentId).pos : input.to;
+    if (!to || typeof to.x !== 'number' || typeof to.y !== 'number' || !Number.isFinite(to.x) || !Number.isFinite(to.y))
+      return fail(400, 'invalid', 'Give a destination {x, y} or an incidentId.');
+    const via = Array.isArray(input.via)
+      ? input.via.filter((p) => typeof p?.x === 'number' && typeof p?.y === 'number' && Number.isFinite(p.x) && Number.isFinite(p.y)).slice(0, 10)
+      : undefined;
+    const plan = planRoute(d.pos, to, { fences: this.geofencesOf(a.orgId, d.siteId), kind: d.kind as 'ugv' | 'uav', via });
+    return { deviceId: d.id, from: d.pos, to, ...plan };
+  }
+
+  /** Vehicles that could respond to an incident, ranked by estimated arrival. */
+  suggestUnits(a: Actor, incidentId: string) {
+    this.require(a, 'mission.prepare', incidentId, { mutating: false });
+    const inc = this.getIncident(a, incidentId);
+    const now = this.now();
+    const missions = this.allMissions(a.orgId);
+    const units = [...this.devices.values()].filter(
+      (d) => d.orgId === a.orgId && d.siteId === inc.siteId && (d.kind === 'ugv' || d.kind === 'uav') && d.commands.includes('start'),
+    );
+    const fences = this.geofencesOf(a.orgId, inc.siteId);
+    return rankUnits(units, inc.pos, fences)
+      .map(({ unit: d, plan, etaS, lengthM }) => {
+        const ready = isReadyAt(now, d, missions);
+        const fresh = freshnessAt(now, d);
+        const reason = !d.commands.length
+          ? 'No commands'
+          : fresh !== 'live'
+            ? `Telemetry ${fresh}`
+            : (d.battery ?? 100) < 25
+              ? `Battery ${Math.round(d.battery ?? 0)}%`
+              : !ready
+                ? 'On another mission'
+                : !plan.ok
+                  ? plan.reason
+                  : undefined;
+        return {
+          deviceId: d.id,
+          kind: d.kind,
+          model: d.model,
+          ready: ready && plan.ok,
+          battery: d.battery,
+          etaS: plan.ok ? etaS : null,
+          lengthM: plan.ok ? lengthM : null,
+          checkpoints: plan.ok ? plan.checkpoints : [],
+          reason,
+        };
+      })
+      .sort((x, y) => Number(y.ready) - Number(x.ready) || (x.etaS ?? Infinity) - (y.etaS ?? Infinity));
+  }
+
+  // ---- scheduled patrols ---------------------------------------------------------------
+
+  listPatrols(a: Actor): (Patrol & { siteId: string })[] {
+    const rows = this.db.prepare('SELECT site_id, data FROM patrols WHERE org_id = ? ORDER BY rowid').all(a.orgId) as { site_id: string; data: string }[];
+    return rows.filter((r) => this.inScope(a, a.orgId, r.site_id)).map((r) => ({ ...(JSON.parse(r.data) as Patrol), siteId: r.site_id }));
+  }
+
+  private patrolRow(orgId: string, id: string) {
+    const r = this.db.prepare('SELECT site_id, data FROM patrols WHERE id = ? AND org_id = ?').get(id, orgId) as { site_id: string; data: string } | undefined;
+    return r ? { p: JSON.parse(r.data) as Patrol, siteId: r.site_id } : undefined;
+  }
+
+  private savePatrol(orgId: string, siteId: string, p: Patrol) {
+    this.db
+      .prepare('INSERT INTO patrols (id, org_id, site_id, data) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+      .run(p.id, orgId, siteId, JSON.stringify(p));
+    this.publish({ orgId, siteId, event: { type: 'patrol', patrol: p } });
+  }
+
+  upsertPatrol(a: Actor, input: Partial<Patrol>, id?: string): Patrol {
+    this.require(a, 'patrol.manage', id ?? 'patrol');
+    const cur = id ? this.patrolRow(a.orgId, id) : undefined;
+    if (id && (!cur || !this.inScope(a, a.orgId, cur.siteId))) return fail(404, 'not_found', 'Patrol not found.');
+    const prev = cur?.p;
+    const name = String(input.name ?? prev?.name ?? '').trim();
+    if (!name || name.length > 80) fail(400, 'invalid', 'A name of up to 80 characters is required.');
+    const d = this.getDevice(a, String(input.deviceId ?? prev?.deviceId ?? ''));
+    if ((d.kind !== 'ugv' && d.kind !== 'uav') || !d.commands.includes('start')) fail(400, 'invalid', `${d.id} cannot run patrols (no start command).`);
+    const operatorId = String(input.operatorId ?? prev?.operatorId ?? '');
+    const op = this.db.prepare('SELECT role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(operatorId, a.orgId) as { role: Role } | undefined;
+    if (!op || op.role !== 'operator') fail(400, 'invalid', 'Choose an active operator.');
+    const route = this.clearRoute(a.orgId, d, this.validRoute((input.route ?? prev?.route ?? []) as Point[]));
+    const days = [...new Set(((input.days ?? prev?.days ?? []) as unknown[]).map(Number))].filter((x) => Number.isInteger(x) && x >= 0 && x <= 6).sort();
+    if (!days.length) fail(400, 'invalid', 'Pick at least one weekday.');
+    const times = [...new Set(((input.times ?? prev?.times ?? []) as unknown[]).map(String))].filter((t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)).sort();
+    if (!times.length || times.length > 24) fail(400, 'invalid', 'Give 1–24 times as HH:MM.');
+    const tz = getOrgSettings(this.db, a.orgId).detection.timezone;
+    const now = this.now();
+    const p: Patrol = {
+      id: id ?? `${this.prefix(a.orgId)}PAT-${String(nextNumber(this.db, a.orgId, 'patrol')).padStart(3, '0')}`,
+      name,
+      deviceId: d.id,
+      operatorId,
+      route,
+      days,
+      times,
+      enabled: input.enabled ?? prev?.enabled ?? true,
+      autoStart: input.autoStart ?? prev?.autoStart ?? false,
+      createdBy: prev?.createdBy ?? a.userId ?? a.name,
+      createdAt: prev?.createdAt ?? now,
+      lastRunAt: prev?.lastRunAt,
+      lastMissionId: prev?.lastMissionId,
+      lastOutcome: prev?.lastOutcome,
+      note: typeof input.note === 'string' ? input.note.trim().slice(0, 200) || undefined : prev?.note,
+    };
+    p.nextRunAt = p.enabled ? nextRun(now, p.days, p.times, tz) : undefined;
+    this.savePatrol(a.orgId, d.siteId, p);
+    this.audit(
+      a,
+      prev ? 'patrol.update' : 'patrol.create',
+      p.id,
+      'ok',
+      `${p.name}: ${d.id}, ${p.days.join('')} at ${p.times.join(' ')}${p.autoStart ? ', auto-start' : ''}${p.enabled ? '' : ', disabled'}`,
+    );
+    return p;
+  }
+
+  deletePatrol(a: Actor, id: string) {
+    this.require(a, 'patrol.manage', id);
+    const cur = this.patrolRow(a.orgId, id);
+    if (!cur || !this.inScope(a, a.orgId, cur.siteId)) return fail(404, 'not_found', 'Patrol not found.');
+    this.db.prepare('DELETE FROM patrols WHERE id = ?').run(id);
+    this.audit(a, 'patrol.delete', id, 'ok', cur.p.name);
+    this.publish({ orgId: a.orgId, siteId: cur.siteId, event: { type: 'patrol', patrol: cur.p, deleted: true } });
+    return { ok: true };
+  }
+
+  /** Runs a patrol now (supervisor). */
+  runPatrol(a: Actor, id: string) {
+    this.require(a, 'patrol.manage', id);
+    const cur = this.patrolRow(a.orgId, id);
+    if (!cur || !this.inScope(a, a.orgId, cur.siteId)) return fail(404, 'not_found', 'Patrol not found.');
+    const r = this.startPatrolRun(a.orgId, cur.siteId, cur.p, a, 'manual');
+    if (!r.ok) return fail(409, 'conflict', r.reason);
+    return r;
+  }
+
+  /** Timer: start every enabled patrol whose time has come. */
+  runPatrols(now = this.now()) {
+    const rows = this.db.prepare('SELECT org_id, site_id, data FROM patrols').all() as { org_id: string; site_id: string; data: string }[];
+    const out: { id: string; ok: boolean; reason?: string }[] = [];
+    for (const r of rows) {
+      const p = JSON.parse(r.data) as Patrol;
+      if (!p.enabled || !p.nextRunAt || p.nextRunAt > now) continue;
+      const tz = getOrgSettings(this.db, r.org_id).detection.timezone;
+      const res = this.startPatrolRun(r.org_id, r.site_id, p, this.systemActor(r.org_id, 'system', 'Patrol scheduler'), 'schedule', now);
+      out.push({ id: p.id, ...res });
+      const fresh = this.patrolRow(r.org_id, p.id)?.p ?? p;
+      fresh.nextRunAt = nextRun(now, fresh.days, fresh.times, tz);
+      this.savePatrol(r.org_id, r.site_id, fresh);
+    }
+    return out;
+  }
+
+  /**
+   * One patrol run: a patrol incident (verified by the schedule's standing order) and a mission
+   * approved under the standing approval of the supervisor who set the schedule. With autoStart
+   * the vehicle is assigned to the operator and started; otherwise the operator accepts as usual.
+   */
+  private startPatrolRun(
+    orgId: string,
+    siteId: string,
+    p: Patrol,
+    a: Actor,
+    trigger: 'schedule' | 'manual',
+    now = this.now(),
+  ): { ok: true; incidentId: string; missionId: string; started: boolean } | { ok: false; reason: string } {
+    const d = this.devices.get(p.deviceId);
+    const skip = (reason: string) => {
+      p.lastRunAt = now;
+      p.lastOutcome = 'skipped';
+      this.savePatrol(orgId, siteId, p);
+      this.audit(a, 'patrol.skip', p.id, 'error', reason);
+      this.publish({ orgId, siteId, event: { type: 'notice', tone: 'warn', text: `Patrol "${p.name}" skipped: ${reason}` } });
+      return { ok: false as const, reason };
+    };
+    if (!d || d.orgId !== orgId) return skip(`${p.deviceId} is not registered.`);
+    const fresh = freshnessAt(now, d);
+    if (fresh !== 'live') return skip(`${d.id} telemetry is ${fresh}.`);
+    if ((d.battery ?? 100) < 25) return skip(`${d.id} battery ${Math.round(d.battery ?? 0)}% is too low.`);
+    if (!isReadyAt(now, d, this.allMissions(orgId))) return skip(`${d.id} is on another mission.`);
+    const hits = routeViolations(p.route, d.pos, this.geofencesOf(orgId, siteId), d.kind as 'ugv' | 'uav');
+    if (hits.length) return skip(`route enters keep-out zone "${hits[0].name}".`);
+    const operator = this.db.prepare('SELECT name FROM users WHERE id = ? AND org_id = ? AND active = 1').get(p.operatorId, orgId) as { name: string } | undefined;
+    if (!operator) return skip('the assigned operator is no longer active.');
+    const source = trigger === 'schedule' ? 'Patrol scheduler' : a.name;
+    const inc: Incident = {
+      id: `${this.prefix(orgId)}INC-${String(nextNumber(this.db, orgId, 'incident', 1)).padStart(3, '0')}`,
+      title: `Patrol: ${p.name}`,
+      type: 'Scheduled patrol',
+      severity: 'low',
+      status: 'confirmed',
+      zone: d.zone,
+      place: p.name,
+      pos: p.route[p.route.length - 1],
+      source,
+      createdAt: now,
+      owner: operator.name,
+      thumb: 'path',
+      patrolId: p.id,
+    };
+    const m: Mission = {
+      id: `${this.prefix(orgId)}MSN-${String(nextNumber(this.db, orgId, 'mission')).padStart(4, '0')}`,
+      incidentId: inc.id,
+      deviceId: d.id,
+      operatorId: p.operatorId,
+      checkpoints: p.route.map((q) => ({ ...q })),
+      planVersion: 1,
+      approvedVersion: 1,
+      approvedBy: p.createdBy,
+      status: 'approved',
+      nextCp: 0,
+      createdAt: now,
+      patrolId: p.id,
+      note: `Standing approval from patrol schedule ${p.id} (${this.userName(orgId, p.createdBy)}).`,
+    };
+    let started = false;
+    tx(this.db, () => {
+      this.saveIncident(orgId, siteId, inc);
+      this.event(a, orgId, siteId, inc.id, trigger === 'schedule' ? 'Scheduled patrol due' : 'Patrol started by supervisor', {
+        actor: source,
+        tone: 'info',
+        detail: `${d.id} · ${p.route.length} checkpoints · operator ${operator.name}.`,
+      });
+      this.saveMission(orgId, siteId, m);
+      this.event(a, orgId, siteId, inc.id, 'Mission approved (standing approval)', {
+        actor: source,
+        tone: 'ok',
+        detail: `Plan v1 pre-approved by ${this.userName(orgId, p.createdBy)} when the schedule was set.`,
+      });
+      this.audit(a, 'patrol.run', p.id, 'ok', `${inc.id} ${m.id} (${trigger})`);
+    });
+    if (p.autoStart && (!d.controlOwner || d.controlOwner === p.operatorId)) {
+      d.controlOwner = p.operatorId;
+      this.saveDevice(d);
+      m.status = 'assigned';
+      this.saveMission(orgId, siteId, m);
+      this.event(a, orgId, siteId, inc.id, 'Operator assigned by schedule', { actor: source, detail: `${operator.name} holds control of ${d.id} for this patrol.` });
+      try {
+        this.issueCommand({ ...this.systemActor(orgId, 'system', 'Patrol scheduler'), userId: p.operatorId }, m.id, 'start', `${m.id}:patrol-start`);
+        started = true;
+      } catch (e) {
+        this.event(null, orgId, siteId, inc.id, 'Automatic start refused', { tone: 'warn', detail: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    p.lastRunAt = now;
+    p.lastMissionId = m.id;
+    p.lastOutcome = started ? 'started' : 'approved';
+    this.savePatrol(orgId, siteId, p);
+    return { ok: true, incidentId: inc.id, missionId: m.id, started };
+  }
+
+  /** A patrol mission finished: close its incident with the outcome and give the vehicle back. */
+  private finishPatrolRun(orgId: string, siteId: string, m: Mission, at: number) {
+    const r = this.incRow(m.incidentId);
+    if (!r) return;
+    const inc = JSON.parse(r.data) as Incident;
+    const d = this.devices.get(m.deviceId);
+    if (d && d.controlOwner === m.operatorId) {
+      d.controlOwner = undefined;
+      this.saveDevice(d);
+    }
+    if (!['closed', 'dismissed', 'duplicate'].includes(inc.status)) {
+      inc.status = 'closed';
+      inc.outcome = inc.outcome ?? 'Patrol completed. No findings reported.';
+      this.saveIncident(orgId, siteId, inc);
+      this.event(null, orgId, siteId, inc.id, 'Patrol completed', {
+        actor: m.deviceId,
+        tone: 'ok',
+        at,
+        detail: `${m.checkpoints.length} checkpoints driven. Incident closed automatically; evidence stays attached.`,
+      });
+    }
+    this.audit(this.systemActor(orgId, 'system', 'Patrol scheduler'), 'patrol.complete', m.patrolId ?? m.id, 'ok', `${m.id} ${inc.id}`);
+  }
+
   // ---- snapshot -----------------------------------------------------------
 
   meta(orgId: string): Meta {
@@ -2261,6 +2776,13 @@ export class Platform {
       timeline,
       evidence: can(a.role as Role, 'evidence.view') ? this.evidenceFor(a, ids) : [],
       assignments: this.listAssignments(a).filter((x) => ids.has(x.incidentId)),
+      geofences: this.geofencesOf(a.orgId, site.id),
+      patrols:
+        a.role === 'admin' || a.role === 'responder'
+          ? []
+          : this.listPatrols(a)
+              .filter((p) => p.siteId === site.id)
+              .map(({ siteId: _s, ...p }) => p),
     };
   }
 
@@ -2270,6 +2792,8 @@ export class Platform {
     if (m.siteId && a.siteIds.length && !a.siteIds.includes(m.siteId)) return false;
     const e = m.event;
     if (e.type === 'resync' || e.type === 'notice') return true;
+    if (e.type === 'geofence') return true;
+    if (e.type === 'patrol') return a.role !== 'responder' && a.role !== 'admin';
     if (a.role === 'admin') return e.type === 'audit' || e.type === 'device';
     if (e.type === 'audit') return can(a.role as Role, 'audit.view');
     if (a.role === 'responder') {
@@ -2287,6 +2811,60 @@ export class Platform {
   userActor(u: SessionUser, extra: Partial<Actor> = {}): Actor {
     return { kind: 'user', orgId: u.orgId, siteIds: u.siteIds, userId: u.id, name: u.name, role: u.role, stepUpUntil: u.stepUpUntil, ...extra };
   }
+}
+
+/** Local weekday, date and minutes of a timestamp in a time zone. */
+function localClock(at: number, tz: string) {
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'short',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(at));
+  } catch {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC',
+      weekday: 'short',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(at));
+  }
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '0';
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(get('weekday'));
+  const y = Number(get('year'));
+  const mo = Number(get('month'));
+  const d = Number(get('day'));
+  const h = Number(get('hour')) % 24;
+  const mi = Number(get('minute'));
+  // Offset between the zone's wall clock and UTC at this instant.
+  const offsetMs = Date.UTC(y, mo - 1, d, h, mi) - (at - (at % 60_000));
+  return { day, y, mo, d, h, mi, offsetMs };
+}
+
+/** Next instant after `after` that falls on one of the weekdays at one of the HH:MM times, in the zone. */
+export function nextRun(after: number, days: number[], times: string[], tz: string): number | undefined {
+  let best: number | undefined;
+  for (let k = 0; k < 8 && best === undefined; k++) {
+    const probe = after + k * 86_400_000;
+    const lc = localClock(probe, tz);
+    if (!days.includes(lc.day)) continue;
+    for (const t of times) {
+      const [h, mi] = t.split(':').map(Number);
+      const instant = Date.UTC(lc.y, lc.mo - 1, lc.d, h, mi) - lc.offsetMs;
+      if (instant > after && (best === undefined || instant < best)) best = instant;
+    }
+  }
+  return best;
 }
 
 /** Clip length: 5 s to 10 minutes, whole seconds. */

@@ -19,9 +19,11 @@ import type {
   Role,
   TimelineEvent,
   User,
+  DeviceStats,
 } from './types';
 import type { SiteGeometry } from './site';
 import type { GimbalState, GwCameraResult, SrvCamera, StreamInfo } from './camera';
+import type { Geofence } from './routing';
 import type { CameraMount } from './aim';
 
 export const GATEWAY_PROTOCOL = 'ps-gw/1';
@@ -357,6 +359,39 @@ export interface Snapshot {
   timeline: TimelineEvent[];
   evidence: Evidence[];
   assignments: Assignment[];
+  geofences: Geofence[];
+  patrols: Patrol[];
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled patrols
+// ---------------------------------------------------------------------------
+
+/**
+ * A recurring patrol: at each time on the listed weekdays the platform raises a patrol incident
+ * and a mission with a standing approval from the supervisor who created the schedule. The
+ * operator accepts and starts it, or, with autoStart, the platform starts it when the vehicle is
+ * ready and the operator is on shift.
+ */
+export interface Patrol {
+  id: string;
+  name: string;
+  deviceId: string;
+  operatorId: string;
+  route: Point[];
+  /** 0 = Sunday … 6 = Saturday, in the organisation's time zone. */
+  days: number[];
+  /** HH:MM local times. */
+  times: string[];
+  enabled: boolean;
+  autoStart: boolean;
+  createdBy: string;
+  createdAt: number;
+  lastRunAt?: number;
+  lastMissionId?: string;
+  lastOutcome?: 'started' | 'approved' | 'skipped';
+  nextRunAt?: number;
+  note?: string;
 }
 
 export interface ApiError {
@@ -389,7 +424,10 @@ export type ConsoleEvent =
       satellites?: number;
       temperatureC?: number;
       gimbal?: GimbalState;
+      stats?: DeviceStats;
     }
+  | { type: 'geofence'; geofence: Geofence; deleted?: boolean }
+  | { type: 'patrol'; patrol: Patrol; deleted?: boolean }
   | { type: 'timeline'; event: TimelineEvent }
   | { type: 'evidence'; evidence: Evidence }
   | { type: 'assignment'; assignment: Assignment }

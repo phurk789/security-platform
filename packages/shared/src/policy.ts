@@ -1,5 +1,6 @@
 // Rules shared by the server (authoritative) and the clients (to hide what a role cannot do).
 import { BUILDINGS, atBuilding, insideDemoArea } from './site';
+import { routeViolations, type Geofence } from './routing';
 import { floorPlan, inNoGo, routeCrossesWalls } from './indoor';
 import type { Device, Freshness, Mission, Role } from './types';
 
@@ -45,6 +46,9 @@ export type Action =
   | 'admin.backup'
   | 'admin.settings'
   | 'admin.privacy'
+  | 'site.geofences'
+  | 'patrol.manage'
+  | 'device.service'
   | 'demo.control';
 
 const DISPATCH: Action[] = [
@@ -72,15 +76,15 @@ const DISPATCH: Action[] = [
  */
 export const MATRIX: Record<Role, Action[]> = {
   dispatcher: DISPATCH,
-  supervisor: [...DISPATCH, 'mission.approve', 'control.handover', 'evidence.export', 'audit.view'],
+  supervisor: [...DISPATCH, 'mission.approve', 'control.handover', 'evidence.export', 'audit.view', 'site.geofences', 'patrol.manage'],
   operator: ['mission.accept', 'device.command', 'media.view', 'camera.control', 'payload.control', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'],
   responder: ['incident.create', 'field.update', 'evidence.view', 'evidence.add'],
   auditor: ['evidence.view', 'evidence.export', 'report.view', 'audit.view'],
-  admin: ['admin.users', 'admin.devices', 'admin.keys', 'admin.backup', 'admin.settings', 'admin.privacy', 'audit.view', 'demo.control'],
+  admin: ['admin.users', 'admin.devices', 'admin.keys', 'admin.backup', 'admin.settings', 'admin.privacy', 'site.geofences', 'device.service', 'audit.view', 'demo.control'],
 };
 
 /** Actions that require a recent password check. */
-export const STEP_UP_ACTIONS: Action[] = ['mission.approve', 'evidence.export', 'control.handover', 'admin.users', 'admin.keys', 'admin.backup', 'admin.privacy'];
+export const STEP_UP_ACTIONS: Action[] = ['mission.approve', 'evidence.export', 'control.handover', 'admin.users', 'admin.keys', 'admin.backup', 'admin.privacy', 'patrol.manage'];
 
 export function can(role: Role, action: Action): boolean {
   return MATRIX[role].includes(action);
@@ -121,13 +125,26 @@ export interface Check {
 }
 
 /** Pre-approval checks shown to the supervisor and re-run by the server on approve. */
-export function constraintChecksAt(now: number, d: Device, m: Mission, nameOf: (id?: string) => string): Check[] {
+export function constraintChecksAt(now: number, d: Device, m: Mission, nameOf: (id?: string) => string, fences: Geofence[] = []): Check[] {
   const fresh = freshnessAt(now, d);
   const inside = m.checkpoints.length > 0 && m.checkpoints.every(insideDemoArea);
   const battery = d.battery ?? 0;
+  const hits = d.kind === 'ugv' || d.kind === 'uav' ? routeViolations(m.checkpoints, d.pos, fences, d.kind) : [];
   const routeChecks: Check[] = d.indoor
     ? indoorRouteChecks(d, m)
-    : [{ label: 'Route inside demo area', ok: inside, hard: true, detail: `${m.checkpoints.length} checkpoints inside site boundary` }];
+    : [
+        { label: 'Route inside demo area', ok: inside, hard: true, detail: `${m.checkpoints.length} checkpoints inside site boundary` },
+        ...(fences.length
+          ? [
+              {
+                label: 'Route clear of keep-out zones',
+                ok: hits.length === 0,
+                hard: true,
+                detail: hits.length ? `Enters ${hits.map((f) => f.name).join(', ')}` : `${fences.filter((f) => f.active).length} active zones checked`,
+              },
+            ]
+          : []),
+      ];
   return [
     { label: 'Telemetry fresh', ok: fresh === 'live', hard: true, detail: fresh === 'live' ? 'Last seen < 5 s' : `Telemetry ${fresh}` },
     { label: 'Battery ≥ 30%', ok: battery >= 30, hard: true, detail: `${Math.round(battery)}%` },

@@ -204,6 +204,9 @@ export class TwinWorld {
   private routeGroup = new THREE.Group();
   private routeKey = '';
   private zoneLines: { name: string; line: THREE.LineLoop; fill: THREE.Mesh }[] = [];
+  /** Geofence overlays, rebuilt when the fence list changes. */
+  private fenceGroup = new THREE.Group();
+  private fenceKey = '';
   private labelsGroup = new THREE.Group();
   private cars: { g: THREE.Group; dir: 1 | -1; speed: number; lane: number }[] = [];
   private feedCams = new Map<string, THREE.PerspectiveCamera>();
@@ -1144,6 +1147,47 @@ export class TwinWorld {
     return out;
   }
 
+  /** Keep-out (red), caution (amber) and no-fly (violet) zones as dashed outlines with a faint floor fill. */
+  private syncFences() {
+    const s = this.state!;
+    if (!this.fenceGroup.parent) this.scene.add(this.fenceGroup);
+    const key = s.geofences.map((g) => `${g.id}:${g.active ? 1 : 0}:${g.kind}:${g.poly.map((p) => `${p.x},${p.y}`).join(';')}`).join('|');
+    if (key !== this.fenceKey) {
+      this.fenceKey = key;
+      for (const c of [...this.fenceGroup.children]) {
+        this.fenceGroup.remove(c);
+        (c as THREE.Mesh).geometry?.dispose?.();
+      }
+      for (const g of s.geofences) {
+        const color = g.kind === 'keep_out' ? RED : g.kind === 'caution' ? AMBER : new THREE.Color('#a78bfa');
+        const alpha = g.active ? 1 : 0.35;
+        const pts = g.poly.map((p) => {
+          const w = toWorld(p.x, p.y);
+          return new THREE.Vector3(w.x, 0.3, w.z);
+        });
+        const line = new THREE.LineLoop(
+          new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineDashedMaterial({ color, dashSize: 2.2, gapSize: 1.6, transparent: true, opacity: 0.9 * alpha, toneMapped: false }),
+        );
+        line.computeLineDistances();
+        const shape = new THREE.Shape(g.poly.map((p) => new THREE.Vector2(p.x, p.y)));
+        const fill = new THREE.Mesh(
+          new THREE.ShapeGeometry(shape),
+          new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.12 * alpha, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }),
+        );
+        // Shape geometry is in site metres on the x/y plane: lay it flat and map site y onto world z.
+        fill.rotation.x = Math.PI / 2;
+        const o = toWorld(0, 0);
+        const ox = toWorld(1, 0);
+        const oz = toWorld(0, 1);
+        fill.scale.set(ox.x - o.x, oz.z - o.z, 1);
+        fill.position.set(o.x, 0.22, o.z);
+        this.fenceGroup.add(overlay(line), overlay(fill));
+      }
+    }
+    this.fenceGroup.visible = s.layers.geofences !== false;
+  }
+
   private syncZones() {
     const s = this.state!;
     const inc = s.incidents.find((i) => i.id === s.selectedIncidentId);
@@ -1232,6 +1276,7 @@ export class TwinWorld {
     this.syncSubjects(dt);
     this.syncRoute();
     this.syncZones();
+    this.syncFences();
     this.syncCallout();
     for (const b of this.buildingLabels) b.visible = this.labelsVisible;
   }

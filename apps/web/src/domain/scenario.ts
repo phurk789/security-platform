@@ -1,4 +1,4 @@
-import { DEFAULT_LAYERS, SEED_USERS, seedDevices, seedEvidence, seedIncidents, seedTimeline } from '@13store/shared';
+import { DEFAULT_GEOFENCES, DEFAULT_LAYERS, SEED_USERS, seedDevices, seedEvidence, seedIncidents, seedTimeline } from '@13store/shared';
 import type { AppState } from '@13store/shared';
 
 export { DEFAULT_ROUTE } from '@13store/shared';
@@ -31,6 +31,8 @@ export function initialState(): AppState {
     failsafeAt: {},
     replay: { active: false, at: now },
     assignments: [],
+    geofences: DEFAULT_GEOFENCES.map((g) => ({ ...g, poly: g.poly.map((p) => ({ ...p })) })),
+    patrols: [],
     dataLabel: 'OFFLINE DEMO',
     toasts: [],
     presentation: false,

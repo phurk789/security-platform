@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Ban,
   BatteryMedium,
@@ -25,7 +25,7 @@ import {
 import { ageMs, can, currentUser, fmtTime, freshness, isReady, userName } from '../domain/policy';
 import { isTerminal, missionForIncident } from '../domain/reducer';
 import { constraintChecks } from '../domain/policy';
-import { DEFAULT_ROUTE } from '@13store/shared';
+import { DEFAULT_ROUTE, planRoute, rankUnits } from '@13store/shared';
 import type { AppState, CommandType, Device, Incident, Mission, Point } from '@13store/shared';
 import { useStore } from '../store';
 import { CameraFeed } from './CameraFeed';
@@ -419,21 +419,66 @@ function Outcome({ inc }: { inc: Incident }) {
   );
 }
 
-function ReadyDevices({ onPick, picked }: { onPick?: (id: string) => void; picked?: string }) {
+/** Estimated arrival of every vehicle at the incident, planned around buildings and keep-out zones. */
+function useUnitRanking(inc: Incident | undefined) {
+  const { s } = useStore();
+  const ids = Object.values(s.devices)
+    .filter((d) => d.kind !== 'cctv')
+    .map((d) => `${d.id}:${Math.round(d.pos.x)}:${Math.round(d.pos.y)}`)
+    .join(',');
+  return useMemo(() => {
+    const out = new Map<string, { etaS: number; lengthM: number; ok: boolean; reason?: string; route: Point[] }>();
+    if (!inc) return out;
+    // Indoor vehicles follow floor plans, not the site planner: no outdoor ETA for them.
+    const units = Object.values(s.devices).filter((d) => d.kind !== 'cctv' && !d.indoor);
+    for (const r of rankUnits(units, inc.pos, s.geofences))
+      out.set(
+        r.unit.id,
+        r.plan.ok ? { etaS: r.etaS, lengthM: r.lengthM, ok: true, route: r.plan.checkpoints } : { etaS: Infinity, lengthM: Infinity, ok: false, reason: r.plan.reason, route: [] },
+      );
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids, inc?.id, inc?.pos.x, inc?.pos.y, s.geofences]);
+}
+
+function ReadyDevices({ onPick, picked, inc }: { onPick?: (id: string) => void; picked?: string; inc?: Incident }) {
   const { s } = useStore();
   const t = useT();
-  const list = Object.values(s.devices).filter((d) => d.kind !== 'cctv');
+  const rank = useUnitRanking(inc);
+  const list = Object.values(s.devices)
+    .filter((d) => d.kind !== 'cctv')
+    .sort((a, b) => Number(isReady(s, b)) - Number(isReady(s, a)) || (rank.get(a.id)?.etaS ?? Infinity) - (rank.get(b.id)?.etaS ?? Infinity));
+  const best = list.find((d) => isReady(s, d) && rank.get(d.id)?.ok)?.id;
   return (
     <section className="step">
       <h4>{onPick ? t('Choose device') : t('Available device')}</h4>
       {list.map((d) => (
-        <DeviceCard key={d.id} d={d} onPick={onPick} picked={picked === d.id} />
+        <DeviceCard key={d.id} d={d} onPick={onPick} picked={picked === d.id} eta={rank.get(d.id)} best={d.id === best} />
       ))}
     </section>
   );
 }
 
-function DeviceCard({ d, onPick, picked }: { d: Device; onPick?: (id: string) => void; picked?: boolean }) {
+function fmtEta(sec: number) {
+  if (!Number.isFinite(sec)) return '—';
+  const m = Math.floor(sec / 60);
+  const r = Math.round(sec % 60);
+  return m ? `${m} min ${String(r).padStart(2, '0')} s` : `${r} s`;
+}
+
+function DeviceCard({
+  d,
+  onPick,
+  picked,
+  eta,
+  best,
+}: {
+  d: Device;
+  onPick?: (id: string) => void;
+  picked?: boolean;
+  eta?: { etaS: number; lengthM: number; ok: boolean; reason?: string };
+  best?: boolean;
+}) {
   const { s } = useStore();
   const t = useT();
   const f = freshness(s, d);
@@ -496,6 +541,20 @@ function DeviceCard({ d, onPick, picked }: { d: Device; onPick?: (id: string) =>
             .map((c) => t(c.replace('_', ' ')))
             .join(' · ')}
         </small>
+        {eta && canPatrol && (
+          <small className={`eta${best ? ' best' : ''}`}>
+            {eta.ok ? (
+              <>
+                <RouteIcon size={12} /> {t('ETA {eta} · {m} m', { eta: fmtEta(eta.etaS), m: eta.lengthM })}
+                {best && ready ? ` · ${t('nearest')}` : ''}
+              </>
+            ) : (
+              <>
+                <RouteIcon size={12} /> {eta.reason ?? t('No clear route')}
+              </>
+            )}
+          </small>
+        )}
         {!canPatrol && <small className="warn-text">{t('Display only — no commands supported')}</small>}
         {canPatrol && !ready && (
           <small className="warn-text">
@@ -517,10 +576,17 @@ function PrepareMission({ inc }: { inc: Incident }) {
   const [route, setRoute] = useState('direct');
   const picked = s.devices[deviceId];
   const indoorPlan = picked?.indoor ? floorPlan(picked.indoor.buildingId, picked.indoor.level) : undefined;
+  // Route planned around buildings and keep-out zones from where the vehicle is now to the alert.
+  const autoPlan = useMemo(
+    () => (picked && !picked.indoor && (picked.kind === 'ugv' || picked.kind === 'uav') ? planRoute(picked.pos, inc.pos, { fences: s.geofences, kind: picked.kind }) : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deviceId, inc.id, Math.round(picked?.pos.x ?? 0), Math.round(picked?.pos.y ?? 0), s.geofences],
+  );
   useEffect(() => {
     // Indoor vehicle: the floor patrol is the only sensible default; outdoor routes would cross walls.
     if (indoorPlan && route !== 'indoor') setRoute('indoor');
-    if (!indoorPlan && route === 'indoor') setRoute('direct');
+    else if (!indoorPlan && (route === 'indoor' || route === 'auto')) setRoute(autoPlan?.ok ? 'auto' : 'direct');
+    else if (!indoorPlan && autoPlan?.ok && route === 'direct') setRoute('auto');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
   const operators = s.users.filter((u) => u.role === 'operator');
@@ -530,7 +596,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
   if (!open)
     return (
       <>
-        <ReadyDevices />
+        <ReadyDevices inc={inc} />
         <section className="step">
           <button className="btn-primary wide big" disabled={!allowed} onClick={() => setOpen(true)}>
             <Play size={18} /> {t('Prepare mission')}
@@ -550,13 +616,18 @@ function PrepareMission({ inc }: { inc: Incident }) {
           <li>{t('Approval')}</li>
         </ol>
       </section>
-      <ReadyDevices onPick={setDeviceId} picked={deviceId} />
+      <ReadyDevices onPick={setDeviceId} picked={deviceId} inc={inc} />
       <section className="step">
         <label className="field">
           <span>
             <RouteIcon size={14} /> {t('Route')}
           </span>
           <select value={route} onChange={(e) => setRoute(e.target.value)}>
+            {autoPlan?.ok && (
+              <option value="auto">
+                {t('Auto-planned to the alert · {k} checkpoints · {m} m · ETA {eta}', { k: autoPlan.checkpoints.length, m: autoPlan.lengthM, eta: fmtEta(autoPlan.etaS) })}
+              </option>
+            )}
             {indoorPlan && (
               <option value="indoor">
                 {t('Floor patrol · {b} level {n} · {k} checkpoints', {
@@ -598,7 +669,12 @@ function PrepareMission({ inc }: { inc: Incident }) {
                 incidentId: inc.id,
                 deviceId,
                 operatorId: op,
-                checkpoints: route === 'indoor' && indoorPlan ? indoorPlan.patrolRoute : (ROUTES.find((r) => r.id === route) ?? ROUTES[0]).pts,
+                checkpoints:
+                  route === 'indoor' && indoorPlan
+                    ? indoorPlan.patrolRoute
+                    : route === 'auto' && autoPlan?.ok
+                      ? autoPlan.checkpoints
+                      : (ROUTES.find((r) => r.id === route) ?? ROUTES[0]).pts,
               })
             }
           >

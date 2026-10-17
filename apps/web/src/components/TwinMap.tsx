@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type PointerEvent as RPointerEvent, type WheelEvent as RWheelEvent } from 'react';
 import { Bot, Building2, Cctv, Drone, Layers, LocateFixed, Minus, Plus, Search, TriangleAlert, X } from 'lucide-react';
-import { BUILDINGS, FENCE_Y, FLOOR_PLANS, GATE, PARKING, PLAZA, ROAD, SITE, ZONES, floorPlan, floorPlansOf, type FloorPlan } from '@13store/shared';
+import {
+  BUILDINGS,
+  FENCE_Y,
+  FLOOR_PLANS,
+  GATE,
+  GEOFENCE_KIND_LABEL,
+  PARKING,
+  PLAZA,
+  ROAD,
+  SITE,
+  ZONES,
+  floorPlan,
+  floorPlansOf,
+  type FloorPlan,
+  type Geofence,
+} from '@13store/shared';
 import { freshness, ageMs } from '../domain/policy';
 import { missionForIncident } from '../domain/reducer';
 import type { AppState, Device, Layers as LayerState, Point } from '@13store/shared';
@@ -141,6 +156,7 @@ export function TwinMap() {
           <g transform={tf} key={mode}>
             <Ground P={P} />
             {L.zones && <ZonesLayer P={P} selZone={selInc?.zone} />}
+            {L.geofences !== false && <GeofenceLayer P={P} fences={s.geofences} />}
             {mode === '2d' ? TREES.map((t, i) => <circle key={i} cx={t.x} cy={t.y} r={4} className="tree" />) : null}
             {(mode === '2d' || !L.buildings) &&
               BUILDINGS.map((b) => (
@@ -253,7 +269,7 @@ export function TwinMap() {
           </button>
           {layersOpen && (
             <div className="pop">
-              {(['buildings', 'traffic', 'cctv', 'ugv', 'uav', 'routes', 'poi', 'zones', 'labels', 'accuracy'] as (keyof LayerState)[]).map((k) => (
+              {(['buildings', 'traffic', 'cctv', 'ugv', 'uav', 'routes', 'geofences', 'poi', 'zones', 'labels', 'accuracy'] as (keyof LayerState)[]).map((k) => (
                 <label key={k}>
                   <input type="checkbox" checked={L[k] !== false} onChange={() => dispatch({ type: 'toggleLayer', layer: k })} />
                   {t(
@@ -264,6 +280,7 @@ export function TwinMap() {
                       ugv: 'UGV',
                       uav: 'UAV',
                       routes: 'Mission routes',
+                      geofences: 'Geofences',
                       poi: 'POI (entrances, hydrants)',
                       zones: 'Safety zones',
                       labels: 'Labels',
@@ -672,6 +689,35 @@ function ZonesLayer({ P, selZone }: { P: Proj; selZone?: string }) {
               <rect x={-20} y={-8} width={40} height={14} rx={3} className="chip" />
               <text textAnchor="middle" y={2.5} className="chip-t">
                 {z.name}
+              </text>
+            </g>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+/** Keep-out, caution and no-fly zones: hatched, with a small label. Inactive zones are shown faint. */
+function GeofenceLayer({ P, fences }: { P: Proj; fences: Geofence[] }) {
+  return (
+    <g>
+      {fences.map((g) => {
+        const cx = g.poly.reduce((a, p) => a + p.x, 0) / g.poly.length;
+        const cy = g.poly.reduce((a, p) => a + p.y, 0) / g.poly.length;
+        const [lx, ly] = P(cx, cy, P === P3 ? 2 : 0);
+        return (
+          <g key={g.id} className={`gf gf-${g.kind}${g.active ? '' : ' off'}`}>
+            <polygon
+              points={poly(
+                P,
+                g.poly.map((p) => [p.x, p.y] as [number, number]),
+              )}
+            />
+            <g transform={`translate(${lx} ${ly})`}>
+              <rect x={-30} y={-7} width={60} height={13} rx={3} className="chip" />
+              <text textAnchor="middle" y={3} className="chip-t">
+                {GEOFENCE_KIND_LABEL[g.kind].toUpperCase()}
               </text>
             </g>
           </g>

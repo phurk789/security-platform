@@ -92,6 +92,9 @@ export class SimUgv extends SimDevice {
     this.lastPhysics = now;
     const r = stepMotion(this.motion, dt);
     stepSensors(this.sensors, dt, 'ugv', this.motion.speed);
+    // Docked: idle within 3 m of the home position → the charger tops the battery up (~1 % per 20 s).
+    if (this.mode === 'idle' && this.motion.speed === 0 && Math.hypot(this.motion.x - this.seed.pos.x, this.motion.y - this.seed.pos.y) < 3)
+      this.sensors.battery = Math.min(100, this.sensors.battery + 0.05 * dt);
     const route = this.motion.route;
     for (const cp of r.checkpoints) {
       if (route && cp < route.length) this.emit({ kind: 'checkpoint', checkpoint: cp, detail: `Reached checkpoint ${cp + 1} of ${route.length}` });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BadgeCheck, DatabaseBackup, Eraser, KeyRound, Plus, RefreshCw, Router, ScanEye, Search, ShieldCheck, Timer, Trash2, UserPlus } from 'lucide-react';
+import { BadgeCheck, DatabaseBackup, Eraser, KeyRound, Octagon, Plus, RefreshCw, Router, ScanEye, Search, ShieldCheck, Timer, Trash2, UserPlus } from 'lucide-react';
 import {
+  GEOFENCE_KIND_LABEL,
   DEFAULT_DETECTION_RULES,
   DEFAULT_ORG_SETTINGS,
   DETECTION_LABEL,
@@ -77,6 +78,8 @@ function Admin() {
   const [lic, setLic] = useState<LicenseStatus | null>(null);
   const [settings, setSettings] = useState<OrgSettings>(DEFAULT_ORG_SETTINGS);
   const [ret, setRet] = useState<Record<keyof OrgSettings['retention'], string>>({ telemetryDays: '90', closedIncidentDays: '0', evidenceDays: '0', detectionDays: '90' });
+  const geofences = useStore().s.geofences;
+  const [ng, setNg] = useState({ name: '', kind: 'keep_out' as 'keep_out' | 'caution' | 'no_fly', x: '200', y: '120', w: '40', d: '30', uav: true, reason: '' });
   const [rules, setRules] = useState<DetectionRule[]>(DEFAULT_DETECTION_RULES);
   const [rulesDirty, setRulesDirty] = useState(false);
   const [pq, setPq] = useState('');
@@ -582,6 +585,92 @@ function Admin() {
             </>
           )}
         </section>
+        <section className="card">
+          <h3>
+            <Octagon size={16} /> {t('Geofences')}
+          </h3>
+          <p className="fine" style={{ marginTop: 0 }}>
+            {t(
+              'Keep-out zones refuse routes and raise a breach when a vehicle enters; caution zones are noted on the timeline; no-fly zones apply to aircraft. Supervisors can change them too.',
+            )}
+          </p>
+          <ul className="list">
+            {geofences.map((g) => (
+              <li key={g.id} className={g.active ? '' : 'dim'}>
+                <span>
+                  <b>{g.name}</b>{' '}
+                  <small className="muted">
+                    · {t(GEOFENCE_KIND_LABEL[g.kind])} · {g.appliesTo.map((k) => k.toUpperCase()).join('/')}
+                  </small>
+                  {g.reason && (
+                    <>
+                      <br />
+                      <small className="muted">{g.reason}</small>
+                    </>
+                  )}
+                </span>
+                <span className="row gap-s">
+                  <button className="btn-ghost small" onClick={() => act(() => session!.saveGeofence({ active: !g.active }, g.id))}>
+                    {g.active ? t('Deactivate') : t('Activate')}
+                  </button>
+                  <button className="btn-ghost small" onClick={() => act(() => session!.deleteGeofence(g.id), t('{name} removed.', { name: g.name }))} aria-label={t('Remove')}>
+                    <Trash2 size={14} />
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const x = Number(ng.x);
+              const y = Number(ng.y);
+              const w = Number(ng.w);
+              const d = Number(ng.d);
+              act(
+                () =>
+                  session!.saveGeofence({
+                    name: ng.name.trim(),
+                    kind: ng.kind,
+                    appliesTo: ng.kind === 'no_fly' ? ['uav'] : ng.uav ? ['ugv', 'uav'] : ['ugv'],
+                    reason: ng.reason.trim() || undefined,
+                    poly: [
+                      { x, y },
+                      { x: x + w, y },
+                      { x: x + w, y: y + d },
+                      { x, y: y + d },
+                    ],
+                  }),
+                t('Geofence {name} saved.', { name: ng.name.trim() }),
+              ).then(() => setNg({ ...ng, name: '', reason: '' }));
+            }}
+          >
+            <input placeholder={t('Name, e.g. Stage build-up')} value={ng.name} onChange={(e) => setNg({ ...ng, name: e.target.value })} />
+            <select value={ng.kind} onChange={(e) => setNg({ ...ng, kind: e.target.value as 'keep_out' | 'caution' | 'no_fly' })}>
+              <option value="keep_out">{t('Keep-out')}</option>
+              <option value="caution">{t('Caution')}</option>
+              <option value="no_fly">{t('No-fly')}</option>
+            </select>
+            <input className="num" placeholder="x" value={ng.x} onChange={(e) => setNg({ ...ng, x: e.target.value })} aria-label="x" />
+            <input className="num" placeholder="y" value={ng.y} onChange={(e) => setNg({ ...ng, y: e.target.value })} aria-label="y" />
+            <input className="num" placeholder={t('width')} value={ng.w} onChange={(e) => setNg({ ...ng, w: e.target.value })} aria-label={t('width')} />
+            <input className="num" placeholder={t('depth')} value={ng.d} onChange={(e) => setNg({ ...ng, d: e.target.value })} aria-label={t('depth')} />
+            {ng.kind !== 'no_fly' && (
+              <label className="check">
+                <input type="checkbox" checked={ng.uav} onChange={(e) => setNg({ ...ng, uav: e.target.checked })} /> {t('also aircraft')}
+              </label>
+            )}
+            <input placeholder={t('Reason shown to operators')} value={ng.reason} onChange={(e) => setNg({ ...ng, reason: e.target.value })} />
+            <button
+              className="btn-primary"
+              disabled={!ng.name.trim() || ![ng.x, ng.y, ng.w, ng.d].every((v) => v !== '' && Number.isFinite(Number(v))) || Number(ng.w) <= 0 || Number(ng.d) <= 0}
+            >
+              <Plus size={16} /> {t('Add rectangle (site metres)')}
+            </button>
+          </form>
+        </section>
+
         <section className="card rules-card">
           <h3>
             <ScanEye size={16} /> {t('Detection rules')}

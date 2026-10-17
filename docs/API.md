@@ -138,6 +138,19 @@ are bounded and unknown kinds/statuses fall back to `other` / `pending`.
 - Gateway adapters raise detections as `{ t: 'event', kind: 'detection', detection: {…} }` on the gateway channel
   (the ONVIF adapter does this for camera analytics events).
 
+## Vehicles: routes, geofences, patrols, service
+
+- `POST /routes/plan {deviceId, incidentId | to:{x,y}, via?}` → `{ ok, checkpoints, lengthM, etaS }`: a route around
+  buildings and keep-out zones (through the service gate). `GET /incidents/{id}/suggest` ranks vehicles by ETA.
+- `GET /geofences`; `POST /geofences`, `PATCH /geofences/{id}`, `DELETE /geofences/{id}` (`site.geofences`: supervisor,
+  admin). Kinds `keep_out` (routes refused, breach raised), `caution` (noted), `no_fly` (aircraft). A mission route that
+  enters an active keep-out zone is refused with `409 conflict`.
+- `GET /patrols`; `POST /patrols`, `PATCH /patrols/{id}`, `DELETE /patrols/{id}`, `POST /patrols/{id}/run`
+  (`patrol.manage`: supervisor, step-up). Body: `{ name, deviceId, operatorId, route, days: [0-6], times: ['HH:MM'],
+autoStart, enabled }`. Each run raises an incident of type `Scheduled patrol` and an approved mission (`patrolId` set).
+- `POST /devices/{id}/service {note}` (admin) and `PATCH /devices/{id}/stats {serviceIntervalM, serviceIntervalH, dock}`.
+  `Device.stats` carries odometer, runtime, missions, service counters and `docked`. See VEHICLES.md.
+
 ## Replay
 
 Clients showing past data send `X-Console-Mode: replay`. The server then refuses every change

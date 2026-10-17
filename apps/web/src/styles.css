@@ -3540,3 +3540,94 @@ html:lang(th) .meta dt {
 .rule-row select {
   min-height: 32px;
 }
+
+/* geofences on the 2D map */
+.gf polygon {
+  fill: rgba(248, 113, 113, 0.14);
+  stroke: var(--red);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+}
+.gf.gf-caution polygon {
+  fill: rgba(251, 191, 36, 0.12);
+  stroke: var(--amber);
+}
+.gf.gf-no_fly polygon {
+  fill: rgba(167, 139, 250, 0.14);
+  stroke: #a78bfa;
+}
+.gf.off polygon {
+  opacity: 0.35;
+}
+.gf .chip {
+  fill: rgba(10, 16, 26, 0.85);
+  stroke: var(--red);
+  stroke-width: 0.6;
+}
+.gf.gf-caution .chip {
+  stroke: var(--amber);
+}
+.gf.gf-no_fly .chip {
+  stroke: #a78bfa;
+}
+.gf .chip-t {
+  font-size: 6.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  fill: #fff;
+}
+.gf.off .chip,
+.gf.off .chip-t {
+  opacity: 0.5;
+}
+
+/* vehicles: ETA, patrols, service */
+.dev-card .eta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 0.78rem;
+  margin-top: 2px;
+}
+.dev-card .eta.best {
+  color: var(--cyan);
+  font-weight: 600;
+}
+.patrols li .row {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.patrol-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+.patrol-form .chips,
+.patrol-form .check,
+.patrol-form .fine,
+.patrol-form .row {
+  grid-column: 1 / -1;
+}
+.patrol-form .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+.inline-form input.num {
+  width: 70px;
+  flex: 0 0 auto;
+}
+.inline-form .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.service-cell {
+  display: inline-block;
+  min-width: 160px;
+}

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react';
-import type { AppState, CameraAction, Meta, Point, SessionUser } from '@13store/shared';
+import type { AppState, CameraAction, Geofence, Meta, Patrol, Point, SessionUser } from '@13store/shared';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
 import type { Api } from './api';
 
@@ -28,8 +28,32 @@ export interface Session {
   clip(deviceId: string, start: number, durationS: number): Promise<ClipLink>;
   /** Save a stretch of recording to the incident as evidence. */
   saveClip(incidentId: string, deviceId: string, start: number, durationS: number): Promise<void>;
+  /** Vehicles ranked by estimated arrival at an incident, each with a planned route. */
+  suggestUnits(incidentId: string): Promise<UnitSuggestion[]>;
+  /** Plan a route for a vehicle around buildings and keep-out zones. */
+  planRoute(deviceId: string, target: { incidentId: string } | Point): Promise<RoutePlan>;
+  saveGeofence(g: Partial<Geofence>, id?: string): Promise<Geofence | undefined>;
+  deleteGeofence(id: string): Promise<unknown>;
+  savePatrol(p: Partial<Patrol>, id?: string): Promise<Patrol | undefined>;
+  deletePatrol(id: string): Promise<unknown>;
+  runPatrol(id: string): Promise<unknown>;
+  recordService(deviceId: string, note: string): Promise<unknown>;
   reload(): Promise<void>;
 }
+
+export interface UnitSuggestion {
+  deviceId: string;
+  kind: string;
+  model: string;
+  ready: boolean;
+  battery?: number;
+  etaS: number | null;
+  lengthM: number | null;
+  checkpoints: Point[];
+  reason?: string;
+}
+
+export type RoutePlan = { deviceId: string; from: Point; to: Point } & ({ ok: true; checkpoints: Point[]; lengthM: number; etaS: number } | { ok: false; reason: string });
 
 export interface Recordings {
   label: 'RECORDED' | 'SIMULATED';
