@@ -133,7 +133,11 @@ export function CameraControls({ device: d, aimAt: target }: { device: Device; /
   const hold = (start: () => void) => ({
     onPointerDown: (e: PointerEvent<HTMLButtonElement>) => {
       e.preventDefault();
-      e.currentTarget.setPointerCapture?.(e.pointerId);
+      try {
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+      } catch {
+        /* synthetic events have no active pointer */
+      }
       start();
     },
     onPointerUp: release,

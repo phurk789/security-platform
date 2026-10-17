@@ -84,3 +84,16 @@
 .ptz-pl-now { font-size: 0.76rem; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root[data-theme='light'] .ptz-btn.pl-spot.on { background: #fff6d6; border-color: #d4a514; color: #8a6400; }
 @media (prefers-reduced-motion: reduce) { .ptz-btn.pl-beacon.on { animation: none; background: rgba(239, 68, 68, 0.45); } }
+
+/* Feed source menu (3D twin / recorded clip / this computer's camera) */
+.feed-src { position: relative; display: inline-flex; }
+.feed-srcmenu { position: fixed; z-index: 70; min-width: 260px; max-width: 320px; display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--line-2); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); pointer-events: auto; text-align: left; }
+.feed-srcmenu button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font-size: 0.8rem; font-weight: 600; text-shadow: none; }
+.feed-srcmenu button small { font-weight: 400; font-size: 0.7rem; color: var(--text-3); white-space: normal; }
+.feed-srcmenu button[aria-checked='true'] { background: rgba(56, 189, 248, 0.12); color: var(--cyan); }
+.feed-srcmenu button:hover { background: rgba(56, 189, 248, 0.08); }
+.feed-tag.recorded { background: rgba(251, 191, 36, 0.2); border-color: var(--amber); color: var(--amber); }
+.feed video.recorded { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; transform-origin: 50% 50%; transition: transform 0.35s ease-out; }
+.feed.frozen video.recorded { filter: grayscale(0.7) brightness(0.7); }
+.feed video.local { transform: scaleX(-1); } /* mirror like a viewfinder */
+:root[data-theme='light'] .feed-srcmenu { --text: #0f1b2d; --text-3: #6b7b91; background: #fff; }

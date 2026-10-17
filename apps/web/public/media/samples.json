@@ -1,0 +1,7 @@
+{
+  "clips": {
+    "kind:ugv": { "src": "media/ugv-onboard.mp4", "credit": "Onboard camera, recorded on a field test", "ownDevice": true },
+    "kind:cctv": { "src": "media/cctv-gate.mp4", "credit": "Gate camera, recorded on site", "ownDevice": true },
+    "kind:uav": { "src": "media/uav-aerial.mp4", "credit": "Drone camera, recorded on a flight test", "ownDevice": true }
+  }
+}

@@ -608,4 +608,15 @@ export const TH: Record<string, string> = {
   'Outcome recorded with the mission still linked. A false alarm is still a full record: who checked, what was seen, what was done.': 'บันทึกผลโดยยังผูกกับภารกิจ แม้เป็นสัญญาณหลอกก็มีบันทึกครบ: ใครตรวจ เห็นอะไร ทำอะไร',
   'Close and report': 'ปิดเหตุและออกรายงาน',
   'The report lists the incident, mission, approver, commands and evidence. Every export is logged.': 'รายงานรวมเหตุ ภารกิจ ผู้อนุมัติ คำสั่ง และหลักฐาน การส่งออกทุกครั้งถูกบันทึก',
+  // --- feed sources ---------------------------------------------------------
+  'Video source': 'แหล่งภาพวิดีโอ',
+  '3D twin (simulated)': 'ดิจิทัลทวิน 3D (จำลอง)',
+  'Recorded footage': 'วิดีโอที่บันทึกไว้ (ของจริง)',
+  'No clip for this device. Add {file} and reload.': 'ยังไม่มีคลิปของอุปกรณ์นี้ ใส่ไฟล์ {file} แล้วโหลดใหม่',
+  'Pan and zoom are applied digitally to recorded footage.': 'การหมุนและซูมถูกใส่ลงบนภาพที่บันทึกไว้แบบดิจิทัล',
+  "This computer's camera (live)": 'กล้องของเครื่องนี้ (สด)',
+  'Webcam or USB camera. The browser asks for permission once.': 'เว็บแคมหรือกล้อง USB เบราว์เซอร์จะขออนุญาตครั้งเดียว',
+  'Connecting to the camera…': 'กำลังเชื่อมต่อกล้อง…',
+  'Camera permission was refused. Allow the camera for this site and choose the source again.': 'ถูกปฏิเสธการใช้กล้อง กรุณาอนุญาตกล้องให้เว็บไซต์นี้แล้วเลือกแหล่งภาพอีกครั้ง',
+  'No camera is available in this view. Open the demo in a browser tab (HTTPS or localhost) with a camera attached.': 'มุมมองนี้ใช้กล้องไม่ได้ เปิดเดโมในแท็บเบราว์เซอร์ (HTTPS หรือ localhost) ที่มีกล้องต่ออยู่',
 };

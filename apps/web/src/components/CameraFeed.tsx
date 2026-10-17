@@ -7,13 +7,20 @@ import { useStore } from '../store';
 import { CameraControls } from './CameraControls';
 import { WhepVideo } from './WhepVideo';
 import { useAppearance } from './Hud';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Film } from 'lucide-react';
+import { RecordedFeed } from './RecordedFeed';
+import { LocalCameraFeed } from './LocalCameraFeed';
+import { localCameraAvailable, setFeedSource, setWebcamDevice, useFeedPrefs, useSampleClip } from '../media/feeds';
 
 export type Scene = 'gate' | 'plaza' | 'path' | 'lot' | 'ugv' | 'equipment';
 
 /**
- * Drawn stand-in for a camera stream. Always labelled SIMULATED (UXUI §7).
- * When the source is stale or offline the frame freezes and the overlay says so — never LIVE.
+ * Camera feed. Real device stream (WHEP) when there is one; otherwise the 3D twin (SIMULATED),
+ * a recorded clip (RECORDED) or this computer's camera (LIVE · LOCAL CAMERA), as chosen in the
+ * feed's source menu. When telemetry is stale or offline the frame freezes and the overlay says
+ * so — a frozen picture is never labelled LIVE (UXUI §7).
  */
 export function CameraFeed({
   scene,
@@ -50,20 +57,48 @@ export function CameraFeed({
   const dev = id ? s.devices[id] : undefined;
   // Real camera with a stream on the site media server: play it over WebRTC. Not in replay.
   const liveStream = !compact && !replay && !!session && !!dev && dev.integration !== 'simulated' && !!dev.stream?.whep;
-  const live3d = !compact && !liveStream && !!id && webglAvailable();
+  // Picture source when the device is not streaming for real: 3D twin, a recorded clip, or this computer's camera.
+  const prefs = useFeedPrefs();
+  const sample = useSampleClip(id, dev?.kind);
+  const local = !compact && !liveStream && !replay && !!id && prefs.webcamDevice === id;
+  const recorded = !compact && !liveStream && !replay && !local && !!id && prefs.source === 'recorded' && !!sample.clip && !sample.missing;
+  const live3d = !compact && !liveStream && !local && !recorded && !!id && webglAvailable();
   const g = dev?.capabilities.includes('gimbal') ? dev.gimbal : undefined;
+  // The feed clips its content, so the source menu is positioned on the viewport.
+  const [menu, setMenu] = useState<{ top: number; right: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const openMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (menu) return setMenu(null);
+    const r = e.currentTarget.getBoundingClientRect();
+    setMenu({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+  };
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!menuRef.current?.contains(t) && !btnRef.current?.contains(t)) setMenu(null);
+    };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [menu]);
+  const srcLabel = local ? 'LIVE · LOCAL CAMERA' : recorded ? (sample.clip?.ownDevice ? 'RECORDED · OWN DEVICE' : 'RECORDED · SAMPLE') : 'SIMULATED FEED';
   // Small view: low-resolution sub-stream when the camera has one; HD on request.
   const hasSub = liveStream && !!dev?.stream?.whepSub;
   const [hd, setHd] = useState(false);
   const useSub = hasSub && !hd;
   const feed = (
-    <div className={`feed${compact ? ' compact' : ''}${frozen && !liveStream ? ' frozen' : ''}${live3d ? ' feed-3d' : ''}`}>
-      {liveStream ? (
+    <div className={`feed${compact ? ' compact' : ''}${frozen && !liveStream && !local ? ' frozen' : ''}${live3d ? ' feed-3d' : ''}${recorded ? ' feed-rec' : ''}`}>
+      {local ? (
+        <LocalCameraFeed key={id} />
+      ) : recorded ? (
+        <RecordedFeed key={sample.clip!.src} clip={sample.clip!} frozen={frozen} gimbal={g} />
+      ) : liveStream ? (
         <WhepVideo
           key={`${dev!.id}:${useSub ? 'sub' : 'main'}`}
           getUrl={async () => {
             const r = await session!.mediaSession(dev!.id);
-            const u = useSub ? r.whepSub : r.whep ?? r.whepSub;
+            const u = useSub ? r.whepSub : (r.whep ?? r.whepSub);
             if (!u) throw new Error(tr('No live stream for this device.'));
             return u;
           }}
@@ -71,25 +106,25 @@ export function CameraFeed({
       ) : live3d ? (
         <SceneFeed deviceId={id!} ir={night && id!.startsWith('CCTV')} frozen={frozen} day={!night} />
       ) : (
-      <svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-label={tr('{label} simulated camera view', { label })}>
-        <defs>
-          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#0b1626" />
-            <stop offset="1" stopColor="#1c2a3c" />
-          </linearGradient>
-          <radialGradient id="lamp" cx="0.5" cy="0.5" r="0.5">
-            <stop offset="0" stopColor="#ffe9b0" stopOpacity="0.9" />
-            <stop offset="1" stopColor="#ffe9b0" stopOpacity="0" />
-          </radialGradient>
-        </defs>
-        <rect width="320" height="180" fill="url(#sky)" />
-        {scene === 'gate' && <GateScene />}
-        {scene === 'ugv' && <UgvScene progress={progress} />}
-        {scene === 'plaza' && <PlazaScene />}
-        {scene === 'path' && <PathScene />}
-        {(scene === 'lot' || scene === 'equipment') && <LotScene />}
-        <rect width="320" height="180" className="scan" />
-      </svg>
+        <svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-label={tr('{label} simulated camera view', { label })}>
+          <defs>
+            <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#0b1626" />
+              <stop offset="1" stopColor="#1c2a3c" />
+            </linearGradient>
+            <radialGradient id="lamp" cx="0.5" cy="0.5" r="0.5">
+              <stop offset="0" stopColor="#ffe9b0" stopOpacity="0.9" />
+              <stop offset="1" stopColor="#ffe9b0" stopOpacity="0" />
+            </radialGradient>
+          </defs>
+          <rect width="320" height="180" fill="url(#sky)" />
+          {scene === 'gate' && <GateScene />}
+          {scene === 'ugv' && <UgvScene progress={progress} />}
+          {scene === 'plaza' && <PlazaScene />}
+          {scene === 'path' && <PathScene />}
+          {(scene === 'lot' || scene === 'equipment') && <LotScene />}
+          <rect width="320" height="180" className="scan" />
+        </svg>
       )}
       {!compact && g && !frozen && (
         <>
@@ -112,7 +147,61 @@ export function CameraFeed({
                   {hd ? 'HD' : 'SD'}
                 </button>
               )}
-              <span className={`feed-tag ${replay ? 'replay' : liveStream ? 'live' : ''}`}>{replay ? 'REPLAY' : liveStream ? 'LIVE' : 'SIMULATED FEED'}</span>
+              {!liveStream && !replay && id && (
+                <div className="feed-src">
+                  <button ref={btnRef} className="feed-q" onClick={openMenu} aria-haspopup="menu" aria-expanded={!!menu} title={tr('Video source')}>
+                    <Film size={11} />
+                  </button>
+                  {menu &&
+                    createPortal(
+                      <div className="feed-srcmenu" role="menu" ref={menuRef} style={{ top: menu.top, right: menu.right }}>
+                        <button
+                          role="menuitemradio"
+                          aria-checked={!local && !recorded}
+                          onClick={() => {
+                            setFeedSource('sim');
+                            if (prefs.webcamDevice === id) setWebcamDevice(null);
+                            setMenu(null);
+                          }}
+                        >
+                          {tr('3D twin (simulated)')}
+                        </button>
+                        <button
+                          role="menuitemradio"
+                          aria-checked={recorded}
+                          onClick={() => {
+                            setFeedSource('recorded');
+                            if (prefs.webcamDevice === id) setWebcamDevice(null);
+                            setMenu(null);
+                          }}
+                        >
+                          {tr('Recorded footage')}
+                          {sample.loaded && (!sample.clip || sample.missing) && (
+                            <small>{tr('No clip for this device. Add {file} and reload.', { file: sample.wanted ?? 'media/<id>.mp4' })}</small>
+                          )}
+                          {sample.clip && !sample.missing && <small>{tr('Pan and zoom are applied digitally to recorded footage.')}</small>}
+                        </button>
+                        {localCameraAvailable() && (
+                          <button
+                            role="menuitemradio"
+                            aria-checked={local}
+                            onClick={() => {
+                              setWebcamDevice(local ? null : id);
+                              setMenu(null);
+                            }}
+                          >
+                            {tr("This computer's camera (live)")}
+                            <small>{tr('Webcam or USB camera. The browser asks for permission once.')}</small>
+                          </button>
+                        )}
+                      </div>,
+                      document.body,
+                    )}
+                </div>
+              )}
+              <span className={`feed-tag ${replay ? 'replay' : liveStream || local ? 'live' : recorded ? 'recorded' : ''}`}>
+                {replay ? 'REPLAY' : liveStream ? 'LIVE' : srcLabel}
+              </span>
             </span>
           </div>
           <div className="feed-bottom">
@@ -120,6 +209,7 @@ export function CameraFeed({
               {fmtDate(time)} &nbsp;{fmtTime(time, true)}
             </span>
             {live3d && !frozen && <span className="feed-meta">{night && id!.startsWith('CCTV') ? 'IR · ' : ''}12 fps · 1.8 Mbps</span>}
+            {recorded && !frozen && sample.clip?.credit && <span className="feed-meta">{sample.clip.credit}</span>}
             {frozen && <span className="feed-frozen">{freshness === 'offline' ? `NO SIGNAL · ${tr('last frame')}` : `FEED DELAYED · ${tr('frame frozen')}`}</span>}
           </div>
         </>
