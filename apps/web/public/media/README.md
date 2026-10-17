@@ -26,3 +26,9 @@ as they are after the command above. Gimbal pan/tilt/zoom from the console is ap
 recorded picture digitally.
 
 Expected default file names: `ugv-onboard.mp4`, `cctv-gate.mp4`, `uav-aerial.mp4`.
+
+## Real building models (BIM)
+
+Copy `twin.example.json` to `twin.json`, put your glTF model (`site.glb`) and orthophoto
+(`site-ortho.jpg`) here, and the twin shows them in place of the drawn buildings. Export steps and
+coordinate rules: `docs/BIM.md`.

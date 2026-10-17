@@ -3,6 +3,11 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { getQuality, useQuality } from '../twin/quality';
 import { useStore } from '../store';
 import { getWorld, subscribeFrame } from '../twin/world';
 import { useAppearance, useTheme } from './Hud';
@@ -25,7 +30,11 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
   world.callbacks = {
     selectDevice: (id) => dispatch({ type: 'selectDevice', id }),
     selectIncident: (id) => dispatch({ type: 'selectIncident', id }),
+    selectBuilding: (id) => dispatch({ type: 'selectBuilding', id }),
   };
+  const quality = useQuality();
+  const qualityRef = useRef(getQuality());
+  qualityRef.current = quality;
   const headingRef = useRef(onHeading);
   headingRef.current = onHeading;
   const followRef = useRef(follow);
@@ -49,6 +58,13 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
     const camera = new THREE.PerspectiveCamera(36, 1, 1, 4000);
     camera.position.copy(HOME.pos);
     camera.layers.enableAll();
+    // High quality: MSAA render target, bloom for lamps and windows, colour output pass.
+    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    const composer = new EffectComposer(renderer, target);
+    composer.addPass(new RenderPass(world.scene, camera));
+    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.32, 0.5, 0.9);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.copy(HOME.target);
     controls.enableDamping = true;
@@ -64,6 +80,8 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
       const w = el.clientWidth || 1;
       const h = el.clientHeight || 1;
       renderer.setSize(w, h, false);
+      composer.setPixelRatio(renderer.getPixelRatio());
+      composer.setSize(w, h);
       labels.setSize(w, h);
       camera.aspect = w / h;
       // Panels floating over the map (HUD layout) cover its edges: centre the scene in the gap
@@ -95,6 +113,7 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
       const hit = world.pick(ray);
       if (hit?.kind === 'device') world.callbacks.selectDevice(hit.id);
       if (hit?.kind === 'incident') world.callbacks.selectIncident(hit.id);
+      if (hit?.kind === 'building') world.callbacks.selectBuilding(hit.id);
     };
     renderer.domElement.addEventListener('pointerdown', onDown);
     renderer.domElement.addEventListener('pointerup', onUp);
@@ -120,7 +139,12 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
       }
       controls.update();
       renderer.toneMappingExposure = world.exposure;
-      renderer.render(world.scene, camera);
+      if (qualityRef.current === 'high') {
+        bloom.strength = world.daylight ? 0.14 : 0.32;
+        world.setComposed(true);
+        composer.render();
+        world.setComposed(false);
+      } else renderer.render(world.scene, camera);
       labels.render(world.scene, camera);
       const az = THREE.MathUtils.radToDeg(controls.getAzimuthalAngle());
       if (Math.abs(az - lastHeading) > 0.5) {
@@ -135,6 +159,8 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
       controls.dispose();
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('pointerup', onUp);
+      composer.dispose();
+      target.dispose();
       renderer.dispose();
       el.innerHTML = '';
       ctl.current = null;
@@ -161,6 +187,11 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
       const c = ctl.current;
       const st = world.state;
       if (!c || !st) return;
+      const bld = st.selectedBuildingId ? world.buildingCenter(st.selectedBuildingId) : null;
+      if (bld) {
+        c.goal = { target: bld.center, dist: Math.max(bld.w, bld.d) * 2.4 };
+        return;
+      }
       const inc = st.incidents.find((i) => i.id === st.selectedIncidentId);
       const dev = st.selectedDeviceId ? st.devices[st.selectedDeviceId] : undefined;
       const p = dev?.pos ?? inc?.pos;

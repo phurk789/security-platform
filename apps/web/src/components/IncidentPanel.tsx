@@ -32,6 +32,8 @@ import { CameraFeed } from './CameraFeed';
 import { Badge, CommandBadge, FreshBadge, IncidentBadge, IntegrationBadge, MissionBadge } from './Badges';
 import { ReasonDialog } from './Dialog';
 import { TelemetryPanel } from './TelemetryPanel';
+import { BuildingPanel } from './BuildingPanel';
+import { BUILDINGS } from '@13store/shared';
 import { ago, useT } from '../i18n';
 
 const SEV = { low: 'Low', medium: 'Medium', high: 'High' } as const;
@@ -58,6 +60,8 @@ function routeId(pts: Point[]) {
 export function RightPanel() {
   const { s } = useStore();
   const t = useT();
+  const bld = s.selectedBuildingId ? BUILDINGS.find((b) => b.id === s.selectedBuildingId) : undefined;
+  if (bld) return <BuildingPanel b={bld} />;
   const dev = s.selectedDeviceId ? s.devices[s.selectedDeviceId] : undefined;
   if (dev) return <DevicePanel d={dev} />;
   const inc = s.incidents.find((i) => i.id === s.selectedIncidentId);

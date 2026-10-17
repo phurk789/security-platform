@@ -294,6 +294,8 @@ export interface AppState {
   layers: Layers;
   selectedIncidentId: string | null;
   selectedDeviceId: string | null;
+  /** Building whose BIM panel is open (map click). */
+  selectedBuildingId?: string | null;
   incidents: Incident[];
   devices: Record<string, Device>;
   missions: Mission[];

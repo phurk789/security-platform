@@ -17,6 +17,7 @@ export function initialState(): AppState {
     layers: { cctv: true, ugv: true, uav: true, zones: true, accuracy: true },
     selectedIncidentId: 'INC-024',
     selectedDeviceId: null,
+    selectedBuildingId: null,
     incidents: seedIncidents(now),
     devices: seedDevices(now),
     missions: [],

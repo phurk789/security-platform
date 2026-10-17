@@ -7,6 +7,7 @@ import type { AppState, Device, Layers as LayerState, Point } from '@13store/sha
 import { useStore } from '../store';
 import { Twin3D, type Twin3DApi } from './Twin3D';
 import { webglAvailable } from '../twin/world';
+import { setQuality, useQuality } from '../twin/quality';
 import { ago, tr, useT } from '../i18n';
 
 // --- projection ------------------------------------------------------------
@@ -61,6 +62,7 @@ export function TwinMap() {
   const [zoom, setZoom] = useState(1.1);
   const [pan, setPan] = useState<[number, number]>([0, 0]);
   const [layersOpen, setLayersOpen] = useState(false);
+  const quality = useQuality();
   const drag = useRef<{ x: number; y: number; pan: [number, number] } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const api3d = useRef<Twin3DApi>(null);
@@ -126,7 +128,7 @@ export function TwinMap() {
           <Ground P={P} />
           {L.zones && <ZonesLayer P={P} selZone={selInc?.zone} />}
           {mode === '2d' ? TREES.map((t, i) => <circle key={i} cx={t.x} cy={t.y} r={4} className="tree" />) : null}
-          {mode === '2d' && BUILDINGS.map((b) => <rect key={b.id} x={b.x} y={b.y} width={b.w} height={b.d} className="bld-2d" rx={1} />)}
+          {mode === '2d' && BUILDINGS.map((b) => <rect key={b.id} x={b.x} y={b.y} width={b.w} height={b.d} className={`bld-2d click${s.selectedBuildingId === b.id ? ' sel' : ''}`} rx={1} onClick={() => dispatch({ type: 'selectBuilding', id: b.id })} />)}
           {mode === '3d' && <Buildings3D trees />}
           {mode === '2d' && BUILDINGS.map((b) => <BuildingLabel key={b.id} P={P} b={b} />)}
           {mission && !['cancelled', 'rejected', 'completed'].includes(mission.status) && (
@@ -186,6 +188,12 @@ export function TwinMap() {
                   {t({ cctv: 'CCTV', ugv: 'UGV', uav: 'UAV (simulated)', zones: 'Zones', accuracy: 'Position accuracy' }[k])}
                 </label>
               ))}
+              <hr />
+              <label>
+                <input type="checkbox" checked={quality === 'high'} onChange={() => setQuality(quality === 'high' ? 'low' : 'high')} />
+                {t('High quality 3D (bloom, reflections)')}
+              </label>
+              <p className="pop-h">{t('Click a building for its BIM data')}</p>
             </div>
           )}
         </div>

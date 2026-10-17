@@ -60,6 +60,7 @@ export type Msg =
   | { type: 'toggleLayer'; layer: keyof Layers }
   | { type: 'selectIncident'; id: string | null }
   | { type: 'selectDevice'; id: string | null }
+  | { type: 'selectBuilding'; id: string | null }
   | { type: 'openCamera'; incidentId: string }
   | { type: 'confirmIncident'; incidentId: string }
   | { type: 'dismissIncident'; incidentId: string; reason: string }
@@ -487,9 +488,15 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     case 'selectIncident':
       s.selectedIncidentId = msg.id;
       s.selectedDeviceId = null;
+      s.selectedBuildingId = null;
       return s;
     case 'selectDevice':
       s.selectedDeviceId = msg.id;
+      if (msg.id) s.selectedBuildingId = null;
+      return s;
+    case 'selectBuilding':
+      s.selectedBuildingId = msg.id;
+      if (msg.id) s.selectedDeviceId = null;
       return s;
     case 'dismissToast':
       s.toasts = s.toasts.filter((t) => t.id !== msg.id);

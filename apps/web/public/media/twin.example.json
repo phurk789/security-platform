@@ -1,0 +1,6 @@
+{
+  "ground": { "ortho": "media/site-ortho.jpg" },
+  "models": [
+    { "src": "media/site.glb", "origin": { "x": 0, "y": 0 }, "rotationDeg": 0, "scale": 1, "elevation": 0, "replaces": "*" }
+  ]
+}

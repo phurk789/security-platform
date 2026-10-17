@@ -24,7 +24,7 @@ import { StoreCtx, useToastTimer, type CameraResult, type MediaSession, type Ses
 import { StepUpDialog } from './components/StepUp';
 import { tr } from './i18n';
 
-const LOCAL: Msg['type'][] = ['setView', 'setMapMode', 'toggleLayer', 'selectIncident', 'selectDevice', 'dismissToast', 'togglePresentation', 'seekReplay', 'toast'];
+const LOCAL: Msg['type'][] = ['setView', 'setMapMode', 'toggleLayer', 'selectIncident', 'selectDevice', 'selectBuilding', 'dismissToast', 'togglePresentation', 'seekReplay', 'toast'];
 
 const DEMO_USERS = [
   { username: 'alex', name: 'Alex Chen', role: 'dispatcher' },

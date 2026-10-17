@@ -2,9 +2,10 @@
 // camera "sees" is the same model the map shows. Kept in sync with AppState every frame.
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { BUILDINGS, FENCE_Y, GATE, ROAD, SITE, ZONES, freshnessAt, type AppState, type Device, type Incident, type Mission, type Point } from '@13store/shared';
-import { CAMERA_VIEWS, LAMPS, LIT_LAMPS, PARKED, TREES, toWorld } from './layout';
+import { BUILDINGS, FENCE_Y, GATE, ROAD, SITE, ZONES, atBuilding, freshnessAt, type AppState, type Device, type Incident, type Mission, type Point } from '@13store/shared';
+import { CAMERA_VIEWS, LAMPS, LIT_LAMPS, PARKED, TREES, fromWorld, toWorld } from './layout';
 import { beamTexture, facadeTextures, groundTexture, roofTexture } from './textures';
+import { loadOrtho, loadTwinManifest, loadTwinModel, makeEnvironment } from './bim';
 import { lampPool, makeBarrier, makeBooth, makeCar, makeCctv, makeLamp, makeUav, makeUgv, type CctvModel, type UavModel, type UgvModel } from './models';
 
 /** Devices are drawn larger than life so they stay visible at site scale (map symbol scale). */
@@ -26,6 +27,7 @@ interface IncVis {
 export interface WorldCallbacks {
   selectDevice(id: string): void;
   selectIncident(id: string): void;
+  selectBuilding(id: string): void;
 }
 
 const AMBER = new THREE.Color('#fbbf24');
@@ -47,6 +49,9 @@ function el(cls: string, html: string, onClick?: () => void) {
   return d;
 }
 
+/** Buildings whose procedural model has been replaced by an imported BIM model (media/twin.json). */
+export const importedBuildings = new Set<string>();
+
 /** Map-only graphics (rings, routes, beams, zone lines) live on layer 1 so camera feeds don't see them. */
 export const OVERLAY = 1;
 function overlay<T extends THREE.Object3D>(o: T): T {
@@ -59,7 +64,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 export class TwinWorld {
   readonly scene = new THREE.Scene();
   state: AppState | null = null;
-  callbacks: WorldCallbacks = { selectDevice() {}, selectIncident() {} };
+  callbacks: WorldCallbacks = { selectDevice() {}, selectIncident() {}, selectBuilding() {} };
   private devices = new Map<string, Vis>();
   private incidents = new Map<string, IncVis>();
   private routeGroup = new THREE.Group();
@@ -77,14 +82,24 @@ export class TwinWorld {
   daylight = false;
   /** Tone-mapping exposure the renderers should use for the current lighting. */
   exposure = 1.35;
+  /** True while the post-processed (bloom) main view is drawing: overlays and sky are toned down to match. */
+  composed = false;
   private sky?: { mat: THREE.ShaderMaterial; hemi: THREE.HemisphereLight; sun: THREE.DirectionalLight; outer: THREE.MeshStandardMaterial; road: THREE.MeshStandardMaterial };
   private nightOnly: THREE.Object3D[] = [];
   private windowMats: THREE.MeshStandardMaterial[] = [];
+  private glassMats: THREE.MeshStandardMaterial[] = [];
+  private skylineMat?: THREE.MeshStandardMaterial;
+  private envNight?: THREE.Texture;
+  private envDay?: THREE.Texture;
+  private siteMat?: THREE.MeshStandardMaterial;
+  private buildingVis = new Map<string, { group: THREE.Group; floors: THREE.Group; highlight: THREE.LineSegments; mesh: THREE.Mesh; b: (typeof BUILDINGS)[number] }>();
+  private imported: THREE.Group[] = [];
   private hudPulse?: THREE.Mesh;
   buildingLabels: CSS2DObject[] = [];
 
   constructor() {
     this.build();
+    void this.loadImported();
   }
 
   // ---------------------------------------------------------------------------
@@ -101,10 +116,11 @@ export class TwinWorld {
         side: THREE.BackSide,
         depthWrite: false,
         fog: false,
-        uniforms: { uDay: { value: 0 } },
+        uniforms: { uDay: { value: 0 }, uComp: { value: 0 } },
         vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
         fragmentShader: `varying vec3 vDir;
           uniform float uDay;
+          uniform float uComp;
           void main(){
             float h = clamp(vDir.y, -0.1, 1.0);
             vec3 top = vec3(0.020, 0.035, 0.075);
@@ -116,6 +132,8 @@ export class TwinWorld {
             // Daytime: clear blue overhead, pale haze at the horizon.
             vec3 day = mix(vec3(0.80, 0.88, 0.96), vec3(0.36, 0.58, 0.88), smoothstep(0.0, 0.6, h));
             col = mix(col, day, uDay);
+            // The post-processed main view tone-maps the sky as well: pre-darken so it reads the same.
+            col *= mix(1.0, 0.62, uComp);
             gl_FragColor = vec4(col, 1.0);
           }`,
       }),
@@ -123,6 +141,11 @@ export class TwinWorld {
     sky.renderOrder = -1;
     s.add(sky);
     s.fog = new THREE.FogExp2('#0c1527', 0.0014);
+    // Reflections on glass and metal: a small painted sky/ground environment (per-renderer safe).
+    this.envNight = makeEnvironment(false);
+    this.envDay = makeEnvironment(true);
+    s.environment = this.envNight;
+    s.environmentIntensity = 0.45;
 
     const hemi = new THREE.HemisphereLight('#5b75a3', '#1a2230', 1.9);
     s.add(hemi);
@@ -155,7 +178,9 @@ export class TwinWorld {
     roadOut.rotation.x = -Math.PI / 2;
     roadOut.position.set(0, -0.02, toWorld(0, ROAD.y + ROAD.h / 2).z);
     s.add(roadOut);
-    const site = new THREE.Mesh(new THREE.PlaneGeometry(SITE.width, SITE.height), new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 0.92 }));
+    const siteMat = new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 0.92 });
+    this.siteMat = siteMat;
+    const site = new THREE.Mesh(new THREE.PlaneGeometry(SITE.width, SITE.height), siteMat);
     site.rotation.x = -Math.PI / 2;
     site.receiveShadow = true;
     s.add(site);
@@ -180,63 +205,162 @@ export class TwinWorld {
     s.add(overlay(this.hud));
     this.hud.visible = false;
 
-    // buildings
+    // buildings: drawn from their footprints with BIM-style detail (floor slabs, glass ground floor,
+    // pilasters, sidewalks, entrances). An imported model from media/twin.json can replace them.
     const roof = roofTexture();
+    const concrete = new THREE.MeshStandardMaterial({ color: '#8d96a3', roughness: 0.95 });
+    const pilasterMat = new THREE.MeshStandardMaterial({ color: '#59626f', roughness: 0.7, metalness: 0.2 });
+    const walkMat = new THREE.MeshStandardMaterial({ color: '#7d848c', roughness: 1 });
+    const hedgeMat = new THREE.MeshStandardMaterial({ color: '#2f5a3a', roughness: 1 });
+    const bollardMat = new THREE.MeshStandardMaterial({ color: '#2a2f36', metalness: 0.6, roughness: 0.4 });
+    const canopyMat = new THREE.MeshStandardMaterial({ color: '#2b3442' });
+    const rollerMat = new THREE.MeshStandardMaterial({ color: '#3a4553', metalness: 0.5, roughness: 0.5 });
+    const fireDoorMat = new THREE.MeshStandardMaterial({ color: '#7a2b2b', roughness: 0.6 });
+    const exitSign = new THREE.MeshBasicMaterial({ color: '#4ade80', toneMapped: false });
+    const bx = (w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number, shadow = true) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+      mesh.position.set(x, y, z);
+      mesh.castShadow = shadow;
+      mesh.receiveShadow = true;
+      return mesh;
+    };
     BUILDINGS.forEach((b, i) => {
+      const group = new THREE.Group();
+      group.userData = { kind: 'building', id: b.id };
+      const p = toWorld(b.x + b.w / 2, b.y + b.d / 2);
+      group.position.set(p.x, 0, p.z);
+      const lh = b.bim.levelHeightM;
       const { map, emissive } = facadeTextures(17 + i * 5);
       const sideX = map.clone();
       const sideXE = emissive.clone();
-      map.repeat.set(b.w / 14, b.h / 16);
+      // one texture tile = 4 floors, so the painted floors line up with the BIM levels
+      map.repeat.set(b.w / 14, b.bim.levels / 4);
       emissive.repeat.copy(map.repeat);
-      sideX.repeat.set(b.d / 14, b.h / 16);
+      sideX.repeat.set(b.d / 14, b.bim.levels / 4);
       sideXE.repeat.copy(sideX.repeat);
       [map, emissive, sideX, sideXE].forEach((t) => (t.needsUpdate = true));
-      const front = new THREE.MeshStandardMaterial({ map, emissiveMap: emissive, emissive: '#ffffff', emissiveIntensity: 0.55, roughness: 0.75, metalness: 0.15 });
-      const side = new THREE.MeshStandardMaterial({ map: sideX, emissiveMap: sideXE, emissive: '#ffffff', emissiveIntensity: 0.55, roughness: 0.75, metalness: 0.15 });
+      const front = new THREE.MeshStandardMaterial({ map, emissiveMap: emissive, emissive: '#ffffff', emissiveIntensity: 0.55, roughness: 0.6, metalness: 0.25 });
+      const side = new THREE.MeshStandardMaterial({ map: sideX, emissiveMap: sideXE, emissive: '#ffffff', emissiveIntensity: 0.55, roughness: 0.6, metalness: 0.25 });
       this.windowMats.push(front, side);
       const r = roof.clone();
       r.repeat.set(b.w / 12, b.d / 12);
       r.needsUpdate = true;
       const top = new THREE.MeshStandardMaterial({ map: r, roughness: 0.9 });
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), [side, side, top, top, front, front]);
-      const p = toWorld(b.x + b.w / 2, b.y + b.d / 2);
-      mesh.position.set(p.x, b.h / 2, p.z);
+      mesh.position.y = b.h / 2;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      s.add(mesh);
-      // HUD outline: glowing edges and a roof frame
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(b.w + 0.3, b.h + 0.3, b.d + 0.3)), new THREE.LineBasicMaterial({ color: 0x38e1ff, transparent: true, opacity: 0.7, toneMapped: false }));
-      edges.position.copy(mesh.position);
-      this.hud.add(overlay(edges));
-      // parapet + rooftop plant
-      const parapet = new THREE.Mesh(new THREE.BoxGeometry(b.w + 0.6, 1.1, b.d + 0.6), new THREE.MeshStandardMaterial({ color: '#4c5666', roughness: 0.8 }));
-      parapet.position.set(p.x, b.h + 0.2, p.z);
-      parapet.scale.set(1, 1, 1);
-      const inner = new THREE.Mesh(new THREE.BoxGeometry(b.w - 0.6, 1.2, b.d - 0.6), new THREE.MeshStandardMaterial({ color: '#5c6676', roughness: 0.9 }));
-      inner.position.set(p.x, b.h + 0.25, p.z);
-      s.add(parapet, inner);
-      for (let k = 0; k < 3; k++) {
-        const u = new THREE.Mesh(new THREE.BoxGeometry(4 + k, 2.2, 3 + (k % 2) * 2), new THREE.MeshStandardMaterial({ color: '#6b7585', roughness: 0.6, metalness: 0.4 }));
-        u.position.set(p.x - b.w / 4 + k * (b.w / 4), b.h + 1.6, p.z - b.d / 5 + (k % 2) * (b.d / 3));
-        u.castShadow = true;
-        s.add(u);
+      group.add(mesh);
+      // floor slabs read as ledges on the façade
+      for (let f = 1; f < b.bim.levels; f++) group.add(bx(b.w + 0.5, 0.22, b.d + 0.5, concrete, 0, Math.min(b.h - 0.3, f * lh), 0));
+      // glass ground floor (lobby) with reflections
+      const glassMat = new THREE.MeshStandardMaterial({ color: '#9fc4e8', metalness: 0.85, roughness: 0.12, transparent: true, opacity: 0.6, emissive: '#cfe6ff', emissiveIntensity: 0.12 });
+      this.glassMats.push(glassMat);
+      const glassH = Math.min(lh, 5) - 0.5;
+      group.add(bx(b.w + 0.14, glassH, b.d + 0.14, glassMat, 0, glassH / 2 + 0.25, 0, false));
+      // corner pilasters
+      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) group.add(bx(1.4, b.h + 0.4, 1.4, pilasterMat, sx * (b.w / 2), (b.h + 0.4) / 2, sz * (b.d / 2)));
+      // parapet and rooftop plant
+      group.add(bx(b.w + 0.6, 1.1, b.d + 0.6, new THREE.MeshStandardMaterial({ color: '#4c5666', roughness: 0.8 }), 0, b.h + 0.2, 0));
+      group.add(bx(b.w - 0.6, 1.2, b.d - 0.6, new THREE.MeshStandardMaterial({ color: '#5c6676', roughness: 0.9 }), 0, b.h + 0.25, 0, false));
+      for (let k = 0; k < 3; k++) group.add(bx(4 + k, 2.2, 3 + (k % 2) * 2, new THREE.MeshStandardMaterial({ color: '#6b7585', roughness: 0.6, metalness: 0.4 }), -b.w / 4 + k * (b.w / 4), b.h + 1.6, -b.d / 5 + (k % 2) * (b.d / 3)));
+      // sidewalk around the footprint
+      group.add(bx(b.w + 7, 0.14, b.d + 7, walkMat, 0, 0.07, 0, false));
+      // entrances from the building information
+      for (const e of b.bim.entrances) {
+        const ep = toWorld(e.x, e.y);
+        const lx = ep.x - p.x;
+        const lz = ep.z - p.z;
+        const out = new THREE.Vector3(Math.abs(lx) >= b.w / 2 - 0.5 ? Math.sign(lx) : 0, 0, Math.abs(lz) >= b.d / 2 - 0.5 ? Math.sign(lz) : 0);
+        if (out.lengthSq() === 0) out.set(0, 0, 1);
+        const yaw = Math.atan2(out.x, out.z); // rotation so +Z faces outward
+        const along = new THREE.Vector3(out.z, 0, -out.x); // unit vector along the face
+        if (e.kind === 'main') {
+          const canopy = bx(8, 0.3, 3, canopyMat, lx + out.x * 1.6, 4, lz + out.z * 1.6);
+          canopy.rotation.y = yaw;
+          const glow = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 3.2), new THREE.MeshBasicMaterial({ color: '#ffe2a8', toneMapped: false }));
+          glow.position.set(lx + out.x * 0.12, 1.6, lz + out.z * 0.12);
+          glow.rotation.y = yaw;
+          const pool = lampPool(7);
+          pool.position.set(lx + out.x * 4.5, 0.16, lz + out.z * 4.5);
+          this.nightOnly.push(pool);
+          group.add(canopy, glow, pool);
+          for (const k of [-1.5, -0.5, 0.5, 1.5]) {
+            const bol = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.9, 10), bollardMat);
+            bol.position.set(lx + out.x * 4 + along.x * k * 1.8, 0.45, lz + out.z * 4 + along.z * k * 1.8);
+            bol.castShadow = true;
+            group.add(bol);
+          }
+          for (const k of [-1, 1]) {
+            const h = bx(7, 0.9, 1.2, hedgeMat, lx + out.x * 1.2 + along.x * k * 8, 0.45, lz + out.z * 1.2 + along.z * k * 8);
+            h.rotation.y = yaw;
+            group.add(h);
+          }
+        } else if (e.kind === 'service') {
+          const door = bx(4.2, 3.4, 0.2, rollerMat, lx + out.x * 0.1, 1.7, lz + out.z * 0.1, false);
+          door.rotation.y = yaw;
+          group.add(door);
+        } else {
+          const door = bx(1.2, 2.2, 0.16, fireDoorMat, lx + out.x * 0.1, 1.1, lz + out.z * 0.1, false);
+          door.rotation.y = yaw;
+          const sign = bx(0.5, 0.18, 0.1, exitSign, lx + out.x * 0.14, 2.4, lz + out.z * 0.14, false);
+          sign.rotation.y = yaw;
+          group.add(door, sign);
+        }
       }
-      // entrance canopy with a light
-      const door = toWorld(b.x + b.w / 2, b.y + b.d + 0.4);
-      const canopy = new THREE.Mesh(new THREE.BoxGeometry(8, 0.3, 3), new THREE.MeshStandardMaterial({ color: '#2b3442' }));
-      canopy.position.set(door.x, 4, door.z + 1.2);
-      const doorGlow = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 3.2), new THREE.MeshBasicMaterial({ color: '#ffe2a8', toneMapped: false }));
-      doorGlow.position.set(door.x, 1.6, door.z + 0.05);
-      const pool = lampPool(7);
-      pool.position.set(door.x, 0.07, door.z + 4);
-      s.add(canopy, doorGlow, pool);
-      this.nightOnly.push(pool);
+      // HUD outline: glowing edges
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(b.w + 0.3, b.h + 0.3, b.d + 0.3)), new THREE.LineBasicMaterial({ color: 0x38e1ff, transparent: true, opacity: 0.7, toneMapped: false }));
+      edges.position.set(p.x, b.h / 2, p.z);
+      this.hud.add(overlay(edges));
+      // BIM overlay, shown when the building is selected: level outlines and entrance markers
+      const floors = new THREE.Group();
+      const lineMat = new THREE.LineBasicMaterial({ color: 0x38e1ff, transparent: true, opacity: 0.85, toneMapped: false });
+      for (let f = 0; f <= b.bim.levels; f++) {
+        const y = Math.min(b.h, f * lh) + 0.05;
+        const hw = b.w / 2 + 0.45;
+        const hd = b.d / 2 + 0.45;
+        floors.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-hw, y, -hd), new THREE.Vector3(hw, y, -hd), new THREE.Vector3(hw, y, hd), new THREE.Vector3(-hw, y, hd)]), lineMat));
+      }
+      for (const e of b.bim.entrances) {
+        const ep = toWorld(e.x, e.y);
+        const ring = new THREE.Mesh(new THREE.RingGeometry(1.5, 2.1, 32), new THREE.MeshBasicMaterial({ color: e.kind === 'fire' ? 0x4ade80 : e.kind === 'service' ? 0xfbbf24 : 0x38e1ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(ep.x - p.x, 0.22, ep.z - p.z);
+        floors.add(ring);
+      }
+      floors.visible = false;
+      group.add(overlay(floors));
+      const highlight = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(b.w + 0.7, b.h + 0.7, b.d + 0.7)), new THREE.LineBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.95, toneMapped: false }));
+      highlight.position.y = b.h / 2;
+      highlight.visible = false;
+      group.add(overlay(highlight));
+      s.add(group);
+      this.buildingVis.set(b.id, { group, floors, highlight, mesh, b });
       // label
       const label = new CSS2DObject(el('t3-bld', `<b>${esc(b.name)}</b><span>${esc(b.use)}</span>`));
       label.position.set(p.x, b.h + 6, p.z);
       this.buildingLabels.push(label);
       this.labelsGroup.add(label);
     });
+
+    // distant city: low silhouettes beyond the site, fading into the fog
+    const skylineMat = new THREE.MeshStandardMaterial({ color: '#141c2a', roughness: 0.9, emissive: '#3b4b6a', emissiveIntensity: 0.14 });
+    this.skylineMat = skylineMat;
+    const skyline = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), skylineMat, 72);
+    let seed = 11;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    const mtx = new THREE.Matrix4();
+    for (let k = 0; k < 72; k++) {
+      const ang = (k / 72) * Math.PI * 2 + rnd() * 0.08;
+      const dist = 560 + rnd() * 380;
+      const w = 18 + rnd() * 44;
+      const h = 12 + rnd() * 70;
+      const d = 18 + rnd() * 44;
+      mtx.compose(new THREE.Vector3(Math.cos(ang) * dist, h / 2, Math.sin(ang) * dist), new THREE.Quaternion(), new THREE.Vector3(w, h, d));
+      skyline.setMatrixAt(k, mtx);
+    }
+    skyline.instanceMatrix.needsUpdate = true;
+    s.add(skyline);
 
     // trees (instanced)
     const trunkGeo = new THREE.CylinderGeometry(0.25, 0.35, 3, 6);
@@ -553,7 +677,7 @@ export class TwinWorld {
           const halfW = Math.tan(THREE.MathUtils.degToRad(TwinWorld.zoomFov(view.fov, g.zoom) / 2)) * dist;
           m.cone.scale.set(halfW, halfW * 0.6, dist);
         }
-        (m.cone.material as THREE.MeshBasicMaterial).opacity = 0.07 + 0.03 * Math.sin(this.t * 2);
+        (m.cone.material as THREE.MeshBasicMaterial).opacity = (this.composed ? 0.028 : 0.08) + 0.02 * Math.sin(this.t * 2);
       }
 
       // accuracy ring (true metres, grows when stale) and selection halo
@@ -751,8 +875,19 @@ export class TwinWorld {
     k.outer.color.set(day ? '#6f7d5e' : '#0d1612');
     k.road.color.set(day ? '#565e68' : '#161c23');
     for (const m of this.windowMats) m.emissiveIntensity = day ? 0.03 : 0.55;
+    for (const m of this.glassMats) m.emissiveIntensity = day ? 0 : 0.12;
+    if (this.skylineMat) this.skylineMat.emissiveIntensity = day ? 0 : 0.14;
+    this.scene.environment = day ? this.envDay! : this.envNight!;
+    this.scene.environmentIntensity = day ? 0.8 : 0.45;
     for (const o of this.nightOnly) o.visible = !day;
     this.exposure = day ? 0.95 : 1.35;
+  }
+
+  /** Called by the main view around a post-processed render (bloom tone-maps overlays and the sky). */
+  setComposed(on: boolean) {
+    this.composed = on;
+    if (this.sky) this.sky.mat.uniforms.uComp.value = on ? 1 : 0;
+    for (const v of this.devices.values()) if (v.kind === 'cctv') (v.m.cone.material as THREE.MeshBasicMaterial).opacity = (on ? 0.028 : 0.08) + 0.02 * Math.sin(this.t * 2);
   }
 
   /** Turn the holographic HUD extras on or off. */
@@ -762,6 +897,11 @@ export class TwinWorld {
 
   update(dt: number) {
     this.t += dt;
+    const selB = this.state?.selectedBuildingId ?? null;
+    for (const [id, v] of this.buildingVis) {
+      const on = id === selB;
+      if (v.floors.visible !== on) v.floors.visible = v.highlight.visible = on;
+    }
     if (this.hud.visible && this.hudPulse) {
       // A slow radar-style sweep ring from the site centre every 6 s.
       const k = (this.t % 6) / 6;
@@ -843,14 +983,60 @@ export class TwinWorld {
   }
 
   /** Raycast helper for clicks on the 3D view. */
-  pick(raycaster: THREE.Raycaster): { kind: 'device' | 'incident'; id: string } | null {
+  pick(raycaster: THREE.Raycaster): { kind: 'device' | 'incident' | 'building'; id: string } | null {
     const targets: THREE.Object3D[] = [];
     for (const v of this.devices.values()) if (v.m.root.visible) targets.push(v.m.root);
     for (const v of this.incidents.values()) if (v.root.visible) targets.push(v.ring, v.fill);
+    for (const v of this.buildingVis.values()) if (v.mesh.visible) targets.push(v.mesh);
+    targets.push(...this.imported);
     const hit = raycaster.intersectObjects(targets, true)[0];
     let o: THREE.Object3D | null = hit?.object ?? null;
     while (o && !o.userData.kind) o = o.parent;
-    return o ? { kind: o.userData.kind, id: o.userData.id } : null;
+    if (o) return { kind: o.userData.kind, id: o.userData.id };
+    if (hit && this.imported.some((g) => g.getObjectById(hit.object.id))) {
+      // Imported BIM model: map the hit point back to the building footprint it falls in.
+      const pt = fromWorld(hit.point.x, hit.point.z);
+      const b = BUILDINGS.find((bb) => atBuilding(bb, pt, 3));
+      if (b) return { kind: 'building', id: b.id };
+    }
+    return null;
+  }
+
+  /** Centre and size of a building, for camera focus. */
+  buildingCenter(id: string) {
+    const v = this.buildingVis.get(id);
+    if (!v) return null;
+    return { center: new THREE.Vector3(v.group.position.x, v.b.h / 2, v.group.position.z), w: v.b.w, d: v.b.d };
+  }
+
+  /** Imported BIM models and orthophoto from media/twin.json (optional). */
+  private async loadImported() {
+    const m = await loadTwinManifest();
+    if (!m) return;
+    if (m.ground?.ortho && this.siteMat) {
+      try {
+        this.siteMat.map = await loadOrtho(m.ground.ortho);
+        this.siteMat.needsUpdate = true;
+      } catch (e) {
+        console.warn('[twin] orthophoto failed', m.ground.ortho, e);
+      }
+    }
+    for (const model of m.models ?? []) {
+      try {
+        const root = await loadTwinModel(model, toWorld);
+        this.scene.add(root);
+        this.imported.push(root);
+        const ids = model.replaces === '*' ? [...this.buildingVis.keys()] : model.replaces ?? [];
+        for (const id of ids) {
+          const v = this.buildingVis.get(id);
+          if (!v) continue;
+          for (const c of v.group.children) if (c !== v.floors && c !== v.highlight) c.visible = false;
+          importedBuildings.add(id);
+        }
+      } catch (e) {
+        console.warn('[twin] model failed', model.src, e);
+      }
+    }
   }
 
   /** World position of a site point (for camera focus). */
