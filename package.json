@@ -14,7 +14,8 @@
     "build:demo": "npm run build:single -w @13store/web",
     "start": "npm run start -w @13store/server",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:vercel": "npm run build:single -w @13store/web && rm -rf vercel-out && mkdir -p vercel-out && cp apps/web/dist-single/index.html vercel-out/index.html"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

@@ -9,6 +9,7 @@
 | Develop | `npm run dev` (server, embedded gateway) and `npm run dev -w @13store/web` (http://localhost:5173, proxies `/api`) |
 | Separate edge gateway | `SERVER_URL=ws://server:8080 GATEWAY_KEY=… npm start -w @13store/gateway` |
 | Offline demo file | `npm run build:demo` → `apps/web/dist-single/index.html` |
+| Vercel (static demo) | Push to the connected repo; `vercel.json` runs `npm run build:vercel`. Vercel serves the offline demo only — the server needs a host with long-running processes and a disk (VM, Docker host, Railway, Fly.io, Render) |
 
 The server serves the command centre at `/`, the field app at `/field/`, the API at `/api/v1`
 and the API description at `/api/v1/openapi.json`.

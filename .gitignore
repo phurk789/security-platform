@@ -5,3 +5,4 @@ data
 *.tsbuildinfo
 .DS_Store
 .proxy-ca.crt
+vercel-out
