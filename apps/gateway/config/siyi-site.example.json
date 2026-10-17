@@ -1,0 +1,29 @@
+{
+  "gatewayId": "edge-site-01",
+  "serverUrl": "wss://platform.example.com",
+  "key": "gw_pilot_REPLACE_WITH_KEY_FROM_ADMIN",
+  "geo": { "originLat": 13.756300, "originLon": 100.501800, "rotationDeg": 0 },
+  "devices": [
+    {
+      "type": "mavlink",
+      "deviceId": "UGV-02",
+      "kind": "ugv",
+      "profile": "ardupilot-rover",
+      "model": "Patrol UGV · SIYI UniFC 6 Pico (ArduPilot Rover)",
+      "link": { "mode": "client", "host": "192.168.144.20", "port": 19856 },
+      "allowRemoteArm": false
+    },
+    {
+      "type": "siyi-camera",
+      "deviceId": "CAM-ZT30-01",
+      "model": "SIYI ZT30 on UGV-02",
+      "host": "192.168.144.25",
+      "port": 37260,
+      "pos": { "x": 214, "y": 218 },
+      "stream": {
+        "rtsp": "rtsp://192.168.144.25:8554/main.264",
+        "whep": "https://edge.example.com/cam-zt30-01/whep"
+      }
+    }
+  ]
+}

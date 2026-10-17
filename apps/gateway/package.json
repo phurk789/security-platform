@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@13store/shared": "*",
+    "node-mavlink": "^2.3.0",
     "ws": "^8.22.0"
   },
   "devDependencies": {

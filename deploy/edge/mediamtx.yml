@@ -1,0 +1,26 @@
+# MediaMTX: re-streams the SIYI camera's RTSP feed to browsers.
+# Put it behind the same TLS reverse proxy as the platform (https://edge.example.com).
+logLevel: info
+
+rtsp: no
+rtmp: no
+srt: no
+hls: yes
+hlsAddress: :8888
+webrtc: yes
+webrtcAddress: :8889
+
+# Every viewer is checked by the platform: the browser gets a short-lived signed token from
+# POST /api/v1/media/{deviceId}/session, and MediaMTX asks the platform whether it is valid.
+authMethod: http
+authHTTPAddress: https://platform.example.com/api/v1/media/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+
+paths:
+  cam-zt30-01:
+    # SIYI cameras on a SIYI link: rtsp://192.168.144.25:8554/main.264 (check your model's manual)
+    source: rtsp://192.168.144.25:8554/main.264
+    rtspTransport: tcp
+    sourceOnDemand: yes

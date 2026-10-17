@@ -18,6 +18,7 @@ import type {
   User,
 } from './types';
 import type { SiteGeometry } from './site';
+import type { GimbalState, GwCameraResult, SrvCamera, StreamInfo } from './camera';
 
 export const GATEWAY_PROTOCOL = 'ps-gw/1';
 
@@ -45,6 +46,8 @@ export interface AdapterDeclaration {
   linkLossBehavior: string;
   /** For cameras: which simulated view to render. */
   view?: Device['view'];
+  /** Live video published through the site media server. */
+  stream?: StreamInfo;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +81,8 @@ export interface GwTelemetry {
   signal?: number;
   satellites?: number;
   temperatureC?: number;
+  /** Gimbal camera attitude/zoom (SIYI and similar). */
+  gimbal?: GimbalState;
 }
 
 export interface GwCommandUpdate {
@@ -99,7 +104,7 @@ export interface GwDeviceEvent {
   checkpoint?: number;
 }
 
-export type GatewayToServer = GwHello | GwTelemetry | GwCommandUpdate | GwDeviceEvent;
+export type GatewayToServer = GwHello | GwTelemetry | GwCommandUpdate | GwDeviceEvent | GwCameraResult;
 
 // ---------------------------------------------------------------------------
 // Server → gateway
@@ -132,7 +137,7 @@ export interface SrvWelcome {
   rejected: { deviceId: string; reason: string }[];
 }
 
-export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome;
+export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera;
 
 // ---------------------------------------------------------------------------
 // Client API

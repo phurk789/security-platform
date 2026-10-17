@@ -11,7 +11,7 @@
 //  - On link loss the device must reach a safe state on its own. Nothing received or queued
 //    during the outage may run after the link comes back.
 
-import type { AdapterDeclaration, GwCommandUpdate, GwDeviceEvent, GwTelemetry, SrvCommand, SrvDemo } from '@13store/shared';
+import type { AdapterDeclaration, CameraAction, GwCameraResult, GwCommandUpdate, GwDeviceEvent, GwTelemetry, SrvCommand, SrvDemo } from '@13store/shared';
 
 export interface Logger {
   info(msg: string, extra?: unknown): void;
@@ -42,6 +42,8 @@ export interface AdapterContext {
   telemetry(t: TelemetryReport): void;
   commandUpdate(u: CommandReport): void;
   event(e: EventReport): void;
+  /** Result of a camera control request (gimbal, zoom, photo, record). */
+  cameraResult(r: Omit<GwCameraResult, 't' | 'deviceId'>): void;
   log: Logger;
 }
 
@@ -55,6 +57,8 @@ export interface Adapter {
   onCommand(cmd: SrvCommand): void;
   /** Demo/presenter control (simulators only; real adapters may ignore it). */
   onDemo(action: SrvDemo['action']): void;
+  /** Camera control, for adapters that declare the 'gimbal' / 'zoom' / 'photo' capabilities. */
+  onCamera?(requestId: string, action: CameraAction): void;
 }
 
 /** Outcome of checking an incoming command against the ledger. */

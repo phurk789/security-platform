@@ -1,0 +1,21 @@
+# Edge site stack: runs on a mini PC wired to the SIYI UniRC 7 Pro's LAN port
+# (same 192.168.144.x network as the air unit, flight controller and camera).
+#   cp ../../apps/gateway/config/siyi-site.example.json site.json   # then edit
+#   docker compose up -d
+services:
+  edge-gateway:
+    image: ps-twin:latest            # built from the repo Dockerfile
+    command: ["node", "apps/gateway/dist/index.js"]
+    network_mode: host               # reach 192.168.144.20 (UniRC datalink) and .25 (camera)
+    environment:
+      GATEWAY_CONFIG: /config/site.json
+    volumes:
+      - ./site.json:/config/site.json:ro
+    restart: unless-stopped
+
+  media:
+    image: bluenviron/mediamtx:1.9.3 # RTSP from the camera → WebRTC (WHEP) / HLS for browsers
+    network_mode: host
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    restart: unless-stopped

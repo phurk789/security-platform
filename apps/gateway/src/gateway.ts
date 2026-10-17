@@ -54,6 +54,7 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
         send({ t: 'cmd', ...u, at: u.at ?? now() });
       },
       event: (e) => send({ t: 'event', deviceId, ...e, at: e.at ?? now() }),
+      cameraResult: (r) => send({ t: 'camera_result', deviceId, ...r }),
     };
   };
 
@@ -76,6 +77,17 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
         const a = byId.get(msg.deviceId);
         if (!a || !accepted.has(msg.deviceId)) return log.warn(`command for unregistered device ${msg.deviceId} ignored`);
         a.onCommand(msg);
+        return;
+      }
+      case 'camera': {
+        const a = byId.get(msg.deviceId);
+        if (!a || !accepted.has(msg.deviceId)) return log.warn(`camera request for unregistered device ${msg.deviceId} ignored`);
+        const { t: _t, requestId, deviceId: _d, ...action } = msg;
+        if (!a.onCamera) {
+          send({ t: 'camera_result', deviceId: msg.deviceId, requestId, ok: false, confirmed: false, detail: 'This device has no camera control.' });
+          return;
+        }
+        a.onCamera(requestId, action as Parameters<NonNullable<Adapter['onCamera']>>[1]);
         return;
       }
       case 'demo': {

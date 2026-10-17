@@ -5,17 +5,19 @@ export interface Captured {
   telemetry: Omit<GwTelemetry, 't' | 'deviceId'>[];
   updates: CommandReport[];
   events: EventReport[];
+  camera: Parameters<AdapterContext['cameraResult']>[0][];
 }
 
 /** Context that records everything an adapter sends. Uses Date.now (faked by vi timers). */
 export function fakeCtx(): { ctx: AdapterContext; got: Captured } {
-  const got: Captured = { telemetry: [], updates: [], events: [] };
+  const got: Captured = { telemetry: [], updates: [], events: [], camera: [] };
   const ctx: AdapterContext = {
     now: () => Date.now(),
     log: silentLogger,
     telemetry: (t) => got.telemetry.push(t),
     commandUpdate: (u) => got.updates.push(u),
     event: (e) => got.events.push(e),
+    cameraResult: (r) => got.camera.push(r),
   };
   return { ctx, got };
 }
