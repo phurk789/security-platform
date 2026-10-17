@@ -13,13 +13,15 @@ export interface DefaultAdapterOptions {
   offline?: string[];
   /** Override every device's telemetry interval (ms) — handy in tests. */
   rateMs?: number;
+  /** Simulate radio/backhaul delay on telemetry (default true). */
+  latency?: boolean;
 }
 
 /** The six seed devices of the Civic Center demo site, all simulated. */
 export function defaultAdapters(opts: DefaultAdapterOptions = {}): Adapter[] {
   const offline = new Set(opts.offline ?? ['CCTV-04']);
   return Object.values(seedDevices(Date.now())).map((d) => {
-    const o = { offline: offline.has(d.id), rateMs: opts.rateMs };
+    const o = { offline: offline.has(d.id), rateMs: opts.rateMs, latency: opts.latency ?? true };
     if (d.kind === 'ugv') return new SimUgv(d, o);
     if (d.kind === 'uav') return new SimUav(d, o);
     return new SimCctv(d, o);

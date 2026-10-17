@@ -149,8 +149,21 @@ export function RemoteProvider({
           case 'telemetry': {
             const d = p.devices[m.deviceId];
             if (!d) return p;
-            const nd: Device = { ...d, pos: m.pos, alt: m.alt ?? d.alt, battery: m.battery ?? d.battery, speed: m.speed, accuracyM: m.accuracyM, lastSeen: m.lastSeen };
-            const sample: TelemetrySample = { deviceId: m.deviceId, at: m.lastSeen, x: m.pos.x, y: m.pos.y };
+            const nd: Device = {
+              ...d,
+              pos: m.pos,
+              alt: m.alt ?? d.alt,
+              battery: m.battery ?? d.battery,
+              speed: m.speed,
+              accuracyM: m.accuracyM,
+              lastSeen: m.lastSeen,
+              heading: m.heading ?? d.heading,
+              signal: m.signal ?? d.signal,
+              latencyMs: m.latencyMs ?? d.latencyMs,
+              satellites: m.satellites ?? d.satellites,
+              temperatureC: m.temperatureC ?? d.temperatureC,
+            };
+            const sample: TelemetrySample = { deviceId: m.deviceId, at: m.lastSeen, x: m.pos.x, y: m.pos.y, speed: m.speed, battery: m.battery, signal: m.signal, heading: m.heading };
             const telemetry = d.kind === 'cctv' || p.replay.active ? p.telemetry : [...p.telemetry.slice(-3999), sample];
             return { ...p, devices: { ...p.devices, [m.deviceId]: nd }, telemetry };
           }
@@ -246,8 +259,12 @@ export function RemoteProvider({
           void Promise.all(
             movers.map((d) =>
               api
-                .get<{ receivedTime: number; x: number; y: number }[]>(`/devices/${encodeURIComponent(d.id)}/telemetry?from=${at - 10 * 60_000}&to=${Date.now() + offset.current}`)
-                .then((rows) => rows.map((r) => ({ deviceId: d.id, at: r.receivedTime, x: r.x, y: r.y }))),
+                .get<{ receivedTime: number; x: number; y: number; speed?: number; battery?: number; signal?: number; heading?: number }[]>(
+                  `/devices/${encodeURIComponent(d.id)}/telemetry?from=${at - 10 * 60_000}&to=${Date.now() + offset.current}`,
+                )
+                .then((rows) =>
+                  rows.map((r) => ({ deviceId: d.id, at: r.receivedTime, x: r.x, y: r.y, speed: r.speed ?? undefined, battery: r.battery ?? undefined, signal: r.signal ?? undefined, heading: r.heading ?? undefined })),
+                ),
             ),
           )
             .then((all) => setS((p) => ({ ...p, telemetry: all.flat().sort((a, b) => a.at - b.at) })))

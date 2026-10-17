@@ -38,7 +38,15 @@ describe('SimUgv', () => {
     vi.advanceTimersByTime(3000);
     expect(got.telemetry.map((t) => t.seq)).toEqual([1, 2, 3]);
     expect(got.telemetry[2].sourceTime - got.telemetry[0].sourceTime).toBe(2000);
-    expect(got.telemetry[0]).toMatchObject({ pos: seed['UGV-01'].pos, speed: 0, battery: 82 });
+    // GNSS noise: the reported fix sits within a couple of metres of the true position.
+    const t0 = got.telemetry[0];
+    expect(Math.hypot(t0.pos.x - seed['UGV-01'].pos.x, t0.pos.y - seed['UGV-01'].pos.y)).toBeLessThan(2.5);
+    expect(t0.speed).toBe(0);
+    expect(t0.battery).toBeCloseTo(82, 0);
+    expect(t0.accuracyM).toBeGreaterThanOrEqual(0.8);
+    expect(t0.accuracyM).toBeLessThanOrEqual(2.5);
+    expect(t0.signal).toBeGreaterThan(20);
+    expect(t0.satellites).toBeGreaterThan(5);
     a.stop();
   });
 
@@ -113,8 +121,13 @@ describe('SimUgv', () => {
     vi.advanceTimersByTime(3000);
     const pause = cmd('pause');
     a.onCommand(pause);
+    // The vehicle brakes (2.5 m/s²); the pause is confirmed only once it has stopped.
     vi.advanceTimersByTime(1000);
+    expect(statuses(got, pause.commandId)).toEqual(['acknowledged', 'executing']);
+    expect(a.speed).toBeGreaterThan(0);
+    vi.advanceTimersByTime(3000);
     expect(statuses(got, pause.commandId)).toEqual(['acknowledged', 'executing', 'succeeded']);
+    expect(a.speed).toBe(0);
     const held = { ...a.pos };
     vi.advanceTimersByTime(3000);
     expect(a.pos).toEqual(held);
@@ -123,7 +136,7 @@ describe('SimUgv', () => {
     expect(a.pos).not.toEqual(held);
     const stop = cmd('stop');
     a.onCommand(stop);
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(4000);
     expect(statuses(got, stop.commandId)).toEqual(['acknowledged', 'executing', 'succeeded']);
     expect(a.mode).toBe('idle');
     expect(a.route).toBeNull();
@@ -186,6 +199,40 @@ describe('SimUgv', () => {
     a.stop();
   });
 
+  it('accelerates gradually, reaches cruise speed and brakes onto the final checkpoint', () => {
+    const { a } = ugv();
+    a.onCommand(cmd('start', { route: DEFAULT_ROUTE }));
+    vi.advanceTimersByTime(1500);
+    expect(a.speed).toBeGreaterThan(0);
+    expect(a.speed).toBeLessThan(2); // ~0.9 s of 1.5 m/s²
+    const speeds: number[] = [];
+    for (let i = 0; i < 300; i++) {
+      vi.advanceTimersByTime(100);
+      speeds.push(a.speed);
+    }
+    expect(Math.max(...speeds)).toBeCloseTo(6, 0);
+    const lastMoving = speeds.findLastIndex((v) => v > 0);
+    expect(speeds[lastMoving]).toBeLessThan(1.5); // creeping onto the checkpoint, not slamming into it
+    expect(a.pos).toEqual(DEFAULT_ROUTE[DEFAULT_ROUTE.length - 1]);
+    a.stop();
+  });
+
+  it('latency option: samples arrive 45–400 ms after they were measured, in order', () => {
+    const a = new SimUgv(seed['UGV-01'], { latency: true });
+    const { ctx, got } = fakeCtx();
+    const arrivals: number[] = [];
+    const orig = ctx.telemetry;
+    ctx.telemetry = (s) => {
+      arrivals.push(Date.now() - s.sourceTime);
+      orig(s);
+    };
+    a.start(ctx);
+    vi.advanceTimersByTime(5500);
+    expect(got.telemetry.map((s) => s.seq)).toEqual([1, 2, 3, 4, 5]);
+    expect(arrivals.every((ms) => ms >= 45 && ms <= 400)).toBe(true);
+    a.stop();
+  });
+
   it('reset returns to the seed state', () => {
     const { a } = ugv();
     a.onCommand(cmd('start', { route: DEFAULT_ROUTE }));
@@ -205,7 +252,8 @@ describe('SimUav and SimCctv', () => {
     a.start(ctx);
     vi.advanceTimersByTime(3000);
     expect(got.telemetry).toHaveLength(3);
-    expect(got.telemetry[0].alt).toBe(40);
+    expect(got.telemetry[0].alt).toBeCloseTo(40, 0);
+    expect(got.telemetry[0].heading).toBeGreaterThanOrEqual(0);
     expect(got.telemetry[0].pos).not.toEqual(got.telemetry[2].pos);
     const c = cmd('start', { deviceId: 'UAV-02' });
     a.onCommand(c);

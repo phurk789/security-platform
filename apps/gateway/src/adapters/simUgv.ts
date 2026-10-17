@@ -1,6 +1,19 @@
-// Simulated patrol UGV. Behaves like the real vehicle should: confirms commands only when the
-// effect is real, stops by itself on link loss, and never resumes or replays on reconnect.
-import { UGV_SPEED, dist, type Device, type Point, type SrvCommand } from '@13store/shared';
+// Simulated patrol UGV. Behaves like the real vehicle should: accelerates and brakes, slows for
+// turns, reports a noisy GNSS fix with an honest accuracy, confirms commands only when the effect
+// is real, stops by itself on link loss, and never resumes or replays on reconnect.
+import {
+  UGV_FAILSAFE_BRAKE,
+  newMotion,
+  newSensors,
+  readSensors,
+  stepMotion,
+  stepSensors,
+  type Device,
+  type Point,
+  type SensorState,
+  type SrvCommand,
+  type VehicleMotion,
+} from '@13store/shared';
 import { admitCommand } from '../sdk';
 import { SimDevice, type SimOptions } from './base';
 
@@ -9,79 +22,102 @@ export const UGV_FAILSAFE_MS = 1_500;
 /** Command timing on the simulated vehicle. */
 export const UGV_ACK_MS = 300;
 export const UGV_EXEC_MS = 600;
-export const UGV_CONFIRM_MS = 900;
+/** Earliest moment the effect of a command is checked; it is then polled until confirmed. */
+export const UGV_CONFIRM_MS = 700;
+/** Give up confirming an effect after this long (reported as failed). */
+export const UGV_CONFIRM_TIMEOUT_MS = 8_000;
+/** Physics step of the simulated vehicle (ms), independent of the telemetry rate. */
+const PHYSICS_MS = 100;
 
 type Mode = 'idle' | 'moving' | 'paused';
 
 export class SimUgv extends SimDevice {
-  pos!: Point;
-  battery!: number;
-  speed = 0;
+  motion!: VehicleMotion;
+  sensors!: SensorState;
   mode: Mode = 'idle';
-  route: Point[] | null = null;
-  nextCp = 0;
   failsafeAt?: number;
   private failsafeTimer?: ReturnType<typeof setTimeout>;
+  private physics?: ReturnType<typeof setInterval>;
+  private lastPhysics = 0;
 
   constructor(seed: Device, opts: SimOptions = {}) {
     super(seed, opts);
     this.resetState();
   }
 
+  // True position and state (tests and the vehicle itself use these; telemetry adds sensor noise).
+  get pos(): Point {
+    return { x: this.motion.x, y: this.motion.y };
+  }
+  get speed() {
+    return this.motion.speed;
+  }
+  get battery() {
+    return this.sensors.battery;
+  }
+  get route() {
+    return this.motion.route;
+  }
+  get nextCp() {
+    return this.motion.nextCp;
+  }
+
   protected resetState() {
     this.clearFailsafeTimer();
-    this.pos = { ...this.seed.pos };
-    this.battery = this.seed.battery ?? 100;
-    this.speed = 0;
+    this.motion = newMotion(this.seed.pos, this.seed.heading ?? 90);
+    this.sensors = newSensors(this.seed.battery ?? 100, 'ugv');
     this.mode = 'idle';
-    this.route = null;
-    this.nextCp = 0;
     this.failsafeAt = undefined;
+  }
+
+  start(ctx: Parameters<SimDevice['start']>[0]) {
+    super.start(ctx);
+    this.lastPhysics = ctx.now();
+    this.physics = setInterval(() => this.physicsStep(), PHYSICS_MS);
   }
 
   stop() {
     this.clearFailsafeTimer();
+    if (this.physics) clearInterval(this.physics);
+    this.physics = undefined;
     super.stop();
   }
 
-  protected step(dt: number) {
-    if (this.mode !== 'moving' || !this.route) {
-      this.speed = this.mode === 'moving' ? this.speed : 0;
-      return;
+  /** Telemetry ticks don't move the vehicle; the physics timer does. */
+  protected step() {}
+
+  private physicsStep() {
+    const now = this.ctx.now();
+    const dt = Math.max(0, now - this.lastPhysics) / 1000;
+    this.lastPhysics = now;
+    const r = stepMotion(this.motion, dt);
+    stepSensors(this.sensors, dt, 'ugv', this.motion.speed);
+    const route = this.motion.route;
+    for (const cp of r.checkpoints) {
+      if (route && cp < route.length) this.emit({ kind: 'checkpoint', checkpoint: cp, detail: `Reached checkpoint ${cp + 1} of ${route.length}` });
     }
-    let budget = UGV_SPEED * dt;
-    while (budget > 0 && this.nextCp < this.route.length) {
-      const target = this.route[this.nextCp];
-      const gap = dist(this.pos, target);
-      if (gap <= budget) {
-        this.pos = { ...target };
-        budget -= gap;
-        this.nextCp += 1;
-        this.emit({ kind: 'checkpoint', checkpoint: this.nextCp - 1, detail: `Reached checkpoint ${this.nextCp} of ${this.route.length}` });
-      } else {
-        this.pos = { x: this.pos.x + ((target.x - this.pos.x) / gap) * budget, y: this.pos.y + ((target.y - this.pos.y) / gap) * budget };
-        budget = 0;
-      }
-    }
-    this.battery = Math.max(0, this.battery - 0.05 * dt);
-    if (this.nextCp >= this.route.length) {
+    if (r.completed) {
       this.mode = 'idle';
-      this.speed = 0;
       this.emit({ kind: 'route_complete', detail: 'Final checkpoint reached. Vehicle holding position.' });
-      this.emit({ kind: 'snapshot', detail: 'Onboard camera frame at final checkpoint (simulated).', frame: snapshotFrame(this.declaration.deviceId, this.ctx.now()) });
+      this.emit({ kind: 'snapshot', detail: 'Onboard camera frame at final checkpoint (simulated).', frame: snapshotFrame(this.declaration.deviceId, now) });
     }
   }
 
   protected sendTelemetry(now: number) {
-    this.ctx.telemetry({
+    const r = readSensors(this.sensors, this.pos, 'ugv');
+    this.publish({
       seq: ++this.seq,
       sourceTime: now,
-      pos: { x: round(this.pos.x), y: round(this.pos.y) },
-      accuracyM: this.seed.accuracyM,
-      battery: round(this.battery),
-      speed: this.speed,
-      quality: 'good',
-      nextCp: this.route ? this.nextCp : undefined,
+      pos: r.pos,
+      accuracyM: r.accuracyM,
+      battery: r.battery,
+      speed: Math.round(this.motion.speed * 100) / 100,
+      heading: Math.round(this.motion.heading),
+      signal: r.signal,
+      satellites: r.satellites,
+      temperatureC: r.temperatureC,
+      quality: r.signal < 45 || r.accuracyM > 2.2 ? 'degraded' : 'good',
+      nextCp: this.motion.route ? this.motion.nextCp : undefined,
     });
   }
 
@@ -95,12 +131,18 @@ export class SimUgv extends SimDevice {
       if (late) return this.report(cmd.commandId, 'failed', cmd, late);
       this.apply(cmd);
       this.report(cmd.commandId, 'executing', cmd);
+      this.later(UGV_CONFIRM_MS - UGV_EXEC_MS, () => this.awaitEffect(cmd, this.ctx.now() + UGV_CONFIRM_TIMEOUT_MS));
     });
-    this.later(UGV_CONFIRM_MS, () => {
-      if (this.statusOf(cmd) !== 'executing') return; // failed earlier
-      const ok = this.confirmed(cmd);
-      this.report(cmd.commandId, ok ? 'succeeded' : 'failed', cmd, ok ? undefined : `Effect not confirmed (vehicle ${this.mode}, speed ${this.speed}).`);
-    });
+  }
+
+  /** Confirm only once the vehicle really does it (moving for start/resume, speed 0 for pause/stop). */
+  private awaitEffect(cmd: SrvCommand, deadline: number) {
+    if (this.statusOf(cmd) !== 'executing') return;
+    if (this.confirmed(cmd)) return this.report(cmd.commandId, 'succeeded', cmd);
+    if (this.ctx.now() >= deadline) {
+      return this.report(cmd.commandId, 'failed', cmd, `Effect not confirmed (vehicle ${this.mode}, speed ${this.motion.speed.toFixed(1)} m/s).`);
+    }
+    this.later(PHYSICS_MS, () => this.awaitEffect(cmd, deadline));
   }
 
   private statusOf(cmd: SrvCommand) {
@@ -125,34 +167,41 @@ export class SimUgv extends SimDevice {
   }
 
   private apply(cmd: SrvCommand) {
+    const m = this.motion;
     switch (cmd.type) {
       case 'start':
-        this.route = cmd.route!.map((p) => ({ ...p }));
-        this.nextCp = 0;
+        m.route = cmd.route!.map((p) => ({ ...p }));
+        m.nextCp = 0;
+        m.done = false;
+        m.intent = 'drive';
+        m.brake = 'normal';
         this.mode = 'moving';
-        this.speed = UGV_SPEED;
         break;
       case 'resume':
+        m.intent = 'drive';
+        m.brake = 'normal';
         this.mode = 'moving';
-        this.speed = UGV_SPEED;
         this.failsafeAt = undefined;
         break;
       case 'pause':
+        m.intent = 'hold';
+        m.brake = 'normal';
         this.mode = 'paused';
-        this.speed = 0;
         break;
       case 'stop':
+        m.intent = 'hold';
+        m.brake = 'normal';
+        m.route = null;
+        m.nextCp = 0;
         this.mode = 'idle';
-        this.route = null;
-        this.nextCp = 0;
-        this.speed = 0;
         break;
     }
   }
 
   private confirmed(cmd: SrvCommand) {
-    if (cmd.type === 'start' || cmd.type === 'resume') return (this.mode === 'moving' && this.speed > 0) || (this.route !== null && this.nextCp >= this.route.length);
-    return this.speed === 0;
+    const m = this.motion;
+    if (cmd.type === 'start' || cmd.type === 'resume') return (this.mode === 'moving' && m.speed > 0) || m.done;
+    return m.speed === 0;
   }
 
   protected onLinkLost() {
@@ -160,11 +209,12 @@ export class SimUgv extends SimDevice {
     this.failsafeTimer = setTimeout(() => {
       this.failsafeTimer = undefined;
       if (!this.linkCut) return;
-      if (this.mode === 'moving' || this.speed > 0) {
+      if (this.mode === 'moving' || this.motion.speed > 0) {
         this.mode = 'paused';
-        this.speed = 0;
+        this.motion.intent = 'hold';
+        this.motion.brake = 'hard';
         this.failsafeAt = this.ctx.now();
-        this.ctx.log.warn(`${this.declaration.deviceId}: link-loss failsafe, stopped in place`);
+        this.ctx.log.warn(`${this.declaration.deviceId}: link-loss failsafe, braking to a stop (${UGV_FAILSAFE_BRAKE} m/s²)`);
       }
     }, UGV_FAILSAFE_MS);
   }
@@ -181,10 +231,6 @@ export class SimUgv extends SimDevice {
     if (this.failsafeTimer) clearTimeout(this.failsafeTimer);
     this.failsafeTimer = undefined;
   }
-}
-
-function round(n: number) {
-  return Math.round(n * 100) / 100;
 }
 
 /** Small SVG frame standing in for an onboard camera snapshot. */

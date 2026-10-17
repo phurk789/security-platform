@@ -156,15 +156,64 @@ describe('stale data and reconnect', () => {
     let s = run(ready, { type: 'issueCommand', missionId: id, command: 'start', idempotencyKey: 'k1' });
     s = advance(s, 3000);
     s = run(s, { type: 'demoCutLink', deviceId: 'UGV-01' }, { type: 'issueCommand', missionId: id, command: 'pause', idempotencyKey: 'k2' });
-    s = advance(s, 1000);
-    const posAtCut = s.devices['UGV-01'].pos;
+    // Longer than the vehicle's 1.5 s failsafe delay plus braking time.
+    s = advance(s, 3500);
     s = run(s, { type: 'demoRestoreLink', deviceId: 'UGV-01' });
-    s = advance(s, 4000);
+    s = advance(s, 1500);
     const pause = s.commands.find((c) => c.idempotencyKey === 'k2')!;
     expect(pause.delivered).toBe(false);
     expect(pause.status).toBe('timed_out');
     expect(missionForIncident(s, 'INC-024')!.status).toBe('paused');
-    expect(s.devices['UGV-01'].pos).toEqual(posAtCut);
+    // After reconnect the vehicle stays put: reported speed 0, fixes only jitter by GNSS noise.
+    const atReconnect = s.devices['UGV-01'].pos;
+    s = advance(s, 4000);
+    expect(s.devices['UGV-01'].speed).toBe(0);
+    expect(s.sim!['UGV-01'].motion.speed).toBe(0);
+    const p = s.devices['UGV-01'].pos;
+    expect(Math.hypot(p.x - atReconnect.x, p.y - atReconnect.y)).toBeLessThan(3);
+    expect(missionForIncident(s, 'INC-024')!.status).toBe('paused');
+  });
+
+  it('a link blip shorter than the failsafe delay does not stop the vehicle', () => {
+    const { s: ready, id } = readyToStart();
+    let s = run(ready, { type: 'issueCommand', missionId: id, command: 'start', idempotencyKey: 'k1' });
+    s = advance(s, 3000);
+    s = run(s, { type: 'demoCutLink', deviceId: 'UGV-01' });
+    s = advance(s, 1000);
+    s = run(s, { type: 'demoRestoreLink', deviceId: 'UGV-01' });
+    s = advance(s, 1500);
+    expect(missionForIncident(s, 'INC-024')!.status).toBe('executing');
+    expect(s.devices['UGV-01'].speed).toBeGreaterThan(0);
+  });
+
+  it('pause is confirmed only after the vehicle has braked to a stop', () => {
+    const { s: ready, id } = readyToStart();
+    let s = run(ready, { type: 'issueCommand', missionId: id, command: 'start', idempotencyKey: 'k1' });
+    s = advance(s, 6000);
+    expect(s.sim!['UGV-01'].motion.speed).toBeGreaterThan(3);
+    s = run(s, { type: 'issueCommand', missionId: id, command: 'pause', idempotencyKey: 'p1' });
+    s = advance(s, 1250);
+    const pending = s.commands.find((c) => c.idempotencyKey === 'p1')!;
+    expect(pending.status).toBe('executing');
+    expect(missionForIncident(s, 'INC-024')!.status).toBe('executing');
+    s = advance(s, 3000);
+    expect(s.commands.find((c) => c.idempotencyKey === 'p1')!.status).toBe('succeeded');
+    expect(s.sim!['UGV-01'].motion.speed).toBe(0);
+    expect(missionForIncident(s, 'INC-024')!.status).toBe('paused');
+  });
+
+  it('telemetry carries heading, link quality, satellites, accuracy and latency', () => {
+    let s = advance(makeInitialState(), 3000);
+    const d = s.devices['UGV-01'];
+    expect(d.signal).toBeGreaterThan(20);
+    expect(d.satellites).toBeGreaterThan(5);
+    expect(d.latencyMs).toBeGreaterThanOrEqual(45);
+    expect(d.accuracyM).toBeGreaterThanOrEqual(0.8);
+    expect(d.accuracyM).toBeLessThanOrEqual(2.5);
+    s = advance(s, 2000);
+    const samples = s.telemetry.filter((t) => t.deviceId === 'UGV-01');
+    expect(samples.length).toBeGreaterThan(2);
+    expect(samples[samples.length - 1].signal).toBeGreaterThan(0);
   });
 });
 

@@ -1,0 +1,44 @@
+/* Live telemetry panel (TelemetryPanel.tsx). Uses the app's theme tokens. */
+.tlm { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--line); }
+.tlm-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tlm-title { font-weight: 600; font-size: 0.85rem; }
+.tlm-window { font-size: 0.72rem; color: var(--text-3); }
+.tlm-nodata { font-size: 0.72rem; color: var(--amber); margin-left: auto; }
+.tlm-sparks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.tlm-spark { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 6px 6px 4px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); }
+.tlm-spark-top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+.tlm-label { font-size: 0.68rem; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tlm-value { font-size: 0.92rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tlm-value small { font-size: 0.66rem; font-weight: 400; color: var(--text-2); }
+.tlm-spark svg { width: 100%; height: 30px; display: block; overflow: visible; }
+.tlm-grid { stroke: var(--line-2); stroke-width: 0.5; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.tlm-line { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.tlm-area { stroke: none; opacity: 0.14; }
+.tone-cyan .tlm-line { stroke: var(--cyan); }
+.tone-cyan .tlm-area, .tone-cyan .tlm-dot { fill: var(--cyan); }
+.tone-green .tlm-line { stroke: var(--green); }
+.tone-green .tlm-area, .tone-green .tlm-dot { fill: var(--green); }
+.tone-amber .tlm-line { stroke: var(--amber); }
+.tone-amber .tlm-area, .tone-amber .tlm-dot { fill: var(--amber); }
+.tone-red .tlm-line { stroke: var(--red); }
+.tone-red .tlm-area, .tone-red .tlm-dot { fill: var(--red); }
+.tlm-stats { display: grid; grid-template-columns: 1.4fr repeat(2, minmax(0, 1fr)); gap: 6px 10px; margin: 0; }
+.tlm-stats > div { min-width: 0; }
+.tlm-stats dt { font-size: 0.66rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tlm-stats dd { margin: 1px 0 0; font-size: 0.82rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tlm-stats .warn dd { color: var(--amber); }
+.tlm-heading { grid-row: span 2; display: flex; align-items: center; gap: 8px; }
+.tlm-compass { width: 44px; height: 44px; flex: none; }
+.tlm-compass .ring { fill: var(--panel-2); stroke: var(--line-2); stroke-width: 1; }
+.tlm-compass .n { fill: var(--text-3); font-size: 7px; font-weight: 700; }
+.tlm-compass .needle { fill: var(--cyan); transition: transform 0.6s ease; }
+.tlm-compass.dim .needle { fill: var(--text-3); }
+.tlm-dim .tlm-line, .tlm-dim .tlm-dot { stroke: var(--text-3); fill: var(--text-3); }
+.tlm-dim .tlm-area { fill: var(--text-3); }
+.tlm-dim .tlm-value { color: var(--text-3); }
+:lang(th) .tlm-stats dt { text-transform: none; letter-spacing: 0; font-size: 0.7rem; }
+@media (max-width: 420px) {
+  .tlm-sparks { grid-template-columns: 1fr; }
+  .tlm-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tlm-heading { grid-row: auto; grid-column: 1 / -1; }
+}

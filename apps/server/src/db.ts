@@ -79,7 +79,21 @@ export function openDb(file: string): DB {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/** Additive migrations for databases created by older versions. */
+function migrate(db: DB) {
+  const cols = new Set((db.prepare('PRAGMA table_info(telemetry)').all() as { name: string }[]).map((c) => c.name));
+  for (const [name, type] of [
+    ['heading', 'REAL'],
+    ['signal', 'REAL'],
+    ['satellites', 'INTEGER'],
+    ['temperature', 'REAL'],
+  ] as const) {
+    if (!cols.has(name)) db.exec(`ALTER TABLE telemetry ADD COLUMN ${name} ${type}`);
+  }
 }
 
 export function tx<T>(db: DB, fn: () => T): T {

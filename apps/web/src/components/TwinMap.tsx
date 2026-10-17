@@ -5,6 +5,8 @@ import { freshness, ageMs } from '../domain/policy';
 import { missionForIncident } from '../domain/reducer';
 import type { AppState, Device, Layers as LayerState, Point } from '@13store/shared';
 import { useStore } from '../store';
+import { Twin3D, type Twin3DApi } from './Twin3D';
+import { webglAvailable } from '../twin/world';
 import { ago, tr, useT } from '../i18n';
 
 // --- projection ------------------------------------------------------------
@@ -61,6 +63,9 @@ export function TwinMap() {
   const [layersOpen, setLayersOpen] = useState(false);
   const drag = useRef<{ x: number; y: number; pan: [number, number] } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const api3d = useRef<Twin3DApi>(null);
+  const [heading, setHeading] = useState(0);
+  const gl = mode === '3d' && webglAvailable();
 
   const replay = s.replay.active;
   const at = replay ? s.replay.at : s.now;
@@ -93,7 +98,10 @@ export function TwinMap() {
   const L = s.layers;
 
   return (
-    <div className={`map map-${mode}${replay ? " replay" : ""}`}>
+    <div className={`map map-${mode}${replay ? " replay" : ""}${gl ? ' map-gl' : ''}`}>
+      {gl ? (
+        <Twin3D ref={api3d} onHeading={setHeading} />
+      ) : (
       <svg
         ref={svgRef}
         viewBox={VB[mode]}
@@ -159,6 +167,7 @@ export function TwinMap() {
           })}
         </g>
       </svg>
+      )}
 
       <div className="map-tools">
         <div className="seg" role="group" aria-label={t('Map view')}>
@@ -183,11 +192,12 @@ export function TwinMap() {
       </div>
 
       <div className="zoom">
-        <button aria-label={t('Zoom in')} onClick={() => setZoom((z) => Math.min(3, z * 1.25))}><Plus size={18} /></button>
-        <button aria-label={t('Zoom out')} onClick={() => setZoom((z) => Math.max(0.7, z / 1.25))}><Minus size={18} /></button>
+        <button aria-label={t('Zoom in')} onClick={() => (gl ? api3d.current?.zoom(0.7) : setZoom((z) => Math.min(3, z * 1.25)))}><Plus size={18} /></button>
+        <button aria-label={t('Zoom out')} onClick={() => (gl ? api3d.current?.zoom(1.4) : setZoom((z) => Math.max(0.7, z / 1.25)))}><Minus size={18} /></button>
         <button
           aria-label={t('Center on selection')}
           onClick={() => {
+            if (gl) return api3d.current?.focusSelection();
             const target = selInc?.pos;
             setZoom(target ? 1.6 : 1.1);
             setPan(target ? [SITE.width / 2 - target.x, mode === '3d' ? (SITE.height / 2 - target.y) * K : SITE.height / 2 - target.y] : [0, 0]);
@@ -196,7 +206,7 @@ export function TwinMap() {
           <LocateFixed size={18} />
         </button>
       </div>
-      <div className="compass" aria-hidden>
+      <div className="compass" aria-hidden style={gl ? { transform: `rotate(${heading}deg)` } : undefined}>
         <span>N</span>
         <svg viewBox="0 0 20 20" width="18" height="18"><path d="M10 2 L15 17 L10 13 L5 17 Z" fill="currentColor" /></svg>
       </div>

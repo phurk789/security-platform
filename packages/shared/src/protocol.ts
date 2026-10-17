@@ -72,6 +72,12 @@ export interface GwTelemetry {
   quality: 'good' | 'degraded';
   /** Index of the next checkpoint for an active route. */
   nextCp?: number;
+  /** Degrees, 0 = north (−y), clockwise. */
+  heading?: number;
+  /** Radio link quality 0–100 as measured by the device. */
+  signal?: number;
+  satellites?: number;
+  temperatureC?: number;
 }
 
 export interface GwCommandUpdate {
@@ -199,7 +205,22 @@ export type ConsoleEvent =
   | { type: 'mission'; mission: Mission }
   | { type: 'command'; command: Command }
   | { type: 'device'; device: Device }
-  | { type: 'telemetry'; deviceId: string; at: number; pos: Point; alt?: number; battery?: number; speed: number; accuracyM: number; lastSeen: number }
+  | {
+      type: 'telemetry';
+      deviceId: string;
+      at: number;
+      pos: Point;
+      alt?: number;
+      battery?: number;
+      speed: number;
+      accuracyM: number;
+      lastSeen: number;
+      heading?: number;
+      signal?: number;
+      latencyMs?: number;
+      satellites?: number;
+      temperatureC?: number;
+    }
   | { type: 'timeline'; event: TimelineEvent }
   | { type: 'evidence'; evidence: Evidence }
   | { type: 'assignment'; assignment: Assignment }

@@ -457,4 +457,14 @@ export const TH: Record<string, string> = {
   'Mission is not awaiting approval.': 'ภารกิจไม่ได้อยู่ในสถานะรออนุมัติ',
   'Resolve the incident before closing it.': 'บันทึกผลเหตุก่อนปิดเหตุ',
   'Plan changed since approval. Re-approval required.': 'แผนเปลี่ยนหลังอนุมัติ ต้องขออนุมัติใหม่',
+  // --- live telemetry panel ---------------------------------------------------
+  'Live telemetry': 'ข้อมูลอุปกรณ์สด',
+  'Last 60 s': '60 วินาทีล่าสุด',
+  'No data since {time}': 'ไม่มีข้อมูลตั้งแต่ {time}',
+  'Heading': 'ทิศทาง',
+  'Satellites': 'ดาวเทียม',
+  'Accuracy': 'ความแม่นยำ',
+  'Latency': 'ความหน่วง',
+  'Motor temp': 'อุณหภูมิมอเตอร์',
+  'Airframe temp': 'อุณหภูมิตัวเครื่อง',
 };

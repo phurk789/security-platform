@@ -1,5 +1,5 @@
 // Shared plumbing for simulated devices: telemetry ticker, link-loss simulation, timers.
-import type { AdapterDeclaration, Device, SrvCommand, SrvDemo } from '@13store/shared';
+import { sampleLatency, type AdapterDeclaration, type Device, type GwTelemetry, type SrvCommand, type SrvDemo } from '@13store/shared';
 import { CommandLedger, type Adapter, type AdapterContext, type EventReport } from '../sdk';
 
 export interface SimOptions {
@@ -7,6 +7,11 @@ export interface SimOptions {
   offline?: boolean;
   /** Override the telemetry interval (ms). Defaults to the declaration's rateMs. */
   rateMs?: number;
+  /**
+   * Simulate radio/backhaul delay: each sample is measured now (sourceTime) but handed to the
+   * gateway 45–400 ms later, depending on link quality. Off by default; on in defaultAdapters().
+   */
+  latency?: boolean;
 }
 
 const LINK_LOSS: Record<Device['kind'], string> = {
@@ -45,6 +50,7 @@ export abstract class SimDevice implements Adapter {
   /** Events raised while the radio link is down; delivered in order once it is back. */
   private heldEvents: EventReport[] = [];
   protected lastTick = 0;
+  private lastDelivery = 0;
 
   constructor(
     protected seed: Device,
@@ -133,6 +139,16 @@ export abstract class SimDevice implements Adapter {
   protected report(commandId: string, status: 'acknowledged' | 'executing' | 'succeeded' | 'rejected' | 'failed', cmd: SrvCommand, detail?: string) {
     this.ledger.record(cmd, status, detail);
     if (!this.linkCut) this.ctx.commandUpdate({ commandId, status, detail });
+  }
+
+  /** Send one telemetry sample, after a realistic link delay when latency is enabled. */
+  protected publish(sample: Omit<GwTelemetry, 't' | 'deviceId'>) {
+    if (!this.opts.latency) return this.ctx.telemetry(sample);
+    const now = this.ctx.now();
+    // Keep samples in order: a later sample never overtakes an earlier one.
+    const at = Math.max(this.lastDelivery + 1, now + sampleLatency(sample.signal ?? 90));
+    this.lastDelivery = at;
+    this.later(at - now, () => this.ctx.telemetry(sample));
   }
 
   protected later(ms: number, fn: () => void) {

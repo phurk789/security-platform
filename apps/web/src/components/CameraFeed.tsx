@@ -1,6 +1,8 @@
 import { fmtDate, fmtTime } from '../domain/policy';
 import { tr } from '../i18n';
 import type { Freshness } from '@13store/shared';
+import { SceneFeed } from './SceneFeed';
+import { webglAvailable } from '../twin/world';
 
 export type Scene = 'gate' | 'plaza' | 'path' | 'lot' | 'ugv' | 'equipment';
 
@@ -16,6 +18,7 @@ export function CameraFeed({
   replay,
   compact,
   progress = 0,
+  deviceId,
 }: {
   scene: Scene;
   label: string;
@@ -25,10 +28,17 @@ export function CameraFeed({
   compact?: boolean;
   /** 0..1 for the UGV forward view: how close the gate is. */
   progress?: number;
+  /** Device whose camera to render from the 3D twin. Defaults to the id at the start of the label. */
+  deviceId?: string;
 }) {
   const frozen = freshness !== 'live';
+  const id = deviceId ?? label.match(/^[A-Z]{2,5}(?:-[A-Z0-9]+)+/)?.[0];
+  const live3d = !compact && !!id && webglAvailable();
   return (
-    <div className={`feed${compact ? ' compact' : ''}${frozen ? ' frozen' : ''}`}>
+    <div className={`feed${compact ? ' compact' : ''}${frozen ? ' frozen' : ''}${live3d ? ' feed-3d' : ''}`}>
+      {live3d ? (
+        <SceneFeed deviceId={id!} ir={id!.startsWith('CCTV')} frozen={frozen} />
+      ) : (
       <svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-label={tr('{label} simulated camera view', { label })}>
         <defs>
           <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
@@ -48,6 +58,7 @@ export function CameraFeed({
         {(scene === 'lot' || scene === 'equipment') && <LotScene />}
         <rect width="320" height="180" className="scan" />
       </svg>
+      )}
       {!compact && (
         <>
           <div className="feed-top">
@@ -58,6 +69,7 @@ export function CameraFeed({
             <span>
               {fmtDate(time)} &nbsp;{fmtTime(time, true)}
             </span>
+            {live3d && !frozen && <span className="feed-meta">{id!.startsWith('CCTV') ? 'IR · ' : ''}12 fps · 1.8 Mbps</span>}
             {frozen && <span className="feed-frozen">{freshness === 'offline' ? `NO SIGNAL · ${tr('last frame')}` : `FEED DELAYED · ${tr('frame frozen')}`}</span>}
           </div>
         </>

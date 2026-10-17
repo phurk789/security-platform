@@ -31,6 +31,7 @@ import { useStore } from '../store';
 import { CameraFeed } from './CameraFeed';
 import { Badge, CommandBadge, FreshBadge, IncidentBadge, IntegrationBadge, MissionBadge } from './Badges';
 import { ReasonDialog } from './Dialog';
+import { TelemetryPanel } from './TelemetryPanel';
 import { ago, useT } from '../i18n';
 
 const SEV = { low: 'Low', medium: 'Medium', high: 'High' } as const;
@@ -574,6 +575,7 @@ function LiveMission({ m }: { m: Mission }) {
           <div><dt>{t('Progress')}</dt><dd>{t('Checkpoint {n} of {total}', { n: Math.min(m.nextCp + 1, m.checkpoints.length), total: m.checkpoints.length })}</dd></div>
           <div><dt>{t('Speed')}</dt><dd>{f === 'live' ? `${d.speed.toFixed(1)} m/s` : t('unknown')}</dd></div>
         </dl>
+        <TelemetryPanel deviceId={d.id} />
         {f !== 'live' && (
           <p className="banner warn">
             {t('Last data {ago}. New start/resume commands are held. Vehicle state is uncertain — check with the field operator.', { ago: ago(age) })}
@@ -673,6 +675,7 @@ function DevicePanel({ d }: { d: Device }) {
             <div><dt>{t('Control')}</dt><dd>{userName(s, d.controlOwner)}</dd></div>
             <div><dt>{t('Commands')}</dt><dd>{d.commands.length ? d.commands.join(', ') : t('none (view only)')}</dd></div>
           </dl>
+          {d.kind !== 'cctv' && <TelemetryPanel deviceId={d.id} />}
           <p className="muted">{d.limitations}</p>
           {d.controlOwner && can(me.role, 'control.handover') && d.controlOwner !== me.id && !s.replay.active && (
             <button className="btn-secondary wide" onClick={() => dispatch({ type: 'handover', deviceId: d.id, toUserId: me.id })}>

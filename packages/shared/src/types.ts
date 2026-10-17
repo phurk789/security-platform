@@ -104,6 +104,16 @@ export interface Device {
   rateMs: number;
   /** Ground speed in m/s as last reported. */
   speed: number;
+  /** Heading in degrees: 0 = north (−y on the site grid), clockwise. */
+  heading?: number;
+  /** Radio link quality, 0–100. */
+  signal?: number;
+  /** Delay between the device measuring and the platform receiving the last sample (ms). */
+  latencyMs?: number;
+  /** GNSS satellites in use (UGV/UAV). */
+  satellites?: number;
+  /** Motor / airframe temperature in °C. */
+  temperatureC?: number;
   /** For CCTV: the camera view variant to render. */
   view?: 'gate' | 'plaza' | 'lot' | 'path';
 }
@@ -204,6 +214,43 @@ export interface TelemetrySample {
   at: number;
   x: number;
   y: number;
+  speed?: number;
+  battery?: number;
+  signal?: number;
+  heading?: number;
+}
+
+/** Motion state of a simulated ground vehicle (true state, not what telemetry reports). */
+export interface VehicleMotion {
+  x: number;
+  y: number;
+  speed: number;
+  heading: number;
+  route: Point[] | null;
+  nextCp: number;
+  /** drive = follow the route; hold = brake to a stop. */
+  intent: 'drive' | 'hold';
+  brake: 'normal' | 'hard';
+  done: boolean;
+}
+
+/** Slowly drifting sensor state of a simulated device. */
+export interface SensorState {
+  /** Random-walk offsets around the site-dependent baseline. */
+  acc: number;
+  sig: number;
+  sat: number;
+  wind: Point;
+  tempC: number;
+  battery: number;
+}
+
+/** Offline-demo vehicle simulation (vehicle side; the platform only sees telemetry). */
+export interface VehicleSim {
+  motion: VehicleMotion;
+  sensors: SensorState;
+  linkLostAt?: number;
+  failsafeAt?: number;
 }
 
 export interface Toast {
@@ -244,6 +291,8 @@ export interface AppState {
   linkCut: Record<string, boolean>;
   /** Sim time at which a device last reported a link-loss failsafe stop. */
   failsafeAt: Record<string, number | undefined>;
+  /** Offline demo only: vehicle-side simulation state. */
+  sim?: Record<string, VehicleSim>;
   replay: { active: boolean; at: number };
   /** Field responder tasks. */
   assignments: Assignment[];

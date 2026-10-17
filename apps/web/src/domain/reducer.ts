@@ -4,12 +4,19 @@
 
 import {
   COMMAND_ACK_TIMEOUT_MS,
-  UGV_SPEED,
   COMMAND_TTL_MS,
+  LINK_LOSS_FAILSAFE_MS,
+  bearing,
+  gaussian,
+  newMotion,
+  newSensors,
+  readSensors,
+  sampleLatency,
+  stepMotion,
+  stepSensors,
   can,
   constraintChecks,
   currentUser,
-  dist,
   freshness,
   isReady,
   userName,
@@ -23,9 +30,11 @@ import type {
   CommandType,
   Incident,
   Layers,
+  Device,
   Mission,
   Point,
   TimelineEvent,
+  VehicleSim,
   View,
 } from '@13store/shared';
 
@@ -156,21 +165,61 @@ export const isTerminal = (c: Command) => TERMINAL.includes(c.status);
 // simulation tick
 // ---------------------------------------------------------------------------
 
+/** Vehicle-side simulation state, created on first use. */
+function simFor(s: AppState, d: Device): VehicleSim {
+  s.sim ??= {};
+  return (s.sim[d.id] ??= { motion: newMotion(d.pos, d.heading ?? 90), sensors: newSensors(d.battery ?? 100, d.kind) });
+}
+
+const UAV_ORBIT = { cx: 318, cy: 52, rx: 34, ry: 26, rate: 0.08 };
+
 function tick(s: AppState, dt: number) {
   s.now += dt;
+  const sec = dt / 1000;
 
+  // Vehicle side: physics, sensors and the link-loss failsafe run whether or not the platform hears them.
+  for (const d of Object.values(s.devices)) {
+    const v = simFor(s, d);
+    if (d.kind === 'ugv') {
+      if (s.linkCut[d.id]) {
+        v.linkLostAt ??= s.now;
+        if (v.failsafeAt === undefined && s.now - v.linkLostAt >= LINK_LOSS_FAILSAFE_MS && (v.motion.intent === 'drive' || v.motion.speed > 0)) {
+          v.motion.intent = 'hold';
+          v.motion.brake = 'hard';
+          v.failsafeAt = s.now;
+          s.failsafeAt[d.id] = s.now;
+        }
+      } else {
+        v.linkLostAt = undefined;
+      }
+      stepMotion(v.motion, sec);
+    } else if (d.kind === 'uav') {
+      const a = (s.now / 1000) * UAV_ORBIT.rate;
+      const w = v.sensors.wind;
+      const next = { x: UAV_ORBIT.cx + Math.cos(a) * UAV_ORBIT.rx + w.x * 1.5, y: UAV_ORBIT.cy + Math.sin(a) * UAV_ORBIT.ry + w.y * 1.5 };
+      const moved = Math.hypot(next.x - v.motion.x, next.y - v.motion.y);
+      if (sec > 0 && moved < 20) {
+        v.motion.speed = moved / sec;
+        if (moved > 0.01) v.motion.heading = bearing(v.motion, next);
+      }
+      v.motion.x = next.x;
+      v.motion.y = next.y;
+    }
+    stepSensors(v.sensors, sec, d.kind, d.kind === 'ugv' ? v.motion.speed : 0);
+  }
+
+  // Platform side: what arrives over the radio, at each device's telemetry rate.
   for (const d of Object.values(s.devices)) {
     if (s.linkCut[d.id]) continue; // no telemetry arrives
     if (s.now - d.lastSeen < d.rateMs) continue;
-    const elapsed = (s.now - d.lastSeen) / 1000;
-    const wasFailsafe = s.failsafeAt[d.id];
+    const v = simFor(s, d);
 
     if (d.kind === 'ugv') {
-      const m = s.missions.find((x) => x.deviceId === d.id && x.status === 'executing');
-      if (wasFailsafe) {
+      if (v.failsafeAt !== undefined) {
         // First telemetry after reconnect: the vehicle reports it stopped itself.
+        v.failsafeAt = undefined;
         s.failsafeAt[d.id] = undefined;
-        d.speed = 0;
+        const m = s.missions.find((x) => x.deviceId === d.id && x.status === 'executing');
         if (m) {
           m.status = 'paused';
           m.note = 'Vehicle stopped by link-loss failsafe. Operator must resume.';
@@ -180,22 +229,24 @@ function tick(s: AppState, dt: number) {
             detail: 'No queued commands were replayed. Mission paused until the operator resumes.',
           });
         }
-      } else if (m) {
-        moveAlong(s, d.id, m, UGV_SPEED * elapsed);
-      } else {
-        d.speed = 0;
       }
-      if (d.battery !== undefined && d.speed > 0) d.battery = Math.max(0, d.battery - 0.05 * elapsed);
-    }
-
-    if (d.kind === 'uav') {
-      const a = (s.now / 1000) * 0.08;
-      d.pos = { x: 318 + Math.cos(a) * 34, y: 52 + Math.sin(a) * 26 };
+      report(s, d, v);
+      const m = s.missions.find((x) => x.deviceId === d.id && (x.status === 'executing' || x.status === 'paused'));
+      if (m && v.motion.route) {
+        m.nextCp = v.motion.nextCp;
+        if (v.motion.done && m.status === 'executing') completeMission(s, m);
+      }
+    } else if (d.kind === 'uav') {
+      report(s, d, v);
+      d.alt = Math.round((40 + gaussian() * 0.25) * 10) / 10;
+    } else {
+      d.signal = readSensors(v.sensors, d.pos, 'cctv').signal;
+      d.latencyMs = sampleLatency(d.signal);
     }
 
     d.lastSeen = s.now;
     if (d.kind !== 'cctv') {
-      s.telemetry.push({ deviceId: d.id, at: s.now, x: d.pos.x, y: d.pos.y });
+      s.telemetry.push({ deviceId: d.id, at: s.now, x: d.pos.x, y: d.pos.y, speed: d.speed, battery: d.battery, signal: d.signal, heading: d.heading });
       if (s.telemetry.length > 4000) s.telemetry.splice(0, s.telemetry.length - 4000);
     }
   }
@@ -206,47 +257,79 @@ function tick(s: AppState, dt: number) {
   }
 }
 
-function moveAlong(s: AppState, deviceId: string, m: Mission, budget: number) {
-  const d = s.devices[deviceId];
-  let moved = 0;
-  while (budget > 0 && m.nextCp < m.checkpoints.length) {
-    const target = m.checkpoints[m.nextCp];
-    const gap = dist(d.pos, target);
-    if (gap <= budget) {
-      d.pos = { ...target };
-      budget -= gap;
-      moved += gap;
-      m.nextCp += 1;
-    } else {
-      d.pos = {
-        x: d.pos.x + ((target.x - d.pos.x) / gap) * budget,
-        y: d.pos.y + ((target.y - d.pos.y) / gap) * budget,
-      };
-      moved += budget;
-      budget = 0;
-    }
+/** Copy what the device would report (noisy fix, honest accuracy, link quality) onto the platform's record. */
+function report(s: AppState, d: Device, v: VehicleSim) {
+  const r = readSensors(v.sensors, { x: v.motion.x, y: v.motion.y }, d.kind);
+  d.pos = r.pos;
+  d.accuracyM = r.accuracyM;
+  d.battery = r.battery;
+  d.speed = Math.round(v.motion.speed * (d.kind === 'uav' ? 10 : 100)) / (d.kind === 'uav' ? 10 : 100);
+  d.heading = Math.round(v.motion.heading);
+  d.signal = r.signal;
+  d.satellites = r.satellites;
+  d.temperatureC = r.temperatureC;
+  d.latencyMs = sampleLatency(r.signal);
+  void s;
+}
+
+function completeMission(s: AppState, m: Mission) {
+  const deviceId = m.deviceId;
+  m.status = 'completed';
+  m.nextCp = m.checkpoints.length;
+  const inc = incident(s, m.incidentId);
+  event(s, m.incidentId, `${deviceId} reached final checkpoint`, {
+    actor: deviceId,
+    tone: 'ok',
+    detail: 'Arrival confirmed by vehicle telemetry. Onboard camera snapshot attached.',
+  });
+  s.evidence.push({
+    id: nextId(s, 'EV'),
+    incidentId: m.incidentId,
+    kind: 'snapshot',
+    title: `${deviceId} onboard camera at ${inc?.place ?? 'checkpoint'}`,
+    source: deviceId,
+    capturedAt: s.now,
+    recordedBy: deviceId,
+    simulated: true,
+  });
+}
+
+/** The device starts doing what the command asks (vehicle side). */
+function actuate(s: AppState, c: Command) {
+  const d = s.devices[c.deviceId];
+  const m = mission(s, c.missionId);
+  if (!d || !m) return;
+  const v = simFor(s, d).motion;
+  switch (c.type) {
+    case 'start':
+      v.route = m.checkpoints.map((p) => ({ ...p }));
+      v.nextCp = m.nextCp;
+      v.done = false;
+      v.intent = 'drive';
+      v.brake = 'normal';
+      break;
+    case 'resume':
+      v.intent = 'drive';
+      v.brake = 'normal';
+      break;
+    case 'pause':
+      v.intent = 'hold';
+      v.brake = 'normal';
+      break;
+    case 'stop':
+      v.intent = 'hold';
+      v.brake = 'normal';
+      v.route = null;
+      break;
   }
-  d.speed = moved > 0 ? UGV_SPEED : 0;
-  if (m.nextCp >= m.checkpoints.length) {
-    d.speed = 0;
-    m.status = 'completed';
-    const inc = incident(s, m.incidentId);
-    event(s, m.incidentId, `${deviceId} reached final checkpoint`, {
-      actor: deviceId,
-      tone: 'ok',
-      detail: 'Arrival confirmed by vehicle telemetry. Onboard camera snapshot attached.',
-    });
-    s.evidence.push({
-      id: nextId(s, 'EV'),
-      incidentId: m.incidentId,
-      kind: 'snapshot',
-      title: `${deviceId} onboard camera at ${inc?.place ?? 'checkpoint'}`,
-      source: deviceId,
-      capturedAt: s.now,
-      recordedBy: deviceId,
-      simulated: true,
-    });
-  }
+}
+
+/** True once the vehicle really does it: moving for start/resume, stopped for pause/stop. */
+function effectConfirmed(s: AppState, c: Command) {
+  const d = s.devices[c.deviceId];
+  if (!d) return false;
+  const v = simFor(s, d).motion;
+  return c.type === 'start' || c.type === 'resume' ? v.speed > 0 || v.done : v.speed === 0;
 }
 
 function progressCommand(s: AppState, c: Command) {
@@ -273,14 +356,18 @@ function progressCommand(s: AppState, c: Command) {
         if (t >= COMMAND_ACK_TIMEOUT_MS + 1000) setCmd(c, 'unknown', s.now, 'Device acknowledged but stopped reporting. Outcome unknown.');
         return;
       }
-      if (t >= 1000) setCmd(c, 'executing', s.now);
+      if (t >= 1000) {
+        setCmd(c, 'executing', s.now);
+        actuate(s, c);
+      }
       return;
     case 'executing':
       if (!linkOk) {
         if (t >= COMMAND_ACK_TIMEOUT_MS + 1000) setCmd(c, 'unknown', s.now, 'Device stopped reporting before confirming. Outcome unknown.');
         return;
       }
-      if (t >= 1700) applyCommand(s, c);
+      if (t >= 1100 && effectConfirmed(s, c)) applyCommand(s, c);
+      else if (t >= 12_000) setCmd(c, 'failed', s.now, 'Effect not confirmed by the vehicle.');
       return;
   }
 }
@@ -600,14 +687,8 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     }
     case 'demoCutLink': {
       if (!guard(s, 'demo.control', msg.deviceId, { allowInReplay: true })) return s;
+      // Vehicle side (see tick): it keeps going for the failsafe delay, then brakes to a stop (PRD §8).
       s.linkCut[msg.deviceId] = true;
-      const d = s.devices[msg.deviceId];
-      const m = s.missions.find((x) => x.deviceId === msg.deviceId && x.status === 'executing');
-      if (d.kind === 'ugv' && m) {
-        // Vehicle side: adapter detects link loss and stops in place (tested failsafe per PRD §8).
-        s.failsafeAt[d.id] = s.now;
-        d.speed = 0;
-      }
       audit(s, 'demo.cut_link', msg.deviceId, 'ok');
       toast(s, 'warn', `Demo: network to ${msg.deviceId} cut.`);
       return s;

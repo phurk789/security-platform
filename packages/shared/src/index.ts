@@ -4,3 +4,4 @@ export * from './seed';
 export * from './policy';
 export * from './states';
 export * from './protocol';
+export * from './kinematics';

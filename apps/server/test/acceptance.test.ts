@@ -144,7 +144,9 @@ describe('command certainty', () => {
     expect(Math.hypot(atReconnect.x - posAtLoss.x, atReconnect.y - posAtLoss.y)).toBeLessThan(15);
     await sleep(1500);
     const after = (await alex.get('/devices/UGV-01')).body;
-    expect(Math.hypot(after.pos.x - atReconnect.x, after.pos.y - atReconnect.y)).toBeLessThan(0.5);
+    // Reported fixes carry GNSS noise (< ~1 m); driving would cover ~9 m in this time.
+    expect(after.speed).toBe(0);
+    expect(Math.hypot(after.pos.x - atReconnect.x, after.pos.y - atReconnect.y)).toBeLessThan(3);
     const stopCmd = (await cmdStatus(id)).find((c) => c.type === 'stop');
     expect(stopCmd.delivered).toBe(false);
     const timeline = (await alex.get(`/incidents/${inc.id}/timeline`)).body as any[];
@@ -154,6 +156,26 @@ describe('command certainty', () => {
     await somchai.post('/commands', { missionId: id, type: 'stop', idempotencyKey: `${id}:stop2` });
     await waitFor(async () => (await alex.get(`/missions/${id}`)).body.status === 'cancelled', 8000);
   }, 45_000);
+});
+
+describe('telemetry realism', () => {
+  it('devices report heading, link quality, satellites and measured latency; history keeps them', async () => {
+    await waitFor(async () => (await alex.get('/devices/UGV-01')).body.latencyMs !== undefined);
+    const d = (await alex.get('/devices/UGV-01')).body;
+    expect(d.signal).toBeGreaterThan(20);
+    expect(d.signal).toBeLessThanOrEqual(99);
+    expect(d.satellites).toBeGreaterThan(5);
+    expect(d.heading).toBeGreaterThanOrEqual(0);
+    expect(d.latencyMs).toBeGreaterThanOrEqual(30); // simulated radio + backhaul delay
+    expect(d.latencyMs).toBeLessThan(1000);
+    expect(d.accuracyM).toBeGreaterThanOrEqual(0.8);
+    const hist = (await alex.get(`/devices/UGV-01/telemetry?from=${Date.now() - 60_000}`)).body as any[];
+    expect(hist.length).toBeGreaterThan(3);
+    const last = hist[hist.length - 1];
+    expect(last.latencyMs).toBe(last.receivedTime - last.sourceTime);
+    expect(last.signal).toBeGreaterThan(0);
+    expect(typeof last.heading).toBe('number');
+  });
 });
 
 describe('duplicates and evidence', () => {

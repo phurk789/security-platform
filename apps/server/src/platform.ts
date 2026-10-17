@@ -587,7 +587,9 @@ export class Platform {
   telemetryHistory(a: Actor, deviceId: string, from: number, to: number) {
     this.getDevice(a, deviceId);
     return this.db
-      .prepare('SELECT seq, source_time AS sourceTime, received_time AS receivedTime, x, y, alt, accuracy, battery, speed FROM telemetry WHERE device_id = ? AND received_time BETWEEN ? AND ? ORDER BY received_time LIMIT 20000')
+      .prepare(
+        'SELECT seq, source_time AS sourceTime, received_time AS receivedTime, received_time - source_time AS latencyMs, x, y, alt, accuracy, battery, speed, heading, signal, satellites, temperature AS temperatureC FROM telemetry WHERE device_id = ? AND received_time BETWEEN ? AND ? ORDER BY received_time LIMIT 20000',
+      )
       .all(deviceId, from, to);
   }
 
@@ -966,12 +968,36 @@ export class Platform {
     d.accuracyM = t.accuracyM;
     if (t.battery !== undefined) d.battery = t.battery;
     d.speed = t.speed;
+    if (t.heading !== undefined) d.heading = t.heading;
+    if (t.signal !== undefined) d.signal = t.signal;
+    if (t.satellites !== undefined) d.satellites = t.satellites;
+    if (t.temperatureC !== undefined) d.temperatureC = t.temperatureC;
+    // Source → received delay. Clamp at 0 in case the device clock runs slightly ahead.
+    d.latencyMs = Math.max(0, now - t.sourceTime);
     d.lastSeen = now;
     this.devices.set(d.id, d);
     this.db.prepare('UPDATE devices SET data = ? WHERE id = ?').run(JSON.stringify(this.publicDevice(d)), d.id);
     this.db
-      .prepare('INSERT INTO telemetry (device_id, seq, source_time, received_time, x, y, alt, accuracy, battery, speed, quality) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .run(d.id, t.seq, t.sourceTime, now, t.pos.x, t.pos.y, t.alt ?? null, t.accuracyM, t.battery ?? null, t.speed, t.quality);
+      .prepare(
+        'INSERT INTO telemetry (device_id, seq, source_time, received_time, x, y, alt, accuracy, battery, speed, quality, heading, signal, satellites, temperature) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      )
+      .run(
+        d.id,
+        t.seq,
+        t.sourceTime,
+        now,
+        t.pos.x,
+        t.pos.y,
+        t.alt ?? null,
+        t.accuracyM,
+        t.battery ?? null,
+        t.speed,
+        t.quality,
+        t.heading ?? null,
+        t.signal ?? null,
+        t.satellites ?? null,
+        t.temperatureC ?? null,
+      );
     if (t.nextCp !== undefined) {
       const m = this.activeMission(d.id);
       if (m && m.nextCp !== t.nextCp && ['executing', 'paused'].includes(m.status)) {
@@ -979,7 +1005,26 @@ export class Platform {
         this.saveMission(d.orgId, d.siteId, m);
       }
     }
-    this.publish({ orgId, siteId: d.siteId, event: { type: 'telemetry', deviceId: d.id, at: t.sourceTime, pos: d.pos, alt: d.alt, battery: d.battery, speed: d.speed, accuracyM: d.accuracyM, lastSeen: now } });
+    this.publish({
+      orgId,
+      siteId: d.siteId,
+      event: {
+        type: 'telemetry',
+        deviceId: d.id,
+        at: t.sourceTime,
+        pos: d.pos,
+        alt: d.alt,
+        battery: d.battery,
+        speed: d.speed,
+        accuracyM: d.accuracyM,
+        lastSeen: now,
+        heading: d.heading,
+        signal: d.signal,
+        latencyMs: d.latencyMs,
+        satellites: d.satellites,
+        temperatureC: d.temperatureC,
+      },
+    });
   }
 
   commandUpdate(orgId: string, u: GwCommandUpdate) {

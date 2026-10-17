@@ -514,3 +514,49 @@ html:lang(th) .meta dt { font-size: 0.78rem; }
   .avatar { width: 32px; height: 32px; }
   .sidenav button { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 }
+
+/* ---------- 3D twin (WebGL) ---------- */
+.t3-host { position: absolute; inset: 0; overflow: hidden; }
+.t3-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+.t3-canvas:active { cursor: grabbing; }
+.t3-labels { position: absolute; inset: 0; pointer-events: none; }
+.t3-labels > div { pointer-events: none; }
+.t3-bld { display: flex; flex-direction: column; align-items: center; background: rgba(8, 14, 26, 0.78); border: 1px solid rgba(182, 194, 209, 0.25); border-radius: 5px; padding: 3px 9px; color: var(--text); font-size: 12px; line-height: 1.25; white-space: nowrap; backdrop-filter: blur(2px); }
+.t3-bld span { color: var(--text-2); font-size: 11px; }
+.t3-zone { background: rgba(8, 14, 26, 0.82); border: 1px solid rgba(182, 194, 209, 0.35); border-radius: 5px; padding: 3px 10px; font-size: 13px; font-weight: 600; color: var(--text); }
+.t3-dev { pointer-events: auto !important; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; background: rgba(8, 14, 26, 0.9); border: 1px solid rgba(56, 189, 248, 0.45); border-radius: 6px; padding: 2px 7px; font-size: 12px; color: var(--text); white-space: nowrap; transform: translateY(-50%); }
+.t3-dev.k-cctv { border-color: rgba(182, 194, 209, 0.35); }
+.t3-dev.sel { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 0 14px rgba(56, 189, 248, 0.45); }
+.t3-dev i { font-style: normal; font-size: 10px; font-weight: 700; color: #e6deff; background: rgba(167, 139, 250, 0.3); border: 1px solid var(--violet); border-radius: 3px; padding: 0 4px; }
+.t3-dev em { font-style: normal; font-size: 10px; font-weight: 700; border-radius: 3px; padding: 0 4px; }
+.t3-dev em.stale { background: var(--amber); color: #1a1405; }
+.t3-dev em.offline { background: var(--red); color: #200a0a; }
+.t3-dev.f-offline { opacity: 0.8; border-color: rgba(248, 113, 113, 0.6); }
+.t3-inc { pointer-events: auto !important; cursor: pointer; display: flex; align-items: center; gap: 7px; background: rgba(30, 22, 6, 0.9); border: 1px solid var(--amber); border-radius: 7px; padding: 4px 9px 4px 5px; color: var(--text); font-size: 12px; white-space: nowrap; }
+.t3-inc .mark { font-style: normal; width: 20px; height: 20px; border-radius: 50%; background: var(--amber); color: #1a1405; display: grid; place-items: center; font-weight: 800; }
+.t3-inc b { color: var(--amber); display: block; }
+.t3-inc span { display: block; color: var(--text); }
+.t3-inc.t-cyan { background: rgba(6, 22, 34, 0.9); border-color: var(--cyan); }
+.t3-inc.t-cyan .mark { background: var(--cyan); }
+.t3-inc.t-cyan b { color: var(--cyan); }
+.t3-inc.t-red { border-color: var(--red); }
+.t3-inc.t-red .mark { background: var(--red); }
+.t3-inc.sel { box-shadow: 0 0 18px rgba(251, 191, 36, 0.35); font-size: 13px; }
+.t3-cp { width: 20px; height: 20px; border-radius: 50%; background: #06121d; border: 2px solid var(--cyan); color: var(--text); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+.t3-cp.draft { border-color: var(--amber); }
+.t3-cp.done { border-color: var(--text-3); color: var(--text-3); }
+.map-gl .compass { transition: transform 0.1s linear; }
+
+/* camera feed rendered from the twin */
+.scene-feed { position: absolute; inset: 0; overflow: hidden; background: #05080d; }
+.scene-feed canvas { width: 100%; height: 100%; display: block; object-fit: cover; image-rendering: auto; filter: saturate(0.85) contrast(1.08); }
+.scene-feed.ir canvas { filter: grayscale(1) contrast(1.35) brightness(1.15) sepia(0.08); }
+.scene-feed.frozen canvas { filter: grayscale(1) brightness(0.55); }
+.sf-noise { position: absolute; inset: -50%; opacity: 0.12; mix-blend-mode: overlay; pointer-events: none; animation: sf-grain 0.5s steps(4) infinite; }
+.scene-feed.ir .sf-noise { opacity: 0.2; }
+.scene-feed.frozen .sf-noise { animation: none; opacity: 0.06; }
+.sf-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%); }
+@keyframes sf-grain { 0% { transform: translate(0, 0); } 25% { transform: translate(-8%, 6%); } 50% { transform: translate(6%, -4%); } 75% { transform: translate(-4%, -8%); } 100% { transform: translate(0, 0); } }
+@media (prefers-reduced-motion: reduce) { .sf-noise { animation: none; } }
+.feed-meta { font-size: 0.7rem; color: rgba(241, 245, 249, 0.75); font-family: var(--mono); }
+.feed-3d .feed-top, .feed-3d .feed-bottom { z-index: 2; }
