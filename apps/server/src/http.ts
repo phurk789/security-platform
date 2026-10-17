@@ -22,7 +22,7 @@ declare module 'fastify' {
 
 type Req = FastifyRequest<{ Params: Record<string, string>; Querystring: Record<string, string>; Body: Record<string, unknown> }>;
 
-const PUBLIC = new Set(['/api/v1/meta', '/api/v1/auth/login', '/api/v1/openapi.json', '/api/v1/health', '/api/v1/gateway', '/api/v1/ws']);
+const PUBLIC = new Set(['/api/v1/meta', '/api/v1/auth/login', '/api/v1/openapi.json', '/api/v1/health', '/api/v1/gateway', '/api/v1/ws', '/api/v1/media/auth']);
 
 function bearer(req: FastifyRequest) {
   const h = req.headers.authorization;
@@ -168,7 +168,13 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.post('/api/v1/devices/:id/handover', async (req: Req) => p.handover(A(req), req.params.id, String(body(req).toUserId ?? '')));
   app.post('/api/v1/devices/:id/release', async (req: Req) => p.release(A(req), req.params.id));
   app.get('/api/v1/devices/:id/telemetry', async (req: Req) => p.telemetryHistory(A(req), req.params.id, num(req.query.from, p.now() - 3600_000)!, num(req.query.to, p.now())!));
+  app.post('/api/v1/devices/:id/camera', async (req: Req) => p.cameraControl(A(req), req.params.id, body(req)));
   app.post('/api/v1/media/:id/session', async (req: Req) => p.mediaSession(A(req), req.params.id));
+  // Site media server (MediaMTX authMethod: http) asks here before serving video. 200 = allow.
+  app.post('/api/v1/media/auth', async (req: Req, reply: FastifyReply) => {
+    const ok = p.mediaAuth(body(req));
+    return reply.status(ok ? 200 : 401).send(ok ? { ok: true } : { error: 'Media access refused.', code: 'forbidden' });
+  });
   app.get('/api/v1/media/:id/frame.svg', async (req: Req, reply: FastifyReply) => {
     const svg = p.mediaFrame(req.params.id, String(req.query.u ?? ''), Number(req.query.exp), String(req.query.sig ?? ''));
     reply.header('Content-Type', 'image/svg+xml').header('Cache-Control', 'no-store');

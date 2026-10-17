@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react';
-import type { AppState, Meta, SessionUser } from '@13store/shared';
+import type { AppState, CameraAction, Meta, SessionUser } from '@13store/shared';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
 import type { Api } from './api';
 
@@ -16,7 +16,26 @@ export interface Session {
   openEvidence(id: string, download?: boolean): Promise<void>;
   /** Ask the media gateway for a signed stream URL. Rejects if the role cannot view video. */
   mediaUrl(deviceId: string): Promise<string>;
+  /** Full media session: signed frame URL, plus WebRTC (WHEP) / HLS links for real devices. */
+  mediaSession(deviceId: string): Promise<MediaSession>;
+  /** Gimbal camera control (pan/tilt, zoom, photo, record). Never throws; failures come back in the result. */
+  cameraControl(deviceId: string, action: CameraAction): Promise<CameraResult>;
   reload(): Promise<void>;
+}
+
+export interface MediaSession {
+  url: string;
+  expiresAt: number;
+  label: 'SIMULATED' | 'LIVE';
+  whep?: string;
+  hls?: string;
+}
+
+export interface CameraResult {
+  ok: boolean;
+  /** True only when the camera itself answered. */
+  confirmed: boolean;
+  detail: string;
 }
 
 export interface StoreValue {

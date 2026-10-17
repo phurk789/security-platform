@@ -143,6 +143,7 @@ function IncidentPanel({ inc }: { inc: Incident }) {
               freshness={replay ? 'live' : freshness(s, ugv)}
               replay={replay}
               progress={m ? m.nextCp / m.checkpoints.length : 0}
+              controls
             />
           ) : cam ? (
             <CameraFeed
@@ -151,6 +152,7 @@ function IncidentPanel({ inc }: { inc: Incident }) {
               time={replay ? s.replay.at : freshness(s, cam) === 'live' ? s.now : cam.lastSeen}
               freshness={replay ? 'live' : freshness(s, cam)}
               replay={replay}
+              controls
             />
           ) : null}
         </div>
@@ -660,7 +662,12 @@ function DevicePanel({ d }: { d: Device }) {
       </div>
       {d.kind === 'cctv' && (
         <div className="feed-wrap">
-          <CameraFeed scene={d.view ?? 'plaza'} label={d.id} time={f === 'live' ? s.now : d.lastSeen} freshness={f} replay={s.replay.active} />
+          <CameraFeed scene={d.view ?? 'plaza'} label={d.id} time={f === 'live' ? s.now : d.lastSeen} freshness={f} replay={s.replay.active} controls />
+        </div>
+      )}
+      {d.kind !== 'cctv' && d.capabilities.includes('camera') && (
+        <div className="feed-wrap">
+          <CameraFeed scene="ugv" label={t('{id} onboard', { id: d.id })} deviceId={d.id} time={f === 'live' ? s.now : d.lastSeen} freshness={f} replay={s.replay.active} controls />
         </div>
       )}
       <div className="panel-body">

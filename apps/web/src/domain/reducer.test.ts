@@ -237,3 +237,41 @@ describe('full run', () => {
     expect(s.incidents.find((i) => i.id === 'INC-024')!.status).toBe('closed');
   });
 });
+
+describe('gimbal camera control (offline demo)', () => {
+  it('pans and zooms the simulated SIYI camera, checks permission and logs every action', () => {
+    let s = makeInitialState();
+    s = advance(s, 500);
+    expect(s.devices['CCTV-02'].gimbal).toMatchObject({ yaw: 0, zoom: 1 });
+    s = run(s, { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'gimbal_speed', yaw: 50, pitch: 0 } });
+    s = advance(s, 1000);
+    s = run(s, { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'gimbal_speed', yaw: 0, pitch: 0 } });
+    const yaw = s.devices['CCTV-02'].gimbal!.yaw;
+    expect(yaw).toBeGreaterThan(20);
+    s = advance(s, 1000);
+    expect(s.devices['CCTV-02'].gimbal!.yaw).toBe(yaw); // stopped means stopped
+    s = run(s, { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'zoom_to', level: 10 } }, { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'record' } });
+    s = advance(s, 2000);
+    expect(s.devices['CCTV-02'].gimbal).toMatchObject({ zoom: 10, recording: true });
+    expect(s.audit.filter((a) => a.action === 'camera.control' && a.result === 'ok')).toHaveLength(4);
+
+    // Auditors cannot move cameras; a camera with no gimbal refuses.
+    s = run(s, as('u-priya'), { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'center' } });
+    expect(s.audit.at(-1)).toMatchObject({ action: 'camera.control', result: 'denied' });
+    s = run(s, as('u-alex'), { type: 'cameraControl', deviceId: 'CCTV-01', action: { action: 'center' } });
+    expect(s.audit.at(-1)?.result).toBe('denied');
+  });
+
+  it('a vehicle camera follows the operator holding control, and nothing moves while the link is cut', () => {
+    let { s } = readyToStart(); // somchai holds UGV-01
+    s = run(s, as('u-alex'), { type: 'cameraControl', deviceId: 'UGV-01', action: { action: 'gimbal_angle', yaw: 45, pitch: 0 } });
+    expect(s.audit.at(-1)).toMatchObject({ result: 'denied', detail: 'another operator holds control' });
+    s = run(s, as('u-somchai'), { type: 'cameraControl', deviceId: 'UGV-01', action: { action: 'gimbal_angle', yaw: 45, pitch: 0 } });
+    s = advance(s, 1500);
+    expect(s.devices['UGV-01'].gimbal!.yaw).toBe(45);
+    s = run(s, { type: 'demoCutLink', deviceId: 'UGV-01' }, { type: 'cameraControl', deviceId: 'UGV-01', action: { action: 'center' } });
+    expect(s.audit.at(-1)).toMatchObject({ result: 'error' });
+    s = advance(s, 1500);
+    expect(s.devices['UGV-01'].gimbal!.yaw).toBe(45);
+  });
+});

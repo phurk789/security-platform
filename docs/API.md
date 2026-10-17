@@ -62,6 +62,25 @@ Re-sending the same `idempotencyKey` returns the same command. The response is t
 record; watch its `status` move through `sent → acknowledged → executing → succeeded`, or end
 in `rejected`, `timed_out` or `unknown`. Only `succeeded` means the device confirmed.
 
+Move a gimbal camera (dispatcher, supervisor or operator; on a vehicle, only the operator
+holding control). The call waits up to 3 s for the camera:
+
+```bash
+curl -s -X POST localhost:8080/api/v1/devices/CCTV-02/camera -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"action":"gimbal_speed","yaw":40,"pitch":0}'
+# → {"ok":true,"confirmed":true,"detail":"Gimbal moving."}
+```
+
+Actions: `gimbal_speed` (yaw, pitch −100…100; send 0,0 to stop), `gimbal_angle` (yaw ±135°,
+pitch −90…25°), `center`, `zoom` (dir −1/0/1), `zoom_to` (level 1–30), `photo`, `record`
+(toggle). `confirmed` is true only when the camera answered; `ok: true, confirmed: false` means
+the request was sent but the camera did not reply. Every action is in the audit log.
+
+Live video of a real camera: `POST /api/v1/media/{id}/session` returns `whep` (WebRTC) and
+`hls` links on the site media server with a 60-second token. MediaMTX checks each viewer with
+`POST /api/v1/media/auth` (`authMethod: http`); only `read` of that device's path is allowed.
+See [`HARDWARE_SIYI.md`](HARDWARE_SIYI.md).
+
 Connect your own adapter to the sandbox (BUILD YOUR OWN):
 
 ```bash

@@ -16,7 +16,7 @@ hardware integration is ready.
 | **Command centre** (`apps/web`) | Situation map 2D/3D, incident queue and workflow, mission planner with constraint checks, live mission with command status, evidence and replay, reports, search, administration. Thai and English. |
 | **Field app** (`apps/field`) | Mobile web app for responders: accept, on scene, report with photos. Works offline and syncs without duplicates. Thai and English. |
 | **Platform server** (`apps/server`) | REST API and WebSockets on SQLite. Sign-in, roles, org and site isolation, approvals, command certainty, evidence with checksums, hash-chained audit log, backups, signed media URLs, OpenAPI. |
-| **Edge gateway** (`apps/gateway`) | Runs device adapters on site and connects them to the server. Includes simulated UGV, UAV and CCTV adapters and an SDK for your own. |
+| **Edge gateway** (`apps/gateway`) | Runs device adapters on site and connects them to the server. Includes simulated UGV, UAV and CCTV adapters, **SIYI hardware adapters** (gimbal cameras over the SIYI SDK; UniFC 6 Pico / any PX4 or ArduPilot vehicle over MAVLink via the UniRC 7 Pro), and an SDK for your own. |
 | **Shared rules** (`packages/shared`) | Roles, state machines, freshness thresholds and the wire protocol used by all of the above. |
 
 ## Quick start
@@ -68,6 +68,7 @@ and show the field app on a phone; inject a duplicate alert and merge it.
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Configuration, deployment, pilot checklist, backup and restore, security notes |
 | [`docs/API.md`](docs/API.md) | API guide, developer sandbox, examples; full reference at `/api/v1/openapi.json` |
 | [`docs/ADAPTER_CONTRACT.md`](docs/ADAPTER_CONTRACT.md) | How to connect a real device (BUILD YOUR OWN) |
+| [`docs/HARDWARE_SIYI.md`](docs/HARDWARE_SIYI.md) | Connecting SIYI cameras, the UniFC 6 Pico flight controller and the UniRC 7 Pro remote; edge PC and video setup; hardware test checklist |
 
 ## Develop
 

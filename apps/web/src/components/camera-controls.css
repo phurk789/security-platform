@@ -1,0 +1,65 @@
+/* Gimbal camera control (CameraControls.tsx). */
+.ptz {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'pad mid act' 'status status status';
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.ptz:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.ptz button { touch-action: none; -webkit-tap-highlight-color: transparent; }
+.ptz button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.ptz-pad { grid-area: pad; display: grid; grid-template-columns: repeat(3, 30px); grid-template-rows: repeat(3, 30px); gap: 2px; }
+.ptz-pad button { display: grid; place-items: center; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text); padding: 0; }
+.ptz-pad button:not(:disabled):active, .ptz-zoom button:not(:disabled):active { background: var(--cyan-d); border-color: var(--cyan); }
+.ptz-pad .u { grid-area: 1 / 2; }
+.ptz-pad .l { grid-area: 2 / 1; }
+.ptz-pad .c { grid-area: 2 / 2; color: var(--cyan); }
+.ptz-pad .r { grid-area: 2 / 3; }
+.ptz-pad .d { grid-area: 3 / 2; }
+
+.ptz-mid { grid-area: mid; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ptz-zoom { display: flex; align-items: center; gap: 6px; }
+.ptz-zoom button { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text); padding: 0; }
+.ptz-zl { min-width: 46px; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+.ptz-read { display: flex; gap: 10px; flex-wrap: wrap; font-size: 0.75rem; color: var(--text-3); }
+.ptz-read b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.ptz-act { grid-area: act; display: flex; flex-direction: column; gap: 6px; }
+.ptz-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 0 10px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text); font-size: 0.8rem; white-space: nowrap; }
+.ptz-btn.rec svg { color: var(--red); }
+.ptz-btn.rec.on { background: rgba(248, 113, 113, 0.16); border-color: var(--red); color: var(--red); animation: ptz-rec 1.2s ease-in-out infinite; }
+@keyframes ptz-rec { 50% { border-color: rgba(248, 113, 113, 0.35); } }
+
+.ptz-status { grid-area: status; font-size: 0.75rem; color: var(--text-3); min-height: 1.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ptz-status.ok { color: var(--green); }
+.ptz-status.warn { color: var(--amber); }
+.ptz-status.err { color: var(--red); }
+.ptz.off .ptz-status { color: var(--text-2); }
+
+/* Readout drawn over the video, like the SIYI app's OSD. */
+.feed-osd { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); display: flex; gap: 10px; white-space: nowrap; padding: 2px 8px; border-radius: 4px; background: rgba(5, 10, 18, 0.55); font: 600 0.7rem var(--mono); color: #e6f4ff; pointer-events: none; }
+.feed-osd .rec { color: #ff6b6b; }
+.feed-reticle { position: absolute; left: 50%; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%); pointer-events: none; opacity: 0.6; }
+.feed-reticle::before, .feed-reticle::after { content: ''; position: absolute; background: #e6f4ff; }
+.feed-reticle::before { left: 0; right: 0; top: 50%; height: 1px; }
+.feed-reticle::after { top: 0; bottom: 0; left: 50%; width: 1px; }
+
+/* Live video from the site media server (WebRTC). */
+.feed video.whep { width: 100%; height: 100%; display: block; object-fit: cover; background: #000; }
+.feed .whep-msg { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; font-size: 0.85rem; color: var(--text-2); background: #050a12; }
+
+@media (max-width: 480px) {
+  .ptz { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'pad mid' 'act act' 'status status'; }
+  .ptz-act { flex-direction: row; }
+  .ptz-act .ptz-btn { flex: 1; }
+}

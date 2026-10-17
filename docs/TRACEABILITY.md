@@ -27,6 +27,19 @@ Status of every requirement in [`13STORE_Public_Security_PRD_R1.md`](13STORE_Pub
 | F15 | Search by incident, time, area, device; replay shows past time and disables commands | Done | Incidents page filters; `/incidents?…`; telemetry history; Replay bar | Browser e2e; `acceptance.test.ts` (replay refused) |
 | F16 | Developer API with sandbox, per-environment credentials, capability contract, tested example | Done | `/api/v1/openapi.json`, `docs/API.md`, sandbox org + keys, `docs/ADAPTER_CONTRACT.md`, `examples/custom-adapter.ts` | `apps/gateway/test/example.test.ts`, `security.test.ts` (sandbox key isolation) |
 
+### Hardware integrations
+
+| Device | Adapter | Status | Tests |
+|---|---|---|---|
+| SIYI gimbal cameras (ZT30, ZR30, ZR10, ZT6, A8 mini) | `apps/gateway/src/real/siyiCamera.ts` (SIYI SDK, UDP 37260) | **TESTING**: written to SIYI's published SDK, not yet run on hardware | `hardware.test.ts` (codec vectors, fake camera), `camera.test.ts` (control, permission, timeout, media auth) |
+| SIYI UniFC 6 Pico (PX4 / ArduPilot) via UniRC 7 Pro datalink | `apps/gateway/src/real/mavlinkVehicle.ts` (MAVLink 2, UDP 19856) | **TESTING**: not yet run on hardware | `hardware.test.ts` (fake ArduPilot rover: mission upload, start/stop, disarmed refusal, pilot override, link loss) |
+| Live video (RTSP → WebRTC) | MediaMTX on the edge PC, `deploy/edge/` | **TESTING** | `camera.test.ts` (token, path binding, expiry) |
+
+Camera control in the console: pan/tilt pad (press and hold), zoom, photo, record, gimbal readout
+and on-video OSD (`CameraControls.tsx`). Permission `camera.control` (dispatcher, supervisor,
+operator); on vehicles only the control holder. The demo's CCTV-02 and UGV-01 run a simulated
+SIYI gimbal so the flow can be shown without hardware. Hardware checklist: `docs/HARDWARE_SIYI.md`.
+
 ## §11 Acceptance checklist
 
 | Check | Status | Where |

@@ -1,5 +1,6 @@
 // The platform's business rules. Every mutating call takes an Actor and is checked here
 // (role, org/site scope, state machine, control ownership, freshness, replay) — PRD §3–§5, §11.
+import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -45,6 +46,10 @@ import {
   type Snapshot,
   type SrvCommand,
   type SrvDemo,
+  type SrvCamera,
+  type GwCameraResult,
+  sanitizeCameraAction,
+  describeCameraAction,
   type TimelineEvent,
   type User,
 } from '@13store/shared';
@@ -96,7 +101,19 @@ export interface BusMessage {
 
 /** Transport to edge gateways, implemented by the gateway hub. */
 export interface GatewayLink {
-  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo): boolean;
+  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera): boolean;
+}
+
+/** How long to wait for the gateway to answer a camera request. */
+export const CAMERA_REPLY_TIMEOUT_MS = 3_000;
+/** Media tokens for the site media server (MediaMTX) are valid this long. */
+export const MEDIA_TOKEN_TTL_MS = 60_000;
+
+export interface CameraResult {
+  ok: boolean;
+  /** True only when the camera itself answered. */
+  confirmed: boolean;
+  detail: string;
 }
 
 const INTEGRATION_ACTIONS: Action[] = ['incident.create'];
@@ -111,6 +128,7 @@ export class Platform {
   private devices = new Map<string, Device & { orgId: string; siteId: string }>();
   private lastFresh = new Map<string, Freshness>();
   private lastSeq = new Map<string, number>();
+  private cameraWaits = new Map<string, { orgId: string; deviceId: string; done: (r: CameraResult) => void }>();
   private sweepTimer?: NodeJS.Timeout;
   now: () => number = () => Date.now();
 
@@ -932,6 +950,7 @@ export class Platform {
         limitations: `${decl.limitations} Link loss: ${decl.linkLossBehavior}`,
         rateMs: decl.rateMs,
         view: decl.view ?? d.view,
+        stream: decl.stream,
       });
       this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
       this.lastSeq.delete(d.id); // a new connection may restart sequence numbers
@@ -972,6 +991,10 @@ export class Platform {
     if (t.signal !== undefined) d.signal = t.signal;
     if (t.satellites !== undefined) d.satellites = t.satellites;
     if (t.temperatureC !== undefined) d.temperatureC = t.temperatureC;
+    if (t.gimbal && Number.isFinite(t.gimbal.yaw) && Number.isFinite(t.gimbal.pitch)) {
+      const g = t.gimbal;
+      d.gimbal = { yaw: +g.yaw, pitch: +g.pitch, roll: Number.isFinite(g.roll) ? g.roll : undefined, zoom: Number.isFinite(g.zoom) ? g.zoom : undefined, recording: typeof g.recording === 'boolean' ? g.recording : undefined };
+    }
     // Source → received delay. Clamp at 0 in case the device clock runs slightly ahead.
     d.latencyMs = Math.max(0, now - t.sourceTime);
     d.lastSeen = now;
@@ -1023,8 +1046,52 @@ export class Platform {
         latencyMs: d.latencyMs,
         satellites: d.satellites,
         temperatureC: d.temperatureC,
+        gimbal: d.gimbal,
       },
     });
+  }
+
+  // ---- camera control (gimbal, zoom, photo, record) -------------------------
+
+  /**
+   * Sends a camera action to the device's gateway and waits for the answer. Camera control
+   * never moves a vehicle, so it needs no mission approval, but it is permission-checked and
+   * audited, and on a vehicle only the operator holding control may use it.
+   */
+  async cameraControl(a: Actor, deviceId: string, raw: unknown): Promise<CameraResult> {
+    this.require(a, 'camera.control', deviceId);
+    const d = this.getDevice(a, deviceId);
+    const action = sanitizeCameraAction(raw);
+    if (!action) return fail(400, 'invalid', 'Unknown or malformed camera action.');
+    if (!d.capabilities.includes('gimbal')) return fail(400, 'invalid', `${d.id} has no gimbal camera.`);
+    if (d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== a.userId) {
+      this.audit(a, 'camera.control', d.id, 'denied', 'another operator holds control');
+      return fail(409, 'not_control_owner', `Another operator holds control of ${d.id}. Ask them to hand over control.`);
+    }
+    const fresh = freshnessAt(this.now(), d);
+    if (fresh === 'offline') return fail(409, 'device_offline', `${d.id} is offline. Camera control is unavailable.`);
+    const requestId = `cam-${randomUUID()}`;
+    const result = await new Promise<CameraResult>((resolve) => {
+      const timer = setTimeout(() => finish({ ok: false, confirmed: false, detail: 'No answer from the gateway. The camera may not have moved.' }), CAMERA_REPLY_TIMEOUT_MS);
+      const finish = (r: CameraResult) => {
+        clearTimeout(timer);
+        this.cameraWaits.delete(requestId);
+        resolve(r);
+      };
+      this.cameraWaits.set(requestId, { orgId: d.orgId, deviceId: d.id, done: finish });
+      const msg = { t: 'camera', requestId, deviceId: d.id, ...action } as SrvCamera;
+      if (!this.gateways.send(d.orgId, d.id, msg)) finish({ ok: false, confirmed: false, detail: `${d.id} gateway is not connected. Command not sent.` });
+    });
+    // Speed commands come in pairs (press, release); audit both so the record shows the full move.
+    this.audit(a, 'camera.control', d.id, result.ok ? 'ok' : 'error', `${describeCameraAction(action)} — ${result.detail}${result.ok && !result.confirmed ? ' (not confirmed)' : ''}`);
+    return result;
+  }
+
+  /** Answer from a gateway. Ignored unless it matches an open request from the same org and device. */
+  cameraResult(orgId: string, r: GwCameraResult) {
+    const w = this.cameraWaits.get(String(r.requestId));
+    if (!w || w.orgId !== orgId || w.deviceId !== r.deviceId) return;
+    w.done({ ok: !!r.ok, confirmed: !!r.ok && !!r.confirmed, detail: String(r.detail ?? (r.ok ? 'Done.' : 'Failed.')).slice(0, 200) });
   }
 
   commandUpdate(orgId: string, u: GwCommandUpdate) {
@@ -1306,7 +1373,45 @@ export class Platform {
     const exp = this.now() + 60_000;
     const sig = hmac(this.cfg.mediaSecret, `${a.orgId}|${d.id}|${a.userId}|${exp}`);
     this.audit(a, 'media.session', d.id);
-    return { url: `/api/v1/media/${encodeURIComponent(d.id)}/frame.svg?u=${encodeURIComponent(a.userId ?? '')}&exp=${exp}&sig=${sig}`, expiresAt: exp, label: d.integration === 'simulated' ? 'SIMULATED' : 'LIVE' };
+    const url = `/api/v1/media/${encodeURIComponent(d.id)}/frame.svg?u=${encodeURIComponent(a.userId ?? '')}&exp=${exp}&sig=${sig}`;
+    const label = d.integration === 'simulated' ? 'SIMULATED' : 'LIVE';
+    // Real device with a stream on the site media server: hand out a short-lived token that the
+    // media server checks with us (POST /api/v1/media/auth) before it serves any video.
+    if (d.integration !== 'simulated' && (d.stream?.whep || d.stream?.hls)) {
+      const token = this.mediaToken(d.orgId, d.id, a.userId ?? '', this.now() + MEDIA_TOKEN_TTL_MS);
+      const withToken = (u?: string) => (u ? `${u}${u.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : undefined);
+      return { url, expiresAt: exp, label, whep: withToken(d.stream.whep), hls: withToken(d.stream.hls), token };
+    }
+    return { url, expiresAt: exp, label };
+  }
+
+  private mediaToken(orgId: string, deviceId: string, userId: string, exp: number) {
+    const body = `${deviceId}.${userId}.${exp}`;
+    return `${Buffer.from(body).toString('base64url')}.${hmac(this.cfg.mediaSecret, `mtx|${orgId}|${body}`)}`;
+  }
+
+  /**
+   * Called by the site media server (MediaMTX `authMethod: http`) for every viewer.
+   * Allows only `read` of the path that belongs to the device in a valid, unexpired token,
+   * issued to a user who is still active in the device's organisation.
+   */
+  mediaAuth(req: { action?: string; path?: string; query?: string; token?: string; password?: string }): boolean {
+    if (req.action !== 'read' && req.action !== 'playback') return false;
+    const q = new URLSearchParams(String(req.query ?? ''));
+    const token = q.get('token') || req.token || req.password || '';
+    const [b64, sig] = token.split('.');
+    if (!b64 || !sig) return false;
+    const body = Buffer.from(b64, 'base64url').toString();
+    const [deviceId, userId, expStr] = body.split('.');
+    const exp = Number(expStr);
+    if (!(exp > this.now())) return false;
+    const d = this.devices.get(deviceId);
+    if (!d || !safeEqual(sig, hmac(this.cfg.mediaSecret, `mtx|${d.orgId}|${body}`))) return false;
+    const u = this.db.prepare('SELECT org_id FROM users WHERE id = ? AND active = 1').get(userId) as { org_id: string } | undefined;
+    if (!u || u.org_id !== d.orgId) return false;
+    // The token is for one device: the requested path must be that device's stream path.
+    const paths = [d.stream?.whep, d.stream?.hls].filter(Boolean).map((s) => streamPath(s!));
+    return paths.includes(String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
   }
 
   /** Verifies a signed media URL. No session needed, so <img> tags work; scope is bound into the signature. */
@@ -1396,5 +1501,17 @@ export class Platform {
 
   userActor(u: SessionUser, extra: Partial<Actor> = {}): Actor {
     return { kind: 'user', orgId: u.orgId, siteIds: u.siteIds, userId: u.id, name: u.name, role: u.role, stepUpUntil: u.stepUpUntil, ...extra };
+  }
+}
+
+/** Media server path of a stream URL: https://edge/cam-zt30-01/whep → cam-zt30-01. */
+export function streamPath(url: string) {
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last === 'whep' || last === 'index.m3u8') parts.pop();
+    return parts.join('/');
+  } catch {
+    return '';
   }
 }

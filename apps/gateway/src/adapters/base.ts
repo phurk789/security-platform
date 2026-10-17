@@ -1,5 +1,5 @@
 // Shared plumbing for simulated devices: telemetry ticker, link-loss simulation, timers.
-import { sampleLatency, type AdapterDeclaration, type Device, type GwTelemetry, type SrvCommand, type SrvDemo } from '@13store/shared';
+import { applyCameraAction, gimbalSample, newSimGimbal, sampleLatency, stepSimGimbal, type CameraAction, type SimGimbal, type AdapterDeclaration, type Device, type GwTelemetry, type SrvCommand, type SrvDemo } from '@13store/shared';
 import { CommandLedger, type Adapter, type AdapterContext, type EventReport } from '../sdk';
 
 export interface SimOptions {
@@ -51,6 +51,8 @@ export abstract class SimDevice implements Adapter {
   private heldEvents: EventReport[] = [];
   protected lastTick = 0;
   private lastDelivery = 0;
+  /** Simulated SIYI-style gimbal, for devices that declare the `gimbal` capability. */
+  protected gimbal?: SimGimbal;
 
   constructor(
     protected seed: Device,
@@ -58,6 +60,7 @@ export abstract class SimDevice implements Adapter {
   ) {
     this.declaration = declarationFrom(seed, opts.rateMs ?? seed.rateMs);
     this.linkCut = !!opts.offline;
+    if (seed.capabilities.includes('gimbal')) this.gimbal = newSimGimbal(seed.kind === 'cctv' ? -7 : 0);
   }
 
   start(ctx: AdapterContext) {
@@ -77,6 +80,7 @@ export abstract class SimDevice implements Adapter {
     const now = this.ctx.now();
     const dt = Math.max(0, now - this.lastTick) / 1000;
     this.lastTick = now;
+    if (this.gimbal) stepSimGimbal(this.gimbal, dt);
     this.step(dt, now);
     if (!this.linkCut) this.sendTelemetry(now);
   }
@@ -121,8 +125,20 @@ export abstract class SimDevice implements Adapter {
       this.heldEvents = [];
       this.ledger.clear();
       this.linkCut = !!this.opts.offline;
+      if (this.gimbal) this.gimbal = newSimGimbal(this.seed.kind === 'cctv' ? -7 : 0);
       this.resetState();
     }
+  }
+
+  /** Camera control. Answers like the real SIYI adapter: confirmed only when the camera replied. */
+  onCamera(requestId: string, a: CameraAction) {
+    if (!this.gimbal) return this.ctx.cameraResult({ requestId, ok: false, confirmed: false, detail: 'This device has no gimbal.' });
+    if (this.linkCut) return this.ctx.cameraResult({ requestId, ok: false, confirmed: false, detail: 'Camera is not responding. Command not sent.' });
+    const g = this.gimbal;
+    this.later(60 + Math.random() * 90, () => {
+      const detail = applyCameraAction(g, a);
+      this.ctx.cameraResult({ requestId, ok: true, confirmed: true, detail });
+    });
   }
 
   protected onLinkLost(_at: number) {}
@@ -143,6 +159,7 @@ export abstract class SimDevice implements Adapter {
 
   /** Send one telemetry sample, after a realistic link delay when latency is enabled. */
   protected publish(sample: Omit<GwTelemetry, 't' | 'deviceId'>) {
+    if (this.gimbal) sample = { ...sample, gimbal: gimbalSample(this.gimbal) };
     if (!this.opts.latency) return this.ctx.telemetry(sample);
     const now = this.ctx.now();
     // Keep samples in order: a later sample never overtakes an earlier one.

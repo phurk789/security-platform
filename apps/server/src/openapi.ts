@@ -54,6 +54,8 @@ const ROUTES: Op[] = [
   ['post', '/devices/{id}/release', 'Release control you hold', 'Devices'],
   ['get', '/devices/{id}/telemetry', 'Telemetry history for playback (from, to)', 'Devices'],
   ['post', '/media/{id}/session', 'Get a signed, 60-second media URL', 'Media'],
+  ['post', '/devices/{id}/camera', 'Camera control: pan/tilt, zoom, photo, record (gimbal cameras)', 'Devices'],
+  ['post', '/media/auth', 'Media server auth hook (MediaMTX authMethod: http). 200 = allow', 'Media'],
   ['get', '/audit', 'Audit log (audit.view)', 'Audit'],
   ['get', '/audit/verify', 'Verify the audit hash chain', 'Audit'],
   ['get', '/admin/users', 'Users (admin)', 'Admin'],

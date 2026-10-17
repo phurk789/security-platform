@@ -311,6 +311,7 @@ details.step summary { cursor: pointer; color: var(--text-2); }
 .feed-label { font-size: 0.85rem; font-weight: 600; text-shadow: 0 1px 3px #000; }
 .feed-tag { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; padding: 3px 8px; border-radius: 4px; background: rgba(251, 191, 36, 0.2); border: 1px solid var(--amber); color: var(--amber); }
 .feed-tag.replay { background: rgba(167, 139, 250, 0.25); border-color: var(--violet); color: #e6deff; }
+.feed-tag.live { background: rgba(74, 222, 128, 0.18); border-color: var(--green); color: var(--green); }
 .feed-bottom { position: absolute; bottom: 8px; left: 10px; right: 10px; display: flex; justify-content: space-between; font-size: 0.82rem; text-shadow: 0 1px 3px #000; font-variant-numeric: tabular-nums; }
 .feed-frozen { color: var(--amber); font-weight: 700; font-size: 0.72rem; }
 
@@ -452,6 +453,10 @@ table.compact td, table.compact th { padding: 6px 8px; }
   .page { padding-block: 14px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
   .meta.cols { grid-template-columns: 1fr 1fr; }
   .ev-map { min-height: 320px; }
+  /* Phone: the details panel scrolls as one page so the steps and actions are always reachable. */
+  .panel.right { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .panel.right .panel-body { flex: none; overflow: visible; }
+  .panel.right .panel-foot { position: sticky; bottom: 0; background: var(--panel); z-index: 2; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dev-pos { transition: none; }

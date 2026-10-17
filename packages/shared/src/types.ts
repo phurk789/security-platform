@@ -1,4 +1,5 @@
 // Domain model for the prototype. Names follow PRD R1 §4 and §6.
+import type { GimbalState, SimGimbal, StreamInfo } from './camera';
 
 export type Role = 'dispatcher' | 'supervisor' | 'operator' | 'responder' | 'auditor' | 'admin';
 
@@ -116,6 +117,10 @@ export interface Device {
   temperatureC?: number;
   /** For CCTV: the camera view variant to render. */
   view?: 'gate' | 'plaza' | 'lot' | 'path';
+  /** Gimbal camera attitude and zoom as last reported (devices with the `gimbal` capability). */
+  gimbal?: GimbalState;
+  /** Live video from the site media server (real devices). */
+  stream?: StreamInfo;
 }
 
 export interface Incident {
@@ -251,6 +256,8 @@ export interface VehicleSim {
   sensors: SensorState;
   linkLostAt?: number;
   failsafeAt?: number;
+  /** Simulated SIYI-style gimbal (devices with the `gimbal` capability). */
+  gimbal?: SimGimbal;
 }
 
 export interface Toast {

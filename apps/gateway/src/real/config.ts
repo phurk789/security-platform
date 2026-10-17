@@ -29,6 +29,7 @@ export type DeviceConfig =
       pos: { x: number; y: number };
       stream?: StreamInfo;
       firmwareTested?: string;
+      yawSign?: 1 | -1;
     }
   | { type: 'simulated'; offline?: string[] };
 
@@ -82,7 +83,7 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           firmwareTested: d.firmwareTested,
         }),
       );
-    else out.push(new SiyiCameraAdapter({ deviceId: d.deviceId, host: d.host ?? SIYI_DEFAULT.host, port: d.port ?? SIYI_DEFAULT.port, model: d.model, pos: d.pos, stream: d.stream, firmwareTested: d.firmwareTested }));
+    else out.push(new SiyiCameraAdapter({ deviceId: d.deviceId, host: d.host ?? SIYI_DEFAULT.host, port: d.port ?? SIYI_DEFAULT.port, model: d.model, pos: d.pos, stream: d.stream, firmwareTested: d.firmwareTested, yawSign: d.yawSign }));
   }
   return out;
 }

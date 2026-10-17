@@ -3,6 +3,9 @@ import { tr } from '../i18n';
 import type { Freshness } from '@13store/shared';
 import { SceneFeed } from './SceneFeed';
 import { webglAvailable } from '../twin/world';
+import { useStore } from '../store';
+import { CameraControls } from './CameraControls';
+import { WhepVideo } from './WhepVideo';
 
 export type Scene = 'gate' | 'plaza' | 'path' | 'lot' | 'ugv' | 'equipment';
 
@@ -19,6 +22,7 @@ export function CameraFeed({
   compact,
   progress = 0,
   deviceId,
+  controls,
 }: {
   scene: Scene;
   label: string;
@@ -30,13 +34,29 @@ export function CameraFeed({
   progress?: number;
   /** Device whose camera to render from the 3D twin. Defaults to the id at the start of the label. */
   deviceId?: string;
+  /** Show pan/tilt/zoom controls under the feed when the device has a gimbal. */
+  controls?: boolean;
 }) {
+  const { s, session } = useStore();
   const frozen = freshness !== 'live';
   const id = deviceId ?? label.match(/^[A-Z]{2,5}(?:-[A-Z0-9]+)+/)?.[0];
-  const live3d = !compact && !!id && webglAvailable();
-  return (
-    <div className={`feed${compact ? ' compact' : ''}${frozen ? ' frozen' : ''}${live3d ? ' feed-3d' : ''}`}>
-      {live3d ? (
+  const dev = id ? s.devices[id] : undefined;
+  // Real camera with a stream on the site media server: play it over WebRTC. Not in replay.
+  const liveStream = !compact && !replay && !!session && !!dev && dev.integration !== 'simulated' && !!dev.stream?.whep;
+  const live3d = !compact && !liveStream && !!id && webglAvailable();
+  const g = dev?.gimbal;
+  const feed = (
+    <div className={`feed${compact ? ' compact' : ''}${frozen && !liveStream ? ' frozen' : ''}${live3d ? ' feed-3d' : ''}`}>
+      {liveStream ? (
+        <WhepVideo
+          key={dev!.id}
+          getUrl={async () => {
+            const r = await session!.mediaSession(dev!.id);
+            if (!r.whep) throw new Error(tr('No live stream for this device.'));
+            return r.whep;
+          }}
+        />
+      ) : live3d ? (
         <SceneFeed deviceId={id!} ir={id!.startsWith('CCTV')} frozen={frozen} />
       ) : (
       <svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-label={tr('{label} simulated camera view', { label })}>
@@ -59,11 +79,22 @@ export function CameraFeed({
         <rect width="320" height="180" className="scan" />
       </svg>
       )}
+      {!compact && g && !frozen && (
+        <>
+          <div className="feed-reticle" />
+          <div className="feed-osd">
+            <span>Y {g.yaw.toFixed(1)}°</span>
+            <span>P {g.pitch.toFixed(1)}°</span>
+            <span>{(g.zoom ?? 1).toFixed(1)}×</span>
+            {g.recording && <span className="rec">● REC</span>}
+          </div>
+        </>
+      )}
       {!compact && (
         <>
           <div className="feed-top">
             <span className="feed-label">{label}</span>
-            <span className={`feed-tag ${replay ? 'replay' : ''}`}>{replay ? 'REPLAY' : 'SIMULATED FEED'}</span>
+            <span className={`feed-tag ${replay ? 'replay' : liveStream ? 'live' : ''}`}>{replay ? 'REPLAY' : liveStream ? 'LIVE' : 'SIMULATED FEED'}</span>
           </div>
           <div className="feed-bottom">
             <span>
@@ -75,6 +106,13 @@ export function CameraFeed({
         </>
       )}
     </div>
+  );
+  if (!controls || compact || !dev?.capabilities.includes('gimbal')) return feed;
+  return (
+    <>
+      {feed}
+      <CameraControls device={dev} />
+    </>
   );
 }
 

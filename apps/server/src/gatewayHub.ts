@@ -1,5 +1,5 @@
 // Edge gateway connections. Commands go out here; telemetry, acks and device events come in.
-import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type SrvCommand, type SrvDemo } from '@13store/shared';
+import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type SrvCamera, type SrvCommand, type SrvDemo } from '@13store/shared';
 import type { WebSocket } from 'ws';
 import type { Accounts } from './accounts';
 import type { GatewayLink, Platform } from './platform';
@@ -66,6 +66,9 @@ export class GatewayHub implements GatewayLink {
           case 'event':
             if (conn.devices.has(msg.deviceId)) this.p.deviceEvent(conn.orgId, msg);
             return;
+          case 'camera_result':
+            if (conn.devices.has(msg.deviceId)) this.p.cameraResult(conn.orgId, msg);
+            return;
         }
       } catch (e) {
         console.error('[gateway] message failed', e);
@@ -75,11 +78,16 @@ export class GatewayHub implements GatewayLink {
     ws.on('close', () => {
       this.conns.delete(conn);
       for (const id of conn.devices) if (this.byDevice.get(id) === conn) this.byDevice.delete(id);
-      if (conn.gatewayId !== 'unknown') this.p.gatewayClosed(conn.orgId, conn.gatewayId);
+      try {
+        if (conn.gatewayId !== 'unknown') this.p.gatewayClosed(conn.orgId, conn.gatewayId);
+      } catch (e) {
+        // During shutdown the database may already be closed.
+        console.warn('[gateway] close not recorded:', e instanceof Error ? e.message : e);
+      }
     });
   }
 
-  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo): boolean {
+  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera): boolean {
     const c = this.byDevice.get(deviceId);
     if (!c || c.orgId !== orgId || c.ws.readyState !== c.ws.OPEN) return false;
     c.ws.send(JSON.stringify(msg));

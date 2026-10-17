@@ -6,6 +6,12 @@ import {
   COMMAND_ACK_TIMEOUT_MS,
   COMMAND_TTL_MS,
   LINK_LOSS_FAILSAFE_MS,
+  applyCameraAction,
+  describeCameraAction,
+  gimbalSample,
+  newSimGimbal,
+  stepSimGimbal,
+  type CameraAction,
   bearing,
   gaussian,
   newMotion,
@@ -59,6 +65,7 @@ export type Msg =
   | { type: 'acceptMission'; missionId: string }
   | { type: 'issueCommand'; missionId: string; command: CommandType; idempotencyKey: string }
   | { type: 'handover'; deviceId: string; toUserId: string }
+  | { type: 'cameraControl'; deviceId: string; action: CameraAction }
   | { type: 'resolveIncident'; incidentId: string; outcome: string }
   | { type: 'closeIncident'; incidentId: string }
   | { type: 'addNote'; incidentId: string; text: string }
@@ -206,6 +213,12 @@ function tick(s: AppState, dt: number) {
       v.motion.y = next.y;
     }
     stepSensors(v.sensors, sec, d.kind, d.kind === 'ugv' ? v.motion.speed : 0);
+    if (d.capabilities.includes('gimbal')) {
+      v.gimbal ??= newSimGimbal(d.kind === 'cctv' ? -7 : 0);
+      stepSimGimbal(v.gimbal, sec);
+      // Attitude rides with the video stream, so it updates every tick while the link is up.
+      if (!s.linkCut[d.id]) d.gimbal = gimbalSample(v.gimbal);
+    }
   }
 
   // Platform side: what arrives over the radio, at each device's telemetry rate.
@@ -643,6 +656,30 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       event(s, m.incidentId, 'Operator accepted mission', { detail: `${me.name} confirmed readiness and holds control of ${d.id}.` });
       audit(s, 'mission.accept', m.id, 'ok');
       audit(s, 'control.acquire', d.id, 'ok');
+      return s;
+    }
+    case 'cameraControl': {
+      const d = s.devices[msg.deviceId];
+      if (!d || !guard(s, 'camera.control', msg.deviceId)) return s;
+      if (!d.capabilities.includes('gimbal')) {
+        toast(s, 'warn', `${d.id} has no gimbal camera.`);
+        return s;
+      }
+      if (d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== me.id) {
+        audit(s, 'camera.control', d.id, 'denied', 'another operator holds control');
+        toast(s, 'warn', `Another operator holds control of ${d.id}.`);
+        return s;
+      }
+      if (s.linkCut[d.id]) {
+        audit(s, 'camera.control', d.id, 'error', `${describeCameraAction(msg.action)} — camera not responding`);
+        return s;
+      }
+      const v = simFor(s, d);
+      v.gimbal ??= newSimGimbal(d.kind === 'cctv' ? -7 : 0);
+      const answer = applyCameraAction(v.gimbal, msg.action);
+      d.gimbal = gimbalSample(v.gimbal);
+      audit(s, 'camera.control', d.id, 'ok', `${describeCameraAction(msg.action)} — ${answer}`);
+      if (msg.action.action === 'photo' || msg.action.action === 'record') toast(s, 'ok', `${d.id}: ${answer}`);
       return s;
     }
     case 'handover': {

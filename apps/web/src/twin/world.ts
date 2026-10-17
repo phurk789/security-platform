@@ -381,6 +381,38 @@ export class TwinWorld {
     return out;
   }
 
+  /** Displayed gimbal attitude, eased between telemetry samples. */
+  private gimbalView = new Map<string, { yaw: number; pitch: number; zoom: number }>();
+
+  private easeGimbal(d: Device, dt: number) {
+    if (!d.gimbal) {
+      this.gimbalView.delete(d.id);
+      return null;
+    }
+    const want = { yaw: d.gimbal.yaw, pitch: d.gimbal.pitch, zoom: d.gimbal.zoom ?? 1 };
+    const cur = this.gimbalView.get(d.id);
+    if (!cur) {
+      this.gimbalView.set(d.id, want);
+      return want;
+    }
+    const k = 1 - Math.exp(-dt * 7);
+    cur.yaw += (want.yaw - cur.yaw) * k;
+    cur.pitch += (want.pitch - cur.pitch) * k;
+    cur.zoom = Math.exp(Math.log(cur.zoom) + (Math.log(want.zoom) - Math.log(cur.zoom)) * k);
+    return cur;
+  }
+
+  /** Unit view direction of a gimbal camera: base bearing (rad, 0 = north) plus gimbal yaw, absolute pitch. */
+  private static gimbalDir(bearing: number, g: { yaw: number; pitch: number }) {
+    const yaw = bearing + THREE.MathUtils.degToRad(g.yaw);
+    const p = THREE.MathUtils.degToRad(g.pitch);
+    return new THREE.Vector3(Math.sin(yaw) * Math.cos(p), Math.sin(p), -Math.cos(yaw) * Math.cos(p));
+  }
+
+  private static zoomFov(fov: number, zoom: number) {
+    return THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(fov / 2)) / Math.max(1, zoom)));
+  }
+
   private syncDevices(dt: number) {
     const s = this.state!;
     const positions = this.positionsAt(s);
@@ -418,6 +450,12 @@ export class TwinWorld {
         m.beaconGlow.material.color.set(busy ? 0xfbbf24 : fresh === 'live' ? 0x4ade80 : 0xf87171);
         m.beaconGlow.material.opacity = on ? 0.95 : 0.1;
         m.headlight.intensity = fresh === 'offline' ? 0 : 30;
+        const g = this.easeGimbal(d, dt);
+        if (g && m.camHead) {
+          m.camHead.rotation.order = 'YXZ';
+          m.camHead.rotation.y = -THREE.MathUtils.degToRad(g.yaw);
+          m.camHead.rotation.x = THREE.MathUtils.degToRad(g.pitch);
+        }
       } else if (v.kind === 'uav') {
         const { m } = v;
         const alt = d.alt ?? 40;
@@ -439,6 +477,20 @@ export class TwinWorld {
         m.ir.material.opacity = fresh === 'offline' ? 0 : 0.35 + 0.25 * Math.sin(this.t * 2 + d.id.length);
         const relevant = sel || s.incidents.some((i) => i.id === s.selectedIncidentId && i.cameraId === d.id);
         m.cone.visible = visible && relevant && fresh !== 'offline';
+        const g = this.easeGimbal(d, dt);
+        const view = CAMERA_VIEWS[d.id];
+        if (g && view) {
+          const t = toWorld(view.target.x, view.target.y);
+          const bearing = Math.atan2(t.x - v.pos.x, -(t.z - v.pos.z));
+          const dir = TwinWorld.gimbalDir(bearing, g);
+          const head = new THREE.Vector3(v.pos.x, view.height, v.pos.z);
+          m.head.lookAt(head.clone().add(dir));
+          m.head.rotateY(Math.PI);
+          // Cone reaches the ground (or 120 m when looking at the horizon); narrows with zoom.
+          const dist = dir.y < -0.02 ? Math.min(120, view.height / -dir.y) : 120;
+          const halfW = Math.tan(THREE.MathUtils.degToRad(TwinWorld.zoomFov(view.fov, g.zoom) / 2)) * dist;
+          m.cone.scale.set(halfW, halfW * 0.6, dist);
+        }
         (m.cone.material as THREE.MeshBasicMaterial).opacity = 0.07 + 0.03 * Math.sin(this.t * 2);
       }
 
@@ -648,12 +700,23 @@ export class TwinWorld {
       cam ??= new THREE.PerspectiveCamera(view.fov, aspect, 0.3, 600);
       const p = toWorld(d.pos.x, d.pos.y);
       const t = toWorld(view.target.x, view.target.y);
-      // Sit just in front of the lens so the camera's own housing is not in view.
-      const tgt = new THREE.Vector3(t.x, view.targetHeight ?? 0, t.z);
-      const eye = new THREE.Vector3(p.x, view.height - 0.1, p.z);
-      eye.addScaledVector(tgt.clone().sub(eye).normalize(), 1.2);
-      cam.position.copy(eye);
-      cam.lookAt(tgt);
+      const g = this.gimbalView.get(deviceId) ?? (d.gimbal ? { yaw: d.gimbal.yaw, pitch: d.gimbal.pitch, zoom: d.gimbal.zoom ?? 1 } : null);
+      if (g) {
+        // Gimbal camera: yaw is relative to the mount's zero (the default view), pitch is absolute.
+        const dir = TwinWorld.gimbalDir(Math.atan2(t.x - p.x, -(t.z - p.z)), g);
+        const eye = new THREE.Vector3(p.x, view.height - 0.1, p.z);
+        eye.addScaledVector(new THREE.Vector3(dir.x, 0, dir.z).normalize(), 1.2);
+        cam.position.copy(eye);
+        cam.lookAt(eye.clone().addScaledVector(dir, 50));
+        cam.fov = TwinWorld.zoomFov(view.fov, g.zoom);
+      } else {
+        // Sit just in front of the lens so the camera's own housing is not in view.
+        const tgt = new THREE.Vector3(t.x, view.targetHeight ?? 0, t.z);
+        const eye = new THREE.Vector3(p.x, view.height - 0.1, p.z);
+        eye.addScaledVector(tgt.clone().sub(eye).normalize(), 1.2);
+        cam.position.copy(eye);
+        cam.lookAt(tgt);
+      }
     } else {
       const v = this.devices.get(deviceId);
       if (!v) return null;
@@ -664,7 +727,12 @@ export class TwinWorld {
         // camera just ahead of the drawn bumper to keep the view clear.
         const ahead = 0.75 * SYMBOL_SCALE.ugv;
         cam.position.set(v.pos.x + fwd.x * ahead, 1.4, v.pos.z + fwd.z * ahead);
-        cam.lookAt(v.pos.x + fwd.x * 30, 0.9, v.pos.z + fwd.z * 30);
+        const g = this.gimbalView.get(deviceId);
+        if (g) {
+          const dir = TwinWorld.gimbalDir(v.heading, g);
+          cam.lookAt(cam.position.clone().addScaledVector(dir, 30));
+          cam.fov = TwinWorld.zoomFov(62, g.zoom);
+        } else cam.lookAt(v.pos.x + fwd.x * 30, 0.9, v.pos.z + fwd.z * 30);
       } else {
         const alt = (d.alt ?? 40) + Math.sin(this.t * 1.3) * 0.4;
         cam.position.set(v.pos.x, alt - 1.6, v.pos.z);

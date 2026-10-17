@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   can,
+  type CameraAction,
   type AppState,
   type Assignment,
   type AuditEvent,
@@ -19,7 +20,7 @@ import {
 } from '@13store/shared';
 import { Api, ApiError, saveBlob } from './api';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
-import { StoreCtx, useToastTimer, type Session } from './store';
+import { StoreCtx, useToastTimer, type CameraResult, type MediaSession, type Session } from './store';
 import { StepUpDialog } from './components/StepUp';
 import { tr } from './i18n';
 
@@ -162,6 +163,7 @@ export function RemoteProvider({
               latencyMs: m.latencyMs ?? d.latencyMs,
               satellites: m.satellites ?? d.satellites,
               temperatureC: m.temperatureC ?? d.temperatureC,
+              gimbal: m.gimbal ?? d.gimbal,
             };
             const sample: TelemetrySample = { deviceId: m.deviceId, at: m.lastSeen, x: m.pos.x, y: m.pos.y, speed: m.speed, battery: m.battery, signal: m.signal, heading: m.heading };
             const telemetry = d.kind === 'cctv' || p.replay.active ? p.telemetry : [...p.telemetry.slice(-3999), sample];
@@ -381,6 +383,16 @@ export function RemoteProvider({
       async mediaUrl(deviceId: string) {
         const r = await api.post<{ url: string }>(`/media/${encodeURIComponent(deviceId)}/session`);
         return r.url;
+      },
+      mediaSession(deviceId: string) {
+        return api.post<MediaSession>(`/media/${encodeURIComponent(deviceId)}/session`);
+      },
+      async cameraControl(deviceId: string, action: CameraAction) {
+        try {
+          return await api.post<CameraResult>(`/devices/${encodeURIComponent(deviceId)}/camera`, action);
+        } catch (e) {
+          return { ok: false, confirmed: false, detail: e instanceof Error ? e.message : String(e) };
+        }
       },
     }),
     [api, user, meta, onLogout, onSwitch, reload, toast],

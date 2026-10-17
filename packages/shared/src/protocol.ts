@@ -225,6 +225,7 @@ export type ConsoleEvent =
       latencyMs?: number;
       satellites?: number;
       temperatureC?: number;
+      gimbal?: GimbalState;
     }
   | { type: 'timeline'; event: TimelineEvent }
   | { type: 'evidence'; evidence: Evidence }

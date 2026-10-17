@@ -16,6 +16,11 @@ export interface SiyiCameraConfig {
   stream?: StreamInfo;
   /** Firmware version you have tested this adapter against (shown in Devices). */
   firmwareTested?: string;
+  /**
+   * Platform convention: positive yaw = turn right (clockwise seen from above). Set −1 if the
+   * camera turns the other way on "pan right" (check on hardware; can differ by mounting).
+   */
+  yawSign?: 1 | -1;
 }
 
 const STALE_MS = 3000;
@@ -33,6 +38,9 @@ export class SiyiCameraAdapter implements Adapter {
   private pending = new Map<number, { requestId: string; timer: ReturnType<typeof setTimeout>; done: (r: Omit<GwCameraResult, 't' | 'deviceId' | 'requestId'>) => void }>();
   private host: string;
   private port: number;
+  private get yawSign() {
+    return this.cfg.yawSign === -1 ? -1 : 1;
+  }
   private reply(r: GwCameraResult) {
     const { t: _t, deviceId: _d, ...rest } = r;
     this.ctx.cameraResult(rest);
@@ -125,7 +133,7 @@ export class SiyiCameraAdapter implements Adapter {
     switch (f.cmd) {
       case CMD.GIMBAL_ATTITUDE: {
         const a = parseAttitude(f.data);
-        if (a) Object.assign(this.gimbal, { yaw: a.yaw, pitch: a.pitch, roll: a.roll });
+        if (a) Object.assign(this.gimbal, { yaw: a.yaw * this.yawSign, pitch: a.pitch, roll: a.roll });
         break;
       }
       case CMD.CURRENT_ZOOM:
@@ -175,11 +183,11 @@ export class SiyiCameraAdapter implements Adapter {
     switch (a.action) {
       case 'gimbal_speed':
         cmd = CMD.GIMBAL_SPEED;
-        frame = req.gimbalSpeed(a.yaw, a.pitch, this.nextSeq());
+        frame = req.gimbalSpeed(a.yaw * this.yawSign, a.pitch, this.nextSeq());
         break;
       case 'gimbal_angle':
         cmd = CMD.SET_ATTITUDE;
-        frame = req.setAttitude(a.yaw, a.pitch, this.nextSeq());
+        frame = req.setAttitude(a.yaw * this.yawSign, a.pitch, this.nextSeq());
         break;
       case 'center':
         cmd = CMD.CENTER;

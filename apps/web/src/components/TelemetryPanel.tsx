@@ -46,7 +46,7 @@ export function TelemetryPanel({ deviceId }: { deviceId: string }) {
           max={100}
           tone={(d.signal ?? 100) < 40 ? 'red' : (d.signal ?? 100) < 60 ? 'amber' : 'green'}
         />
-        <Spark label={t('Battery')} unit="%" metric="battery" value={d.battery} digits={1} samples={samples} end={end} autoRange minSpan={2} tone={(d.battery ?? 100) < 30 ? 'amber' : 'green'} />
+        <Spark label={t('Battery')} unit="%" metric="battery" value={d.battery} digits={1} samples={samples} end={end} autoRange minSpan={3} tone={(d.battery ?? 100) < 30 ? 'amber' : 'green'} />
       </div>
       <dl className="tlm-stats">
         <div className="tlm-heading">

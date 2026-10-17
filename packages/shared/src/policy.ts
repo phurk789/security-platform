@@ -30,6 +30,7 @@ export type Action =
   | 'device.command'
   | 'control.handover'
   | 'media.view'
+  | 'camera.control'
   | 'evidence.view'
   | 'evidence.add'
   | 'evidence.export'
@@ -53,6 +54,7 @@ const DISPATCH: Action[] = [
   'incident.reopen',
   'mission.prepare',
   'media.view',
+  'camera.control',
   'evidence.view',
   'evidence.add',
   'report.view',
@@ -66,7 +68,7 @@ const DISPATCH: Action[] = [
 export const MATRIX: Record<Role, Action[]> = {
   dispatcher: DISPATCH,
   supervisor: [...DISPATCH, 'mission.approve', 'control.handover', 'evidence.export', 'audit.view'],
-  operator: ['mission.accept', 'device.command', 'media.view', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'],
+  operator: ['mission.accept', 'device.command', 'media.view', 'camera.control', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'],
   responder: ['incident.create', 'field.update', 'evidence.view', 'evidence.add'],
   auditor: ['evidence.view', 'evidence.export', 'report.view', 'audit.view'],
   admin: ['admin.users', 'admin.devices', 'admin.keys', 'admin.backup', 'audit.view', 'demo.control'],

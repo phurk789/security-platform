@@ -47,6 +47,12 @@ flowchart LR
 | UniFC 6 Pico (PX4 / ArduPilot) via UniRC 7 Pro | `mavlink` | MAVLink 2 over UDP to the UniRC datalink server `192.168.144.20:19856` (or the FC's own Ethernet port, `listen` mode) | Position (GLOBAL_POSITION_INT → site grid), heading, ground speed, battery, satellites, GPS accuracy (hAcc/eph), radio RSSI, mission progress, flight mode, armed state, critical STATUSTEXT | Upload the approved route (mission protocol), AUTO + MISSION_START, pause (DO_PAUSE_CONTINUE or HOLD), resume, stop (HOLD) |
 | SIYI gimbal camera | `siyi-camera` | SIYI Gimbal Camera SDK over UDP `192.168.144.25:37260` | Gimbal yaw/pitch/roll, zoom level, recording state, firmware | Pan/tilt by speed or to an angle, centre, zoom in/out or to a level, take a photo, start/stop recording |
 
+**In the console**, any device with a gimbal shows a control pad under its video: hold an arrow
+to pan/tilt (slower when zoomed in), − / + to zoom, centre, photo, record, with the gimbal
+attitude, zoom and REC drawn over the video. Keyboard: arrow keys, + / −, C. Dispatchers,
+supervisors and operators may use it; on a vehicle, only the operator holding control. Every
+action is audited. Photos and recordings are saved on the camera's SD card, not the platform.
+
 Confirmation rules are the same as for every device: a command shows **succeeded** only when
 telemetry shows the effect (moving after start; speed 0 after pause/stop). Camera actions show
 **confirmed** only when the camera answers; otherwise "sent, not confirmed".
@@ -112,7 +118,8 @@ Without Docker: `GATEWAY_CONFIG=deploy/edge/site.json npm start -w @13store/gate
 `site.json` fields: `geo` (origin latitude/longitude of the site grid and rotation), and per
 device `type` (`mavlink` / `siyi-camera` / `simulated`), `deviceId`, `profile`
 (`ardupilot-rover`, `ardupilot-copter`, `px4-rover`, `px4-multicopter`), `link`, `pos` for a
-fixed camera, and `stream.whep` for the browser video URL.
+fixed camera, `stream.whep` for the browser video URL, and `yawSign: -1` if "pan right" turns
+the camera left (SIYI yaw sign can differ by model and mounting; check it in test 11).
 
 ## Hardware test checklist (before marking VERIFIED)
 
@@ -131,7 +138,7 @@ physical E-stop in reach. Record firmware versions in the device's "firmware tes
 | 8 | Pilot override | Mode switch on the remote is reported; platform does not switch back |
 | 9 | Link loss | Unplug the edge PC from the UniRC: STALE ≤ 5 s, vehicle follows its failsafe; re-plug: failsafe reported, nothing replayed, mission paused |
 | 10 | Physical E-stop | Works with the platform disconnected |
-| 11 | Camera control | Pan/tilt/zoom/photo/record each confirmed by the camera |
+| 11 | Camera control | Pan/tilt/zoom/photo/record each confirmed by the camera; "pan right" turns right (else set `yawSign: -1`); pitch limits respected |
 | 12 | Video | Browser shows live video; an expired link is refused; another org cannot view |
 | 13 | Latency | Measure command → acknowledgement and glass-to-glass video delay; record both |
 
