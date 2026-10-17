@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  Bell,
+  BellOff,
   Camera,
   Check,
   ChevronRight,
@@ -60,7 +62,10 @@ export function App() {
 
   const signOut = useCallback(
     async (opts: { expired?: boolean } = {}) => {
-      if (session && !opts.expired) api(session.token, 'POST', '/auth/logout').catch(() => undefined);
+      if (session && !opts.expired) {
+        await forgetPushOnServer(session.token);
+        api(session.token, 'POST', '/auth/logout').catch(() => undefined);
+      }
       store.del(SESSION_KEY);
       setSession(null);
       if (opts.expired) setNotice(t(lang, 'sessionEnded'));
@@ -68,9 +73,7 @@ export function App() {
     [session, lang],
   );
 
-  const top = (
-    <TopBar lang={lang} setLang={setLang} meta={meta} L={L} />
-  );
+  const top = <TopBar lang={lang} setLang={setLang} meta={meta} L={L} />;
 
   if (!session)
     return (
@@ -194,6 +197,119 @@ function useOutbox(userId: string) {
   return items;
 }
 
+// ---------------------------------------------------------------------------
+// Web Push: the service worker (public/sw.js) shows alerts while the app is closed.
+
+type PushState = 'unsupported' | 'off' | 'on' | 'denied' | 'busy';
+interface PushControl {
+  state: PushState;
+  error: boolean;
+  toggle: () => Promise<void>;
+}
+
+const SW_URL = `${import.meta.env.BASE_URL}sw.js`;
+
+function pushSupported() {
+  return typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+function base64UrlToBytes(s: string) {
+  const pad = '='.repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function subscriptionBody(sub: PushSubscription) {
+  return { endpoint: sub.endpoint, keys: sub.toJSON().keys, ua: navigator.userAgent.slice(0, 200) };
+}
+
+/** Sign-out: stop alerts for this user on the server; the browser subscription stays for the next sign-in. */
+async function forgetPushOnServer(token: string) {
+  if (!pushSupported()) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration(import.meta.env.BASE_URL);
+    const sub = await reg?.pushManager.getSubscription();
+    if (sub) await api(token, 'DELETE', '/push/subscribe', { endpoint: sub.endpoint });
+  } catch {
+    /* best effort */
+  }
+}
+
+function usePush(token: string, onOpen: (url: string) => void): PushControl {
+  const supported = pushSupported();
+  const [state, setState] = useState<PushState>(supported ? 'busy' : 'unsupported');
+  const [error, setError] = useState(false);
+  const regRef = useRef<ServiceWorkerRegistration | null>(null);
+  const openRef = useRef(onOpen);
+  openRef.current = onOpen;
+
+  useEffect(() => {
+    if (!supported) return;
+    let gone = false;
+    const onMessage = (ev: MessageEvent) => {
+      const d = ev.data as { type?: string; url?: string } | null;
+      if (d?.type === 'open' && typeof d.url === 'string') openRef.current(d.url);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.register(SW_URL, { scope: import.meta.env.BASE_URL });
+        regRef.current = reg;
+        const sub = await reg.pushManager.getSubscription();
+        if (gone) return;
+        if (sub && Notification.permission === 'granted') {
+          setState('on');
+          // Keep the server's copy current for this user (idempotent).
+          api(token, 'POST', '/push/subscribe', subscriptionBody(sub)).catch(() => undefined);
+        } else setState(Notification.permission === 'denied' ? 'denied' : 'off');
+      } catch {
+        if (!gone) setState('unsupported');
+      }
+    })();
+    return () => {
+      gone = true;
+      navigator.serviceWorker.removeEventListener('message', onMessage);
+    };
+  }, [token, supported]);
+
+  const toggle = useCallback(async () => {
+    const reg = regRef.current;
+    if (!reg || state === 'busy') return;
+    setError(false);
+    setState('busy');
+    try {
+      const current = await reg.pushManager.getSubscription();
+      if (current) {
+        await api(token, 'DELETE', '/push/subscribe', { endpoint: current.endpoint }).catch(() => undefined);
+        await current.unsubscribe();
+        setState('off');
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        setState(permission === 'denied' ? 'denied' : 'off');
+        return;
+      }
+      const { publicKey } = await api<{ publicKey: string }>(token, 'GET', '/push/vapid');
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(publicKey) });
+      try {
+        await api(token, 'POST', '/push/subscribe', subscriptionBody(sub));
+      } catch (e) {
+        await sub.unsubscribe().catch(() => undefined);
+        throw e;
+      }
+      setState('on');
+    } catch {
+      setError(true);
+      setState(Notification.permission === 'denied' ? 'denied' : 'off');
+    }
+  }, [token, state]);
+
+  return { state, error, toggle };
+}
+
 interface Cache {
   assignments: Assignment[];
   incidents: Incident[];
@@ -217,6 +333,10 @@ function Main({ session, lang, L, top, onSignOut }: { session: Session; lang: La
   const [openId, setOpenId] = useState<string | null>(() => decodeURIComponent(location.hash.match(/^#task\/(.+)$/)?.[1] ?? '') || null);
   const items = useOutbox(user.id);
   const now = useNow();
+  // A tapped notification tells the service worker which task to open.
+  const push = usePush(token, (url) => {
+    location.hash = url.split('#')[1] ?? '';
+  });
 
   const expired = useCallback(() => onSignOut({ expired: true }), [onSignOut]);
 
@@ -356,6 +476,19 @@ function Main({ session, lang, L, top, onSignOut }: { session: Session; lang: La
         <span className="who">
           {user.name} · {user.title}
         </span>
+        {push.state !== 'unsupported' && (
+          <button
+            className="icon-btn"
+            style={push.state === 'on' ? { color: 'var(--accent)' } : undefined}
+            aria-label={push.state === 'on' ? L('notifDisable') : L('notifEnable')}
+            aria-pressed={push.state === 'on'}
+            title={push.state === 'on' ? L('notifDisable') : L('notifEnable')}
+            disabled={push.state === 'busy'}
+            onClick={() => push.toggle()}
+          >
+            {push.state === 'on' ? <Bell size={20} /> : <BellOff size={20} />}
+          </button>
+        )}
         <button
           className="icon-btn"
           aria-label={L('signOut')}
@@ -384,7 +517,7 @@ function Main({ session, lang, L, top, onSignOut }: { session: Session; lang: La
           onQueued={flush}
         />
       ) : (
-        <TaskList data={data} incidents={incidents} userId={user.id} items={items} L={L} lang={lang} now={now} onOpen={open} />
+        <TaskList data={data} incidents={incidents} userId={user.id} items={items} L={L} lang={lang} now={now} onOpen={open} push={push} />
       )}
     </div>
   );
@@ -409,7 +542,21 @@ function upsert<T extends { id: string }>(list: T[], x: T): T[] {
 
 // ---------------------------------------------------------------------------
 
-function SyncBanner({ items, online, syncing, L, lang, onSync }: { items: OutboxItem[]; online: boolean; syncing: boolean; L: (k: Key) => string; lang: Lang; onSync: () => void }) {
+function SyncBanner({
+  items,
+  online,
+  syncing,
+  L,
+  lang,
+  onSync,
+}: {
+  items: OutboxItem[];
+  online: boolean;
+  syncing: boolean;
+  L: (k: Key) => string;
+  lang: Lang;
+  onSync: () => void;
+}) {
   const [open, setOpen] = useState(false);
   if (!items.length) return null;
   const pending = items.filter((i) => i.state === 'pending').length;
@@ -469,6 +616,7 @@ function TaskList({
   lang,
   now,
   onOpen,
+  push,
 }: {
   data: Cache | null;
   incidents: Map<string, Incident>;
@@ -478,13 +626,12 @@ function TaskList({
   lang: Lang;
   now: number;
   onOpen: (id: string) => void;
+  push: PushControl;
 }) {
   if (!data) return <p className="empty">{L('loading')}</p>;
   void items;
   const order: Record<AssignmentStatus, number> = { assigned: 0, accepted: 1, on_scene: 2, reported: 3, cancelled: 4 };
-  const list = data.assignments
-    .map((a) => ({ a, s: outbox.effectiveStatus(a, userId) }))
-    .sort((x, y) => order[x.s] - order[y.s] || y.a.updatedAt - x.a.updatedAt);
+  const list = data.assignments.map((a) => ({ a, s: outbox.effectiveStatus(a, userId) })).sort((x, y) => order[x.s] - order[y.s] || y.a.updatedAt - x.a.updatedAt);
   return (
     <main className="list">
       <h1>{L('myTasks')}</h1>
@@ -516,8 +663,35 @@ function TaskList({
           </button>
         );
       })}
+      <NotificationsCard push={push} L={L} />
       <Contact L={L} />
     </main>
+  );
+}
+
+/** Settings card: turn Web Push alerts for this phone on or off. */
+function NotificationsCard({ push, L }: { push: PushControl; L: (k: Key) => string }) {
+  const on = push.state === 'on';
+  return (
+    <section className="card notif" aria-labelledby="notif-title">
+      <h2 id="notif-title">
+        {on ? <Bell size={18} /> : <BellOff size={18} />} {L('notifications')}
+      </h2>
+      {push.state === 'unsupported' ? (
+        <small className="muted">{L('notifUnsupported')}</small>
+      ) : (
+        <>
+          <div className="row between gap">
+            <small className="muted">{L('notifHint')}</small>
+            <button className={`btn small ${on ? 'primary' : ''}`} aria-pressed={on} disabled={push.state === 'busy' || push.state === 'denied'} onClick={() => push.toggle()}>
+              {on ? <Bell size={16} /> : <BellOff size={16} />} {push.state === 'busy' ? L('notifBusy') : on ? L('notifOn') : L('notifOff')}
+            </button>
+          </div>
+          {push.state === 'denied' && <p className="banner warn">{L('notifDenied')}</p>}
+          {push.error && <p className="banner error">{L('notifFailed')}</p>}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -753,7 +927,16 @@ function ReportForm({ L, onSubmit, onCancel }: { L: (k: Key) => string; onSubmit
             for (const f of files) {
               try {
                 const d = await downscale(f);
-                setPhotos((ps) => [...ps, { mime: d.mime, base64: d.base64, title: `${L('photo')} ${ps.length + 1}`, capturedAt: f.lastModified || Date.now(), preview: `data:${d.mime};base64,${d.base64}` }]);
+                setPhotos((ps) => [
+                  ...ps,
+                  {
+                    mime: d.mime,
+                    base64: d.base64,
+                    title: `${L('photo')} ${ps.length + 1}`,
+                    capturedAt: f.lastModified || Date.now(),
+                    preview: `data:${d.mime};base64,${d.base64}`,
+                  },
+                ]);
               } catch {
                 setErr(L('photoFailed'));
               }

@@ -42,6 +42,8 @@ and the API description at `/api/v1/openapi.json`.
 | `HSTS`                                                                                             | `1` in pilot                                 | Send `Strict-Transport-Security` on HTTPS responses (behind the TLS proxy)                                                                     |
 | `CSP_CONNECT_SRC`                                                                                  | `https: wss:`                                | Media-server origins the console may connect to (WHEP, playback), space separated                                                              |
 | `ALLOWED_ORIGINS`                                                                                  | any                                          | Browser origins allowed to open the console WebSocket                                                                                          |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`                                                            | generated into `$DATA_DIR/vapid.json`        | Web Push signing key pair (base64url, 65 / 32 bytes). Keep the file with the backups: new keys invalidate every phone's subscription           |
+| `VAPID_SUBJECT`                                                                                    | `mailto:security-ops@example.com`            | Contact the push services may use (`mailto:` or `https:`); set it to the operator's address                                                    |
 
 ## First run
 
@@ -147,6 +149,55 @@ is needed.
 - Scheduled backups run every `BACKUP_INTERVAL_H` hours into `DATA_DIR/backups`, keep the newest
   `BACKUP_KEEP` and are audited (`admin.backup_create` by _Backup scheduler_).
 
+## Load testing
+
+`npm run loadtest -w @13store/server` drives a running server the way a pilot site would and
+measures it against the TOR §9 targets (event shown ≤ 2 s p95; ≥ 100 cameras / 50 devices per
+site). The harness (`apps/server/src/loadtest.ts`) runs in one process on one clock: edge
+gateways on `/api/v1/gateway` send telemetry for synthetic cameras and UGVs, dispatcher consoles
+listen on `/api/v1/ws`, incidents are raised over the API, and `GET /incidents` and
+`GET /snapshot` are sampled every second.
+
+```bash
+PORT=8123 DATA_DIR=/tmp/lt-data npx tsx apps/server/src/index.ts &      # a throwaway server
+npm run loadtest -w @13store/server -- --url http://127.0.0.1:8123 \
+    --gateways 4 --devices 120 --ugvs 20 --consoles 10 --rate-ms 1000 --duration 60 \
+    --incidents-per-min 6 --out /tmp/loadtest.json
+```
+
+| Flag                                 | Default                                            | Meaning                                                                                                                                  |
+| ------------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--url`                              | `http://127.0.0.1:8080`                            | Server under test                                                                                                                        |
+| `--gateways`                         | `2`                                                | Gateway WebSockets; the devices are shared out between them                                                                              |
+| `--devices`, `--ugvs`                | `40`, devices / 6                                  | Load devices in total and how many of them are UGVs (the rest are cameras). Registered once as `LT-CAM-nnn` / `LT-UGV-nnn`, reused after |
+| `--consoles`                         | `4`                                                | Dispatcher console WebSockets                                                                                                            |
+| `--rate-ms`                          | `1000`                                             | Telemetry interval per device                                                                                                            |
+| `--duration`                         | `30`                                               | Seconds of telemetry                                                                                                                     |
+| `--incidents-per-min`                | `6`                                                | Incidents created over the API (the first one at the start)                                                                              |
+| `--admin`, `--console-user`, `--key` | `ploy:demo1234`, `alex:demo1234`, demo gateway key | Credentials: the admin registers the devices and reads `/metrics`; the dispatcher owns the console sessions and the incidents            |
+| `--out`                              | none                                               | Also write the report as JSON                                                                                                            |
+
+What it measures: gateway send → console receipt for every telemetry sample on every console
+(matched by device and sample time), `POST /incidents` → console `incident` event, HTTP latency of
+the sampled routes, deliveries expected vs received (dropped = not shown within 30 s), telemetry
+skipped because a gateway's send buffer was full (back-pressure), errors, and the server's own
+`ps_http_requests_total` / `ps_devices` counters. The Markdown report (stdout) and the JSON give
+p50 / p95 / p99 / max per metric; the exit code is 1 when a target is missed or any error
+occurred. `apps/server/test/loadtest.test.ts` runs a small profile with the test suite.
+
+Measured 2026-10-17 on the development container (4 vCPU, Node 22, SQLite in WAL mode, server
+and harness on the same host, embedded demo gateway also running):
+
+| Profile (60 s, 1 s telemetry, 10 consoles, 6 incidents / min) | Telemetry → console p50 / p95 / p99 / max | Incident → console p95 | `GET /snapshot` p95 | Delivered                 | Errors |
+| ------------------------------------------------------------- | ----------------------------------------- | ---------------------- | ------------------- | ------------------------- | ------ |
+| 4 gateways, 100 cameras + 20 UGVs (one TOR site)              | 12 / 24 / 33 / 126 ms                     | 21 ms                  | 7 ms                | 70 800 / 70 800 (100 %)   | 0      |
+| 4 gateways, 400 cameras + 80 UGVs (4× headroom)               | 40 / 86 / 123 / 444 ms                    | 264 ms                 | 77 ms               | 283 200 / 283 200 (100 %) | 0      |
+
+Both runs sit far inside the 2 s p95 target. Pilot hardware, the pilot network and the real
+browser console will differ: repeat the run against the pilot server from a machine on the pilot
+network before acceptance and keep the report with the acceptance records. Run it only against a
+throwaway data directory — the `LT-*` devices stay registered and count as offline afterwards.
+
 ## Notifications and SLA
 
 - Channels are configured in Administration → **Notification channels** (or `PATCH /admin/settings`).
@@ -159,6 +210,33 @@ is needed.
   incidents every 10 s and raises a breach once; suggested alert: `increase(ps_sla_breaches_total[1h]) > 3`.
 - The monthly report is Reports → Operations KPIs → **Export period report** (or
   `GET /kpi/report?from&to&download=1`). See COMMAND_CENTRE.md.
+
+## Push notifications
+
+Web Push (RFC 8030/8291/8292) wakes a phone while the field app is closed. No vendor account is
+needed: the server signs each request with its VAPID key pair and encrypts the payload; the
+browser vendor's push service (Google, Apple, Mozilla) delivers it.
+
+| Trigger                             | Who is paged                            | Message                                      |
+| ----------------------------------- | --------------------------------------- | -------------------------------------------- |
+| Incident assigned to a responder    | that responder                          | `Assigned: INC-031 <title>` → opens the task |
+| Incident created with severity high | dispatchers and supervisors of the site | `High severity: INC-031` → opens the console |
+| SLA stage breached (within 5 min)   | supervisors of the site                 | `SLA breached: INC-031` · stage and limit    |
+
+- Users turn alerts on in the field app (**Notifications** card or the bell in the header); the
+  browser asks for permission once. Each user may register up to 10 devices; signing out stops
+  alerts for that user on the device, signing in again resumes them. `POST /api/v1/push/test`
+  sends a test message to the caller's devices and returns `sent / failed / removed`.
+- Requirements: the app must be served over HTTPS (or `localhost`) for the service worker
+  (`/field/sw.js`) to install. iPhone: the app must be added to the Home Screen (iOS 16.4+).
+  The server needs egress to the push services (`*.push.apple.com`, `fcm.googleapis.com`,
+  `*.push.services.mozilla.com`).
+- Subscriptions live in `push_subscriptions` (in backups). An endpoint the push service reports
+  as gone (404/410) is deleted at the next send; other failures are counted per device.
+  Metrics: `ps_push_total{status="sent|failed|removed"}`. Audit: `push.subscribe`,
+  `push.unsubscribe`, `push.test`.
+- Payloads are short (title ≤ 60, body ≤ 140 characters) and carry the incident id and a
+  same-origin URL only; nothing else about the incident leaves the server through this channel.
 
 ## Video recordings
 

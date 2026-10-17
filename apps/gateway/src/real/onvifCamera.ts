@@ -7,6 +7,7 @@ import { ComponentTracker } from '../adapters/components';
 import type { Adapter, AdapterContext } from '../sdk';
 import { attachVision } from '../vision/adapter';
 import { FfmpegSource, SnapshotSource } from '../vision/sources';
+import { cropJpeg, decodeJpeg } from '../vision/frames';
 import type { VisionConfig } from '../vision/pipeline';
 import { interpretEvent, OnvifClient, OnvifError, type OnvifProfile } from './onvif';
 
@@ -83,6 +84,9 @@ export class OnvifCameraAdapter implements Adapter {
       },
       ...(cfg.events !== false
         ? [{ id: 'events', name: 'Camera analytics events', kind: 'other' as const, status: 'pending' as const, detail: 'Waiting for the event subscription' }]
+        : []),
+      ...(cfg.vision
+        ? [{ id: 'vision', name: 'Edge vision', kind: 'computer' as const, status: 'pending' as const, detail: Object.keys(cfg.vision.detectors ?? {}).join(', ') }]
         : []),
     ];
     this.comps = new ComponentTracker(parts);
@@ -175,7 +179,14 @@ export class OnvifCameraAdapter implements Adapter {
       } catch {
         this.snapshotUri = undefined;
       }
-      if (this.cfg.vision && !this.vision) this.startVision(rtsp);
+      if (!this.running) return; // stopped while the camera was answering
+      if (this.cfg.vision && !this.vision) {
+        try {
+          this.startVision(rtsp);
+        } catch (e) {
+          this.ctx.log.warn(`${this.cfg.deviceId}: vision not started: ${(e as Error).message}`);
+        }
+      }
       if (this.wantPtz) {
         if (services.ptz && this.profile.ptz) {
           await this.pollPtz();
@@ -269,7 +280,7 @@ export class OnvifCameraAdapter implements Adapter {
           renewedAt = this.ctx.now();
           this.comps.set('events', { status: 'ok', detail: 'Subscribed to camera events' });
         }
-        const events = await this.client.pull(subscription, 5, 20);
+        const events = await this.client.pull(subscription, 3, 20); // shorter than the client's 4 s socket timeout
         this.touch();
         for (const e of events) this.onEvent(e);
         if (this.ctx.now() - renewedAt > RENEW_EVERY_MS) {
@@ -295,6 +306,8 @@ export class OnvifCameraAdapter implements Adapter {
       source = undefined; // the config names its own source
     else if (useRtsp && rtsp) {
       const u = new URL(rtsp);
+      // Cameras often report their own (NAT'd) address: use the host we reach the camera on, like resolve() does.
+      if (u.hostname !== this.cfg.host) u.hostname = this.cfg.host;
       if (!u.username) {
         u.username = encodeURIComponent(this.cfg.username);
         u.password = encodeURIComponent(this.cfg.password);
@@ -312,7 +325,7 @@ export class OnvifCameraAdapter implements Adapter {
       return;
     }
     this.vision = attachVision(this.ctx, v, { source, label: this.cfg.deviceId });
-    this.comps.set('vision', { status: 'ok', detail: `Edge vision: ${Object.keys(v.detectors).join(', ')} · ${source?.kind ?? v.source?.kind}` });
+    if (this.vision) this.comps.set('vision', { status: 'ok', detail: `Edge vision: ${Object.keys(v.detectors).join(', ')} · ${source?.kind ?? v.source?.kind}` });
   }
 
   private onEvent(e: Parameters<typeof interpretEvent>[0]) {
@@ -384,7 +397,13 @@ export class OnvifCameraAdapter implements Adapter {
           const { mime, bytes } = await this.client.getBytes(this.snapshotUri);
           this.touch();
           if (!bytes.length || !/^image\//.test(mime)) return this.reply(requestId, { ok: false, confirmed: false, detail: 'The camera returned no image.' });
-          this.ctx.event({ kind: 'snapshot', frame: { mime, base64: bytes.toString('base64') } });
+          // Keep the frame under the gateway channel's 1 MB message limit.
+          let frame = { mime, base64: bytes.toString('base64') };
+          if (bytes.length > 600_000 && mime === 'image/jpeg') {
+            const c = cropJpeg(decodeJpeg(bytes, this.ctx.now(), 40_000_000), undefined, { maxSide: 1280, quality: 80 });
+            frame = { mime: c.mime, base64: c.base64 };
+          }
+          this.ctx.event({ kind: 'snapshot', frame });
           return this.reply(requestId, { ok: true, confirmed: true, detail: `Photo captured (${Math.round(bytes.length / 1024)} KB).` });
         }
         case 'record':

@@ -22,7 +22,7 @@ export interface GreyFrame {
 export type Box = [number, number, number, number];
 
 export function decodeJpeg(bytes: Uint8Array, at: number, maxPixels = 4_000_000): Frame {
-  const d = jpegDecode(bytes, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 256 });
+  const d = jpegDecode(bytes, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 256, maxResolutionInMP: Math.max(1, Math.ceil(maxPixels / 1e6)) });
   if (d.width * d.height > maxPixels) throw new Error(`Frame too large (${d.width}×${d.height}).`);
   return { width: d.width, height: d.height, rgba: d.data, at };
 }
@@ -71,7 +71,11 @@ export function letterbox(f: Frame, size: number): { data: Float32Array; scale: 
 }
 
 /** JPEG of a region of the frame (with margin), longest side ≤ maxSide. */
-export function cropJpeg(f: Frame, box: Box | undefined, opts: { maxSide?: number; quality?: number; marginFrac?: number } = {}): { mime: 'image/jpeg'; base64: string; bytes: number } {
+export function cropJpeg(
+  f: Frame,
+  box: Box | undefined,
+  opts: { maxSide?: number; quality?: number; marginFrac?: number } = {},
+): { mime: 'image/jpeg'; base64: string; bytes: number } {
   const maxSide = opts.maxSide ?? 640;
   const m = opts.marginFrac ?? 0.15;
   let x0 = 0;
@@ -112,7 +116,13 @@ export function cropJpeg(f: Frame, box: Box | undefined, opts: { maxSide?: numbe
 }
 
 /** Test and demo helper: an RGBA frame painted with rectangles. */
-export function paintFrame(width: number, height: number, bg: [number, number, number], rects: { x: number; y: number; w: number; h: number; rgb: [number, number, number] }[], at = Date.now()): Frame {
+export function paintFrame(
+  width: number,
+  height: number,
+  bg: [number, number, number],
+  rects: { x: number; y: number; w: number; h: number; rgb: [number, number, number] }[],
+  at = Date.now(),
+): Frame {
   const rgba = new Uint8Array(width * height * 4);
   for (let i = 0; i < width * height; i++) {
     rgba[i * 4] = bg[0];
@@ -161,10 +171,10 @@ export function components(mask: Uint8Array, w: number, h: number, minPixels: nu
       if (x > x1) x1 = x;
       if (y < y0) y0 = y;
       if (y > y1) y1 = y;
-      if (x > 0 && mask[j - 1] && !seen[j - 1]) (seen[j - 1] = 1), stack.push(j - 1);
-      if (x < w - 1 && mask[j + 1] && !seen[j + 1]) (seen[j + 1] = 1), stack.push(j + 1);
-      if (y > 0 && mask[j - w] && !seen[j - w]) (seen[j - w] = 1), stack.push(j - w);
-      if (y < h - 1 && mask[j + w] && !seen[j + w]) (seen[j + w] = 1), stack.push(j + w);
+      if (x > 0 && mask[j - 1] && !seen[j - 1]) ((seen[j - 1] = 1), stack.push(j - 1));
+      if (x < w - 1 && mask[j + 1] && !seen[j + 1]) ((seen[j + 1] = 1), stack.push(j + 1));
+      if (y > 0 && mask[j - w] && !seen[j - w]) ((seen[j - w] = 1), stack.push(j - w));
+      if (y < h - 1 && mask[j + w] && !seen[j + w]) ((seen[j + w] = 1), stack.push(j + w));
     }
     if (n >= minPixels) out.push({ x0, y0, x1: x1 + 1, y1: y1 + 1, n, sum });
   }

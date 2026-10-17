@@ -90,9 +90,10 @@ describe('playbooks and SLA stages', () => {
       { ...ev('Verified — action required', 130), incidentId: 'C', at: T0 + 7_200_000 + 10 * 60_000 },
     ];
     const k = computeKpi({ from: T0 - 1, to: T0 + 86_400_000, incidents, timeline: tl, missions: [], playbooks: DEFAULT_PLAYBOOKS, now: T0 + 7_200_000 + 20 * 60_000 });
-    expect(k.incidents.total).toBe(4);
+    // The scheduled patrol P is a mission, not an alert.
+    expect(k.incidents.total).toBe(3);
     expect(k.incidents.open).toBe(1);
-    expect(k.incidents.falseAlarmPct).toBe(25);
+    expect(k.incidents.falseAlarmPct).toBe(33.3);
     expect(k.response.verify.n).toBe(3);
     expect(k.response.verify.p50).toBe(3);
     expect(k.response.respond.p50).toBe(8);
@@ -102,6 +103,7 @@ describe('playbooks and SLA stages', () => {
     expect(k.sla.compliancePct).toBe(80);
     expect(k.incidents.perDay.length).toBeGreaterThanOrEqual(1);
     expect(k.incidents.byType[0]).toEqual({ type: 'Sensor alert', n: 2 });
+    expect(k.incidents.byType.some((t) => t.type === 'Scheduled patrol')).toBe(false);
   });
 });
 

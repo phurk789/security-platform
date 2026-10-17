@@ -13,9 +13,10 @@ import { Metrics } from './metrics';
 import { OidcClient, OidcError } from './oidc';
 import { openapi } from './openapi';
 import { ApiError, Platform, type Actor, type BusMessage } from './platform';
+import { PushService, initVapid, registerPushRoutes } from './push';
 import { DEMO_ORG, resetDemo } from './seed';
 import { initSecrets } from './secrets';
-import { RateLimiter } from './security';
+import { RateLimiter, safeEqual } from './security';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -53,6 +54,10 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   const hub = new GatewayHub(p, accounts);
   p.gateways = hub;
   const metrics = new Metrics();
+  const vapid = initVapid(cfg);
+  if (vapid.source === 'generated') console.log(`[server] generated Web Push (VAPID) keys at ${vapid.file}; keep them with the backups`);
+  const push = new PushService(db, vapid, { now: () => p.now(), metrics });
+  p.push = push;
   const oidc = cfg.oidc ? new OidcClient(cfg.oidc, fetch, () => p.now()) : null;
   let wsClients = 0;
   metrics.gauge('ps_devices', () => p.deviceCounts().live, { freshness: 'live' });
@@ -72,7 +77,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   p.bus.on('sla', (m: { stage: string }) => metrics.inc('ps_sla_breaches_total', { stage: m.stage }));
   p.bus.on('notification', (m: { delivery: { kind: string; status: string } }) => metrics.inc('ps_notifications_total', { kind: m.delivery.kind, status: m.delivery.status }));
 
-  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 12 * 1024 * 1024, trustProxy: true });
+  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 12 * 1024 * 1024, trustProxy: cfg.trustProxy });
   await app.register(fastifyWebsocket, { options: { maxPayload: 1024 * 1024 } });
 
   app.setErrorHandler((err: Error & { statusCode?: number; validation?: unknown }, req, reply) => {
@@ -148,7 +153,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   });
   app.get('/api/v1/metrics', async (req, reply) => {
     const token = bearer(req);
-    const byToken = !!cfg.metricsToken && !!token && token === cfg.metricsToken;
+    const byToken = !!cfg.metricsToken && !!token && safeEqual(token, cfg.metricsToken);
     if (!byToken) {
       const auth = accounts.authenticate(token);
       if (!auth || auth.actor.role !== 'admin') throw new ApiError(403, 'forbidden', 'Metrics need the METRICS_TOKEN or an administrator session.');
@@ -194,7 +199,9 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     try {
       const id = await oidc.callback(String(code), pend.nonce, pend.verifier);
       const r = accounts.loginSso(id, cfg.oidc!.orgId, cfg.oidc!.syncRole);
-      return reply.redirect(`${pend.return_to && pend.return_to.startsWith('/') ? pend.return_to : '/'}#sso=${encodeURIComponent(r.token)}`, 302);
+      // Same-origin paths only: a protocol-relative value (//evil, /\\evil) would carry the token elsewhere.
+      const returnTo = pend.return_to && /^\/(?![\/\\])/.test(pend.return_to) ? pend.return_to : '/';
+      return reply.redirect(`${returnTo}#sso=${encodeURIComponent(r.token)}`, 302);
     } catch (e) {
       if (e instanceof OidcError || e instanceof ApiError) return fail(e.message);
       req.log.error(e);
@@ -416,6 +423,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.patch('/api/v1/admin/settings', async (req: Req) => p.updateOrgSettings(A(req), body(req) as any));
   app.post('/api/v1/admin/notifications/test', async (req: Req) => p.testChannel(A(req), String(body(req).channelId ?? '')));
   app.get('/api/v1/admin/notifications/log', async (req: Req) => p.notificationLog(A(req), num(req.query.limit, 50)!));
+  registerPushRoutes(app, { push, audit: (a, action, object, result, detail) => void p.audit(a, action, object, result, detail) });
   app.post('/api/v1/admin/retention/run', async (req) => {
     p.require(A(req), 'admin.settings', 'retention');
     const r = p.runPurge()[A(req).orgId];
@@ -578,7 +586,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     hub.closeAll();
   });
 
-  return { app, platform: p, accounts, hub, metrics };
+  return { app, platform: p, accounts, hub, metrics, push };
 }
 
 function orgEnv(db: DB, orgId: string): 'demo' | 'sandbox' | 'pilot' {

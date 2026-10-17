@@ -84,7 +84,19 @@ function mapSecrets(c: NotificationChannel, f: (v: string) => string): Notificat
   };
 }
 const sealChannel = (c: NotificationChannel) => mapSecrets(c, seal);
-const openChannel = (c: NotificationChannel) => mapSecrets(c, openSecret);
+let warnedOpen = false;
+/** A sealed value that cannot be opened (key lost or rotated) disables that channel in memory instead of taking the platform down. */
+const openChannel = (c: NotificationChannel) => {
+  try {
+    return mapSecrets(c, openSecret);
+  } catch (e) {
+    if (!warnedOpen) {
+      warnedOpen = true;
+      console.error(`[secrets] cannot open the secrets of channel ${c.id}: ${e instanceof Error ? e.message : e}. The channel is disabled until the secret is re-entered.`);
+    }
+    return { ...mapSecrets(c, () => ''), enabled: false };
+  }
+};
 
 export function maskChannels(channels: NotificationChannel[]): NotificationChannel[] {
   return channels.map((c) => ({
@@ -114,7 +126,13 @@ function validateChannels(input: unknown, current: NotificationChannel[]): Notif
     if (!['webhook', 'line', 'sms'].includes(c.kind)) throw new Error(`${where}: kind must be webhook, line or sms.`);
     const events = Array.isArray(c.events) ? [...new Set(c.events.filter((e: unknown) => NOTIFY_EVENTS.includes(e as NotifyEvent)))] : [];
     if (!events.length) throw new Error(`${where}: pick at least one event.`);
-    const unmask = (v: unknown, prevV: string | undefined) => (v === SECRET_MASK ? (prevV ?? '') : typeof v === 'string' ? v : '');
+    const unmask = (v: unknown, prevV: string | undefined) => {
+      if (v === SECRET_MASK) {
+        if (prevV === undefined) throw new Error(`${where}: the masked secret has no stored value (new or renamed channel); enter the secret again.`);
+        return prevV;
+      }
+      return typeof v === 'string' ? v : '';
+    };
     const out: NotificationChannel = {
       id: c.id,
       name: c.name.trim(),

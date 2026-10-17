@@ -35,14 +35,17 @@ export class Accounts {
   login(username: string, password: string, ip = '') {
     const now = this.p.now();
     const key = `${username.toLowerCase()}|${ip}`;
-    if (this.throttle.blocked(key, now)) throw new ApiError(429, 'forbidden', 'Too many failed attempts. Try again in a minute.');
+    const userKey = `${username.toLowerCase()}|*`;
+    if (this.throttle.blocked(key, now) || this.throttle.blocked(userKey, now)) throw new ApiError(429, 'forbidden', 'Too many failed attempts. Try again in a minute.');
     const u = this.db.prepare('SELECT * FROM users WHERE username = ?').get(username.toLowerCase()) as UserRow | undefined;
     if (!u || !u.active || !verifyPassword(password, u.pw_hash)) {
       this.throttle.fail(key, now);
+      this.throttle.fail(userKey, now);
       if (u) this.p.audit(this.p.systemActor(u.org_id), 'auth.login', u.username, 'denied', 'bad password');
       throw new ApiError(401, 'unauthenticated', 'Wrong username or password.');
     }
     this.throttle.ok(key);
+    this.throttle.ok(userKey);
     const token = randomToken('ses_');
     const expiresAt = now + this.ttlMs;
     const stepUp = now + STEP_UP_WINDOW_MS;

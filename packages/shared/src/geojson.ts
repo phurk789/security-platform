@@ -200,7 +200,13 @@ export function geofencesFromGeoJson(anchor: GeoAnchor, extent: { width: number;
     const geom = f?.geometry;
     if (!geom || (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon')) return out.errors.push(`${where}: only Polygon and MultiPolygon geometries become geofences.`);
     const props = (f.properties ?? {}) as Record<string, unknown>;
-    const parts: LonLat[][] = geom.type === 'Polygon' ? [geom.coordinates[0]] : geom.coordinates.map((p) => p[0]);
+    const coords = (geom as { coordinates: unknown }).coordinates;
+    const partsRaw: unknown[] =
+      geom.type === 'Polygon' ? [Array.isArray(coords) ? coords[0] : undefined] : Array.isArray(coords) ? coords.map((p: unknown) => (Array.isArray(p) ? p[0] : undefined)) : [];
+    const okPoint = (pt: unknown) => Array.isArray(pt) && pt.length >= 2 && Number.isFinite(Number(pt[0])) && Number.isFinite(Number(pt[1]));
+    if (!partsRaw.length || partsRaw.some((r) => !Array.isArray(r) || !r.every(okPoint)))
+      return out.errors.push(`${where}: coordinates must be rings of [longitude, latitude] number pairs.`);
+    const parts = partsRaw as LonLat[][];
     const kind = String(props.kind ?? props.type ?? 'keep_out')
       .toLowerCase()
       .replace(/[\s-]/g, '_');

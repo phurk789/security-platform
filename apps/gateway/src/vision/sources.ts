@@ -20,7 +20,10 @@ export interface HttpAuth {
 }
 
 /** HTTP GET with Basic auth, retrying with Digest when the server insists (RFC 7616). */
-export function httpGet(url: string, opts: { auth?: HttpAuth; timeoutMs?: number; onResponse?: (res: http.IncomingMessage) => void } = {}): Promise<{ status: number; headers: http.IncomingHttpHeaders; bytes: Buffer }> {
+export function httpGet(
+  url: string,
+  opts: { auth?: HttpAuth; timeoutMs?: number; onResponse?: (res: http.IncomingMessage) => void } = {},
+): Promise<{ status: number; headers: http.IncomingHttpHeaders; bytes: Buffer }> {
   const u = new URL(url);
   const once = (authHeader?: string) =>
     new Promise<{ status: number; headers: http.IncomingHttpHeaders; bytes: Buffer }>((resolve, reject) => {
@@ -37,7 +40,8 @@ export function httpGet(url: string, opts: { auth?: HttpAuth; timeoutMs?: number
     });
   const basic = opts.auth ? `Basic ${Buffer.from(`${opts.auth.username}:${opts.auth.password}`).toString('base64')}` : undefined;
   return once(basic).then((r) => {
-    if (r.status === 401 && opts.auth && /^Digest /i.test(String(r.headers['www-authenticate'] ?? ''))) return once(digestAuth(String(r.headers['www-authenticate']), 'GET', u.pathname + u.search, opts.auth));
+    if (r.status === 401 && opts.auth && /^Digest /i.test(String(r.headers['www-authenticate'] ?? '')))
+      return once(digestAuth(String(r.headers['www-authenticate']), 'GET', u.pathname + u.search, opts.auth));
     return r;
   });
 }
@@ -129,10 +133,16 @@ export class JpegSplitter {
   }
 }
 
+/** Removes user:password@ from URLs in free text (ffmpeg prints the input URL on errors). */
+export function redactUrls(text: string) {
+  return text.replace(/(\w+:\/\/)[^\/\s@]+@/g, '$1***@');
+}
+
 /** An HTTP multipart/x-mixed-replace MJPEG stream (Axis, many cheap cameras, MediaMTX "mjpeg" path). */
 export class MjpegSource implements FrameSource {
   readonly kind = 'mjpeg';
   private req?: http.ClientRequest;
+  private res?: http.IncomingMessage;
   private stopped = false;
   private retry?: NodeJS.Timeout;
   constructor(
@@ -141,34 +151,53 @@ export class MjpegSource implements FrameSource {
     private readonly now: () => number = Date.now,
   ) {}
   start(onFrame: (jpeg: Uint8Array, at: number) => void, onError: (e: Error) => void) {
-    const connect = () => {
+    const u = new URL(this.url);
+    const lib = u.protocol === 'https:' ? https : http;
+    const again = (ms: number) => {
+      if (!this.stopped) this.retry = setTimeout(() => connect(), ms);
+    };
+    const connect = (authHeader?: string, digestTried = false) => {
       if (this.stopped) return;
       const splitter = new JpegSplitter((j) => onFrame(j, this.now()));
-      void httpGet(this.url, {
-        auth: this.auth,
-        timeoutMs: 10_000,
-        onResponse: (res) => {
-          if ((res.statusCode ?? 0) >= 400) {
-            onError(new Error(`MJPEG HTTP ${res.statusCode}`));
-            res.resume();
-            return;
-          }
-          res.on('data', (c: Buffer) => splitter.push(c));
-          res.on('end', () => {
-            if (!this.stopped) this.retry = setTimeout(connect, 2000);
-          });
-          res.on('error', (e) => onError(e));
-        },
-      }).catch((e) => {
-        onError(e instanceof Error ? e : new Error(String(e)));
-        if (!this.stopped) this.retry = setTimeout(connect, 3000);
+      const basic = this.auth ? `Basic ${Buffer.from(`${this.auth.username}:${this.auth.password}`).toString('base64')}` : undefined;
+      const header = authHeader ?? basic;
+      const req = lib.request(u, { method: 'GET', headers: header ? { authorization: header } : {}, timeout: 15_000 }, (res) => {
+        this.res = res;
+        const status = res.statusCode ?? 0;
+        const challenge = String(res.headers['www-authenticate'] ?? '');
+        if (status === 401 && this.auth && !digestTried && /^Digest /i.test(challenge)) {
+          res.resume();
+          connect(digestAuth(challenge, 'GET', u.pathname + u.search, this.auth), true);
+          return;
+        }
+        if (status >= 400) {
+          onError(new Error(`MJPEG HTTP ${status}`));
+          res.resume();
+          again(5000);
+          return;
+        }
+        res.on('data', (c: Buffer) => splitter.push(c));
+        res.on('end', () => again(2000));
+        res.on('error', (e) => {
+          onError(e);
+          again(3000);
+        });
       });
+      this.req = req;
+      req.on('timeout', () => req.destroy(new Error('MJPEG stream stalled.')));
+      req.on('error', (e) => {
+        if (this.stopped) return;
+        onError(e);
+        again(3000);
+      });
+      req.end();
     };
     connect();
   }
   stop() {
     this.stopped = true;
     if (this.retry) clearTimeout(this.retry);
+    this.res?.destroy();
     this.req?.destroy();
   }
 }
@@ -200,7 +229,7 @@ export class FfmpegSource implements FrameSource {
       const proc = spawn(this.opts.ffmpegPath ?? 'ffmpeg', FfmpegSource.args(this.opts), { stdio: ['ignore', 'pipe', 'pipe'] });
       this.proc = proc;
       proc.stdout!.on('data', (c: Buffer) => splitter.push(c));
-      proc.stderr!.on('data', (c: Buffer) => (err = (err + c.toString()).slice(-400)));
+      proc.stderr!.on('data', (c: Buffer) => (err = redactUrls(err + c.toString()).slice(-400)));
       proc.on('error', (e) => onError(new Error(`ffmpeg: ${e.message}`)));
       proc.on('exit', (code) => {
         if (this.stopped) return;

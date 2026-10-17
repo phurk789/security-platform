@@ -128,7 +128,8 @@ export function slaStages(inc: Incident, events: TimelineEvent[], limits: Record
   const done: Record<SlaStage, number | undefined> = {
     acknowledge: inc.status === 'new' ? undefined : (firstAt(own, ACK_TITLES) ?? inc.createdAt),
     verify: ['new', 'triaging'].includes(inc.status) ? undefined : (firstAt(own, VERIFY_TITLES) ?? firstAt(own, RESPOND_TITLES)),
-    respond: firstAt(own, RESPOND_TITLES),
+    // Resolved without a mission or responder (e.g. handled from the control room) counts the resolution as the response.
+    respond: firstAt(own, RESPOND_TITLES) ?? (['resolved', 'closed'].includes(inc.status) ? firstAt(own, RESOLVE_TITLES) : undefined),
     resolve: ['resolved', 'closed', 'dismissed', 'duplicate'].includes(inc.status) ? (firstAt(own, RESOLVE_TITLES) ?? now) : undefined,
   };
   return SLA_STAGES.map((stage) => {
@@ -290,7 +291,8 @@ const top = (counts: Record<string, number>, n: number, key: string) =>
 
 /** Operational KPIs for a period. Same code on the server (full data) and in the console (what it holds). */
 export function computeKpi(input: KpiInput, tz = 'Asia/Bangkok'): Kpi {
-  const inRange = input.incidents.filter((i) => i.createdAt >= input.from && i.createdAt <= input.to);
+  // Scheduled patrols are missions, not alerts: they are counted under missions.patrols only.
+  const inRange = input.incidents.filter((i) => i.createdAt >= input.from && i.createdAt <= input.to && !i.patrolId);
   const byStatus: Record<string, number> = {};
   const byType: Record<string, number> = {};
   const bySeverity: Record<string, number> = {};

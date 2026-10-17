@@ -84,6 +84,14 @@ export function parseSiteConfig(json: unknown): SiteConfig {
       throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required.`);
     if (d.type === 'siyi-camera' && d.mount && (!Number.isFinite(d.mount.bearingDeg) || !Number.isFinite(d.mount.heightM)))
       throw new ConfigError(`${d.deviceId}: mount needs bearingDeg and heightM.`);
+    if (d.type === 'vision') {
+      if (!d.pos || !Number.isFinite(d.pos.x) || !Number.isFinite(d.pos.y)) throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required.`);
+      if (!d.vision || typeof d.vision !== 'object' || !d.vision.source)
+        throw new ConfigError(`${d.deviceId}: vision.source (snapshot | mjpeg | ffmpeg | folder) is required for a vision-only camera.`);
+      if (!d.vision.detectors || !Object.values(d.vision.detectors).some(Boolean)) throw new ConfigError(`${d.deviceId}: vision.detectors must enable motion, thermal or onnx.`);
+    }
+    if (d.type === 'onvif' && d.vision && (!d.vision.detectors || !Object.values(d.vision.detectors).some(Boolean)))
+      throw new ConfigError(`${d.deviceId}: vision.detectors must enable motion, thermal or onnx.`);
     if (d.type === 'onvif') {
       if (!d.host || typeof d.host !== 'string') throw new ConfigError(`${d.deviceId}: host (camera IP or name) is required.`);
       if (typeof d.username !== 'string' || typeof d.password !== 'string')

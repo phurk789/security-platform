@@ -37,7 +37,7 @@ pilot. Status words: **Done** (in code, tested), **Pilot** (needs the customer's
 ## 3. Transport and browser
 
 - TLS is terminated by the customer's reverse proxy (nginx / Traefik / cloud LB); the server
-  trusts `X-Forwarded-*` from it. `HSTS=1` (default in pilot) adds `Strict-Transport-Security`.
+  trusts `X-Forwarded-*` only as configured by `TRUST_PROXY` (pilot default on; set the proxy addresses to be strict). `HSTS=1` (default in pilot) adds `Strict-Transport-Security`.
 - Response headers on every answer: `X-Content-Type-Options: nosniff`, `Referrer-Policy:
 no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`,
   `Cross-Origin-Resource-Policy`.

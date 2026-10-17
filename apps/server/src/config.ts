@@ -52,6 +52,13 @@ export interface Config {
   cspConnectSrc: string[];
   /** Origins allowed to open the console WebSocket (empty = any). */
   allowedOrigins: string[];
+  /** Trust X-Forwarded-* from the reverse proxy: false, true, or a comma list of proxy addresses/CIDRs. Default: on in pilot (behind TLS proxy), off in demo. */
+  trustProxy: boolean | string;
+  /** Web Push (VAPID) key pair, base64url. Unset: generated once into DATA_DIR/vapid.json. */
+  vapidPublicKey?: string;
+  vapidPrivateKey?: string;
+  /** Contact the push services may use: mailto: address or https: URL. */
+  vapidSubject?: string;
 }
 
 export function loadConfig(over: Partial<Config> = {}): Config {
@@ -83,6 +90,10 @@ export function loadConfig(over: Partial<Config> = {}): Config {
     hsts: (process.env.HSTS ?? (env === 'pilot' ? '1' : '0')) === '1',
     cspConnectSrc: (process.env.CSP_CONNECT_SRC ?? '').split(/[\s,]+/).filter(Boolean),
     allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '').split(/[\s,]+/).filter(Boolean),
+    trustProxy: parseTrustProxy(process.env.TRUST_PROXY, env === 'pilot'),
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || undefined,
+    vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || undefined,
+    vapidSubject: process.env.VAPID_SUBJECT || undefined,
     ...over,
   };
   if (cfg.env === 'pilot' && !cfg.mediaSecret) throw new Error('MEDIA_SECRET must be set in pilot mode');
@@ -110,4 +121,11 @@ function oidcFromEnv(): Config['oidc'] {
     orgId: process.env.OIDC_ORG || 'org-demo',
     syncRole: (process.env.OIDC_SYNC_ROLE ?? '1') === '1',
   };
+}
+
+function parseTrustProxy(v: string | undefined, def: boolean): boolean | string {
+  if (v === undefined || v === '') return def;
+  if (v === '1' || v === 'true') return true;
+  if (v === '0' || v === 'false') return false;
+  return v; // comma-separated addresses / CIDRs
 }

@@ -49,15 +49,26 @@ export function analyticsOf(p: VisionPipeline, now: number): DeviceAnalytics {
  */
 export function attachVision(ctx: AdapterContext, cfg: VisionConfig, opts: { source?: FrameSource; healthMs?: number; label?: string } = {}) {
   const log = (m: string) => ctx.log.info(`${opts.label ?? 'vision'}: ${m}`);
-  const pipeline = new VisionPipeline(cfg, {
-    now: () => ctx.now(),
-    log,
-    onDetection: (d) => {
-      const { bbox, ...rest } = d;
-      ctx.event({ kind: 'detection', at: d.at, detail: `${d.type}${d.attributes?.label ? ` (${d.attributes.label})` : ''} ${Math.round((d.confidence ?? 1) * 100)}%`, detection: { ...rest, bbox } });
-    },
-    onError: (e) => ctx.log.warn(`${opts.label ?? 'vision'}: ${e.message}`),
-  });
+  let pipeline: VisionPipeline;
+  try {
+    pipeline = new VisionPipeline(cfg, {
+      now: () => ctx.now(),
+      log,
+      onDetection: (d) => {
+        const { bbox, ...rest } = d;
+        ctx.event({
+          kind: 'detection',
+          at: d.at,
+          detail: `${d.type}${d.attributes?.label ? ` (${d.attributes.label})` : ''} ${Math.round((d.confidence ?? 1) * 100)}%`,
+          detection: { ...rest, bbox },
+        });
+      },
+      onError: (e) => ctx.log.warn(`${opts.label ?? 'vision'}: ${e.message}`),
+    });
+  } catch (e) {
+    ctx.log.error(`${opts.label ?? 'vision'}: ${(e as Error).message}`);
+    return undefined;
+  }
   const report = () => ctx.event({ kind: 'analytics', at: ctx.now(), analytics: analyticsOf(pipeline, ctx.now()) });
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -111,7 +122,17 @@ export class VisionCameraAdapter implements Adapter {
     const beat = () => {
       const h = this.handle?.pipeline.status();
       const fresh = !!h?.lastFrameAt && ctx.now() - h.lastFrameAt < 30_000;
-      ctx.telemetry({ seq: this.seq++, sourceTime: ctx.now(), pos: this.cfg.pos, heading: 0, speed: 0, battery: 100, accuracyM: 0, signal: fresh ? 100 : 0, mode: fresh ? 'online' : 'no-frames' } as never);
+      ctx.telemetry({
+        seq: this.seq++,
+        sourceTime: ctx.now(),
+        pos: this.cfg.pos,
+        heading: 0,
+        speed: 0,
+        battery: 100,
+        accuracyM: 0,
+        signal: fresh ? 100 : 0,
+        mode: fresh ? 'online' : 'no-frames',
+      } as never);
     };
     beat();
     this.timer = setInterval(beat, 5000);

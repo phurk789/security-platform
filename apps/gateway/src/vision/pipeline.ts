@@ -158,7 +158,8 @@ export class VisionPipeline {
     this.health.lastFrameAt = at;
     this.frameTimes.push(at);
     while (this.frameTimes.length > 20) this.frameTimes.shift();
-    if (this.frameTimes.length > 1) this.health.fps = Math.round(((this.frameTimes.length - 1) / Math.max(1, this.frameTimes[this.frameTimes.length - 1] - this.frameTimes[0])) * 1000 * 100) / 100;
+    if (this.frameTimes.length > 1)
+      this.health.fps = Math.round(((this.frameTimes.length - 1) / Math.max(1, this.frameTimes[this.frameTimes.length - 1] - this.frameTimes[0])) * 1000 * 100) / 100;
     const cands: Candidate[] = [];
     for (const d of this.detectors) {
       try {
@@ -241,7 +242,14 @@ export class VisionPipeline {
         const y0 = Math.min(...inZone.map((c) => c.bbox[1]));
         const x1 = Math.max(...inZone.map((c) => c.bbox[0] + c.bbox[2]));
         const y1 = Math.max(...inZone.map((c) => c.bbox[1] + c.bbox[3]));
-        out.push({ type: 'crowd', confidence: Math.min(1, inZone.reduce((s, c) => s + c.confidence, 0) / inZone.length), bbox: [x0, y0, x1 - x0, y1 - y0], label: 'crowd', attributes: { count: inZone.length }, zone: z });
+        out.push({
+          type: 'crowd',
+          confidence: Math.min(1, inZone.reduce((s, c) => s + c.confidence, 0) / inZone.length),
+          bbox: [x0, y0, x1 - x0, y1 - y0],
+          label: 'crowd',
+          attributes: { count: inZone.length },
+          zone: z,
+        });
       }
     }
     return out;
@@ -253,6 +261,9 @@ export class VisionPipeline {
     const out: (Candidate & { zone?: ImageZone })[] = [];
     for (const t of this.tracks) {
       if (t.loiterReported || at - t.firstSeen < limit || t.frames < 3) continue;
+      // Only a report that gets through the cooldown consumes the track's one-shot flag.
+      const lkey = `loitering:${this.zoneOf({ type: 'person', confidence: 1, bbox: t.bbox })?.id ?? '-'}`;
+      if (at - (this.lastReport.get(lkey) ?? -Infinity) < (this.cfg.cooldownS ?? 30) * 1000) continue;
       t.loiterReported = true;
       const c: Candidate = { type: 'loitering', confidence: 0.8, bbox: t.bbox, label: 'loitering', attributes: { label: `${Math.round((at - t.firstSeen) / 1000)} s` } };
       out.push({ ...c, zone: this.zoneOf({ ...c, type: 'person' }) });

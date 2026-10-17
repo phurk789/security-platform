@@ -21,14 +21,14 @@ demo) and from `npm run dev` (full platform).
 
 ## 2. Next engineering steps (post-pilot)
 
-| Step                                                                                   | Why                           | Effort                               |
-| -------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------ |
-| Active/standby server with replicated data directory (or PostgreSQL option)            | 99.5 % availability clauses   | 6–8 weeks                            |
-| Hardware runs: SIYI, UniFC 6 / ArduPilot rover, ONVIF cameras, MediaMTX on the edge PC | Turn _Done (sim)_ into _Done_ | 4–6 weeks per vehicle model          |
-| Indoor positioning and floor maps (ROS 2 Nav2)                                         | Indoor patrols                | 8–12 weeks with a partner integrator |
-| Mobile field app packaging (PWA → store builds), push notifications                    | Field responders              | 3 weeks                              |
-| Report templates per agency (Thai PDF), e-signature                                    | Paper trail                   | 3 weeks                              |
-| Load test and penetration test on the pilot network                                    | TOR quality targets           | 2 weeks + remediation                |
+| Step                                                                                        | Why                           | Effort                               |
+| ------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------ |
+| Active/standby server with replicated data directory (or PostgreSQL option)                 | 99.5 % availability clauses   | 6–8 weeks                            |
+| Hardware runs: SIYI, UniFC 6 / ArduPilot rover, ONVIF cameras, MediaMTX on the edge PC      | Turn _Done (sim)_ into _Done_ | 4–6 weeks per vehicle model          |
+| Indoor positioning and floor maps (ROS 2 Nav2)                                              | Indoor patrols                | 8–12 weeks with a partner integrator |
+| Mobile field app packaging (PWA → store builds); push notifications are **Done** (Web Push) | Field responders              | 2 weeks                              |
+| Report templates per agency (Thai PDF), e-signature                                         | Paper trail                   | 3 weeks                              |
+| Load test and penetration test on the pilot network                                         | TOR quality targets           | 2 weeks + remediation                |
 
 ## 3. Licensing
 

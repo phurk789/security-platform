@@ -6,21 +6,24 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "build": "esbuild src/index.ts src/cli/restore.ts src/cli/seed.ts src/cli/license.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist --external:fastify --external:@fastify/* --external:ws --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\"",
+    "build": "esbuild src/index.ts src/cli/restore.ts src/cli/seed.ts src/cli/license.ts src/cli/loadtest.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist --external:fastify --external:@fastify/* --external:ws --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\"",
     "restore": "tsx src/cli/restore.ts",
     "license": "tsx src/cli/license.ts",
     "seed": "tsx src/cli/seed.ts",
+    "loadtest": "tsx src/cli/loadtest.ts",
     "start:prod": "node dist/index.js"
   },
   "dependencies": {
+    "@13store/gateway": "*",
     "@13store/shared": "*",
     "@fastify/static": "^10.1.6",
     "@fastify/websocket": "^11.3.4",
     "fastify": "^5.12.7",
-    "ws": "^8.22.0",
-    "@13store/gateway": "*"
+    "web-push": "^3.6.7",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.25.0",
     "tsx": "^4.20.0"

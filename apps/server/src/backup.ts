@@ -31,6 +31,7 @@ const TABLES = [
   'patrols',
   'device_stats',
   'notifications',
+  'push_subscriptions',
 ];
 
 function walk(dir: string): string[] {

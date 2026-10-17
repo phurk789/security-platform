@@ -164,6 +164,21 @@ autoStart, enabled }`. Each run raises an incident of type `Scheduled patrol` an
 - `GET /kpi?from&to` → the period's KPIs (`computeKpi` in `packages/shared/src/ops.ts`);
   `GET /kpi/report?from&to&download=1` → the Markdown period report (`evidence.export`, audited).
 
+## Push notifications (Web Push)
+
+All routes need a user session; each user manages their own devices only.
+
+- `GET /push/vapid` → `{ publicKey, subject }`: the `applicationServerKey` for `PushManager.subscribe`.
+- `POST /push/subscribe {endpoint, keys: {p256dh, auth}, ua?}` → `{ id, endpoint (masked), ua, createdAt, failures, created }`.
+  The body is the browser's `PushSubscription.toJSON()`. `endpoint` must be https (`400 invalid` otherwise); at most
+  10 devices per user (`409 limit`). Re-posting the same endpoint refreshes it (idempotent).
+- `DELETE /push/subscribe {endpoint}` → `{ ok, removed }`.
+- `GET /push/subscriptions` → the caller's devices, endpoints masked.
+- `POST /push/test` → `{ subscriptions, sent, failed, removed, status: 'sent' | 'failed' | 'none' }` after sending a test
+  message to the caller's devices.
+- Payload the service worker receives: `{ title, body, url?, tag?, incidentId? }` (title ≤ 60, body ≤ 140 characters).
+  Requests carry `Authorization: vapid t=…, k=…`, `Content-Encoding: aes128gcm`, `TTL: 300`, `Urgency: high`.
+
 ## GIS: anchor and GeoJSON
 
 - `GET /sites/{id}` (`default` = your site) → `{ id, name, geometry }`; `geometry.geo` is the WGS 84 anchor

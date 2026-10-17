@@ -78,6 +78,7 @@ export class Notifier {
     } finally {
       this.inflight--;
     }
+    this.smsSent.delete(id);
     const d: NotificationDelivery = {
       id,
       at: this.now(),
@@ -105,6 +106,9 @@ export class Notifier {
   get pending() {
     return this.inflight;
   }
+
+  /** Numbers already accepted per delivery, so a retry does not text them twice. */
+  private smsSent = new Map<string, Set<string>>();
 
   private async send(c: NotificationChannel, msg: Outbound, deliveryId: string): Promise<string> {
     const text = `${msg.title}\n${msg.text}${this.opts.consoleUrl ? `\n${this.opts.consoleUrl}` : ''}`;
@@ -142,7 +146,10 @@ export class Notifier {
     }
     if (c.kind === 'sms' && c.sms) {
       const results: string[] = [];
+      const sent = this.smsSent.get(deliveryId) ?? new Set<string>();
+      this.smsSent.set(deliveryId, sent);
       for (const to of c.sms.to) {
+        if (sent.has(to)) continue; // already accepted by the gateway on an earlier attempt
         const fill = (s: string) =>
           s
             .replace(/\{to\}/g, encodeURIComponent(to))
@@ -158,6 +165,7 @@ export class Notifier {
         }
         const r = await this.fetchFn(url, { method, headers, body, signal: AbortSignal.timeout(this.timeoutMs) });
         if (!r.ok) throw new Error(`SMS HTTP ${r.status} for ${to}`);
+        sent.add(to);
         results.push(`${to}: ${r.status}`);
       }
       return results.join(', ');

@@ -58,6 +58,19 @@ const dict = {
   photo: { th: 'รูปถ่าย', en: 'Photo' },
   storageFull: { th: 'พื้นที่ในเครื่องเต็ม รายการนี้จะหายถ้าปิดแอปก่อนส่ง', en: 'Phone storage is full. This item is lost if you close the app before it sends.' },
   updatedAt: { th: 'อัปเดต', en: 'Updated' },
+  notifications: { th: 'การแจ้งเตือน', en: 'Notifications' },
+  notifHint: { th: 'รับแจ้งงานใหม่บนมือถือแม้ปิดแอปอยู่', en: 'Get new tasks on this phone even when the app is closed.' },
+  notifOn: { th: 'เปิดอยู่', en: 'On' },
+  notifOff: { th: 'ปิดอยู่', en: 'Off' },
+  notifEnable: { th: 'เปิดการแจ้งเตือน', en: 'Turn on notifications' },
+  notifDisable: { th: 'ปิดการแจ้งเตือน', en: 'Turn off notifications' },
+  notifBusy: { th: 'กำลังตั้งค่า…', en: 'Setting up…' },
+  notifDenied: { th: 'เบราว์เซอร์บล็อกการแจ้งเตือนของแอปนี้ อนุญาตได้ในตั้งค่าของเบราว์เซอร์', en: 'Notifications are blocked for this app. Allow them in the browser settings.' },
+  notifUnsupported: {
+    th: 'อุปกรณ์นี้ไม่รองรับการแจ้งเตือนแบบพุช (iPhone: เพิ่มแอปไว้ที่หน้าจอโฮมก่อน)',
+    en: 'Push notifications are not available here (iPhone: add the app to the Home Screen first).',
+  },
+  notifFailed: { th: 'เปิดการแจ้งเตือนไม่สำเร็จ ลองใหม่อีกครั้ง', en: 'Could not turn on notifications. Try again.' },
 } as const;
 
 export type Key = keyof typeof dict;

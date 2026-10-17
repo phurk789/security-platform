@@ -20,7 +20,13 @@ const serverUrl = process.env.SERVER_URL ?? site?.serverUrl ?? 'ws://localhost:8
 const key = process.env.GATEWAY_KEY ?? site?.key ?? 'gw_demo_local_key';
 const gatewayId = process.env.GATEWAY_ID ?? site?.gatewayId ?? 'edge-civic-01';
 const offline = process.env.OFFLINE !== undefined ? process.env.OFFLINE.split(',').filter(Boolean) : undefined;
-const adapters = site ? adaptersFromConfig(site) : defaultAdapters({ offline });
+let adapters: ReturnType<typeof defaultAdapters>;
+try {
+  adapters = site ? adaptersFromConfig(site) : defaultAdapters({ offline });
+} catch (e) {
+  console.error(`[gw] cannot build adapters from ${configPath}: ${(e as Error).message}`);
+  process.exit(2);
+}
 console.log(`[gw] ${site ? `site config ${configPath}` : 'simulated devices'}: ${adapters.map((a) => `${a.declaration.deviceId} (${a.declaration.adapterVersion})`).join(', ')}`);
 const gw = startGateway({ serverUrl, key, gatewayId, adapters, geo: site?.geo });
 const shutdown = async () => {

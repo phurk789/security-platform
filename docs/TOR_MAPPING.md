@@ -75,12 +75,12 @@ clause numbers of the actual tender in the first column.
 
 ## F. คุณภาพการให้บริการ (quality targets)
 
-| #   | Requirement                                             | Status | Note                                                                                            |
-| --- | ------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------- |
-| F1  | เหตุการณ์แสดงบนจอภายใน 2 วินาที (p95)                   | Pilot  | Pushed over WebSocket immediately; load-tested on the pilot network with a defined load profile |
-| F2  | ตรวจจับข้อมูลค้าง (stale) ภายใน 5 วินาที และห้ามสั่งการ | Done   | Tested                                                                                          |
-| F3  | ความพร้อมใช้งาน 99.5 %                                  | Pilot  | Single node + backups today; active/standby in roadmap item 6                                   |
-| F4  | รองรับกล้อง ≥ 100 ตัว อุปกรณ์ ≥ 50 ชิ้นต่อพื้นที่       | Pilot  | Limits are license-driven; load test in pilot                                                   |
+| #   | Requirement                                             | Status     | Note                                                                                                                                                                                                                                            |
+| --- | ------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1  | เหตุการณ์แสดงบนจอภายใน 2 วินาที (p95)                   | Done (sim) | Pushed over WebSocket immediately. Load harness (`npm run loadtest`), 100 cameras + 20 UGVs, 10 consoles: telemetry p95 24 ms, incident p95 21 ms (4× load: 86 ms), 100 % delivered; repeat on the pilot network — OPERATIONS.md → Load testing |
+| F2  | ตรวจจับข้อมูลค้าง (stale) ภายใน 5 วินาที และห้ามสั่งการ | Done       | Tested                                                                                                                                                                                                                                          |
+| F3  | ความพร้อมใช้งาน 99.5 %                                  | Pilot      | Single node + backups today; active/standby in roadmap item 6                                                                                                                                                                                   |
+| F4  | รองรับกล้อง ≥ 100 ตัว อุปกรณ์ ≥ 50 ชิ้นต่อพื้นที่       | Done (sim) | Load harness ran 100 cameras + 20 UGVs on one site (and 480 devices) with 100 % delivery and no errors; limits are license-driven (demo unlimited). Pilot hardware will differ — OPERATIONS.md → Load testing                                   |
 
 ## Items that need the customer's decision before a pilot
 
