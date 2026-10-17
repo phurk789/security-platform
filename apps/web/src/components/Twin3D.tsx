@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { useStore } from '../store';
 import { getWorld, subscribeFrame } from '../twin/world';
+import { useTheme } from './Hud';
 
 export interface Twin3DApi {
   zoom(factor: number): void;
@@ -19,6 +20,7 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void 
   const ctl = useRef<{ camera: THREE.PerspectiveCamera; controls: OrbitControls; goal?: { target: THREE.Vector3; dist: number } } | null>(null);
   const world = getWorld();
   world.setState(s);
+  world.setHud(useTheme() === 'hud');
   world.callbacks = {
     selectDevice: (id) => dispatch({ type: 'selectDevice', id }),
     selectIncident: (id) => dispatch({ type: 'selectIncident', id }),
@@ -61,6 +63,17 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void 
       renderer.setSize(w, h, false);
       labels.setSize(w, h);
       camera.aspect = w / h;
+      // Panels floating over the map (HUD layout) cover its edges: centre the scene in the gap
+      // between them by shifting the projection, not the camera. Insets come from CSS variables.
+      const css = getComputedStyle(el);
+      const px = (n: string) => parseFloat(css.getPropertyValue(n)) || 0;
+      const offX = (px('--view-r') - px('--view-l')) / 2;
+      const offY = (px('--view-b') - px('--view-t')) / 2;
+      if (offX || offY) camera.setViewOffset(w, h, offX, offY, w, h);
+      else camera.clearViewOffset();
+      // Narrow gap between panels: pull back so the whole site still fits (tuned on 1920 px).
+      const gap = w - px('--view-l') - px('--view-r');
+      camera.zoom = gap < w ? Math.max(0.55, Math.min(1, gap / 1080)) : 1;
       camera.updateProjectionMatrix();
     };
     resize();

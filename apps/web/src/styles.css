@@ -521,7 +521,7 @@ html:lang(th) .meta dt { font-size: 0.78rem; }
 }
 
 /* ---------- 3D twin (WebGL) ---------- */
-.t3-host { position: absolute; inset: 0; overflow: hidden; }
+.t3-host { position: absolute; inset: 0; overflow: hidden; isolation: isolate; }
 .t3-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 .t3-canvas:active { cursor: grabbing; }
 .t3-labels { position: absolute; inset: 0; pointer-events: none; }

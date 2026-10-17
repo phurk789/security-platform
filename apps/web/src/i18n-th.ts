@@ -503,4 +503,17 @@ export const TH: Record<string, string> = {
   'Point at {id}': 'หันกล้องไปที่ {id}',
   'Paused to save bandwidth. Resumes when visible.': 'หยุดสตรีมชั่วคราวเพื่อประหยัดแบนด์วิดท์ จะเล่นต่อเมื่อกลับมาแสดงผล',
   'Switch video quality (SD uses less bandwidth)': 'สลับคุณภาพวิดีโอ (SD ใช้แบนด์วิดท์น้อยกว่า)',
+  // --- Twin HUD -----------------------------------------------------------
+  'Switch to the classic layout': 'สลับเป็นหน้าจอแบบเดิม',
+  'Switch to the Twin HUD layout': 'สลับเป็นหน้าจอแบบ Twin HUD',
+  'Layout': 'รูปแบบหน้าจอ',
+  'Classic': 'แบบเดิม',
+  'Fleet': 'ยานพาหนะ',
+  'Video': 'วิดีโอ',
+  'No vehicles registered.': 'ยังไม่มียานพาหนะที่ลงทะเบียน',
+  'No data': 'ไม่มีข้อมูล',
+  'Standby': 'พร้อมใช้งาน',
+  'Display only': 'แสดงผลเท่านั้น',
+  'Your role cannot view video.': 'บทบาทของคุณดูวิดีโอไม่ได้',
+  'Ready to start': 'พร้อมเริ่ม',
 };

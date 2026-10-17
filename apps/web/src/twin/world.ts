@@ -71,6 +71,9 @@ export class TwinWorld {
   private t = 0;
   private beamTex = beamTexture();
   labelsVisible = true;
+  /** Holographic extras for the Twin HUD theme: building outlines, grid, perimeter, sweep. */
+  readonly hud = new THREE.Group();
+  private hudPulse?: THREE.Mesh;
   buildingLabels: CSS2DObject[] = [];
 
   constructor() {
@@ -142,6 +145,26 @@ export class TwinWorld {
     site.receiveShadow = true;
     s.add(site);
 
+    // HUD grid around the site and a glowing perimeter
+    const grid = new THREE.GridHelper(1400, 70, 0x1d6f8f, 0x0f3348);
+    (grid.material as THREE.Material).transparent = true;
+    (grid.material as THREE.Material).opacity = 0.5;
+    grid.position.y = 0.02;
+    this.hud.add(grid);
+    const half = { w: SITE.width / 2, h: SITE.height / 2 };
+    const perim = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-half.w, 0.3, -half.h), new THREE.Vector3(half.w, 0.3, -half.h), new THREE.Vector3(half.w, 0.3, half.h), new THREE.Vector3(-half.w, 0.3, half.h)]),
+      new THREE.LineBasicMaterial({ color: 0x38e1ff, transparent: true, opacity: 0.8, toneMapped: false }),
+    );
+    this.hud.add(perim);
+    const pulse = new THREE.Mesh(new THREE.RingGeometry(0.97, 1, 96), new THREE.MeshBasicMaterial({ color: 0x38e1ff, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }));
+    pulse.rotation.x = -Math.PI / 2;
+    pulse.position.y = 0.4;
+    this.hudPulse = pulse;
+    this.hud.add(pulse);
+    s.add(overlay(this.hud));
+    this.hud.visible = false;
+
     // buildings
     const roof = roofTexture();
     BUILDINGS.forEach((b, i) => {
@@ -165,6 +188,10 @@ export class TwinWorld {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       s.add(mesh);
+      // HUD outline: glowing edges and a roof frame
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(b.w + 0.3, b.h + 0.3, b.d + 0.3)), new THREE.LineBasicMaterial({ color: 0x38e1ff, transparent: true, opacity: 0.7, toneMapped: false }));
+      edges.position.copy(mesh.position);
+      this.hud.add(overlay(edges));
       // parapet + rooftop plant
       const parapet = new THREE.Mesh(new THREE.BoxGeometry(b.w + 0.6, 1.1, b.d + 0.6), new THREE.MeshStandardMaterial({ color: '#4c5666', roughness: 0.8 }));
       parapet.position.set(p.x, b.h + 0.2, p.z);
@@ -669,8 +696,19 @@ export class TwinWorld {
   }
 
   /** Advance animations and sync with state. Called once per frame by the ticker. */
+  /** Turn the holographic HUD extras on or off. */
+  setHud(on: boolean) {
+    this.hud.visible = on;
+  }
+
   update(dt: number) {
     this.t += dt;
+    if (this.hud.visible && this.hudPulse) {
+      // A slow radar-style sweep ring from the site centre every 6 s.
+      const k = (this.t % 6) / 6;
+      this.hudPulse.scale.setScalar(20 + k * 260);
+      (this.hudPulse.material as THREE.MeshBasicMaterial).opacity = 0.45 * (1 - k);
+    }
     for (const c of this.cars) {
       c.g.position.x += c.dir * c.speed * dt;
       if (c.g.position.x > 700) c.g.position.x = -700;
