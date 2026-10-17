@@ -481,7 +481,7 @@ export class TwinWorld {
         const view = CAMERA_VIEWS[d.id];
         if (g && view) {
           const t = toWorld(view.target.x, view.target.y);
-          const bearing = Math.atan2(t.x - v.pos.x, -(t.z - v.pos.z));
+          const bearing = d.mount ? THREE.MathUtils.degToRad(d.mount.bearingDeg) : Math.atan2(t.x - v.pos.x, -(t.z - v.pos.z));
           const dir = TwinWorld.gimbalDir(bearing, g);
           const head = new THREE.Vector3(v.pos.x, view.height, v.pos.z);
           m.head.lookAt(head.clone().add(dir));
@@ -703,7 +703,7 @@ export class TwinWorld {
       const g = this.gimbalView.get(deviceId) ?? (d.gimbal ? { yaw: d.gimbal.yaw, pitch: d.gimbal.pitch, zoom: d.gimbal.zoom ?? 1 } : null);
       if (g) {
         // Gimbal camera: yaw is relative to the mount's zero (the default view), pitch is absolute.
-        const dir = TwinWorld.gimbalDir(Math.atan2(t.x - p.x, -(t.z - p.z)), g);
+        const dir = TwinWorld.gimbalDir(d.mount ? THREE.MathUtils.degToRad(d.mount.bearingDeg) : Math.atan2(t.x - p.x, -(t.z - p.z)), g);
         const eye = new THREE.Vector3(p.x, view.height - 0.1, p.z);
         eye.addScaledVector(new THREE.Vector3(dir.x, 0, dir.z).normalize(), 1.2);
         cam.position.copy(eye);

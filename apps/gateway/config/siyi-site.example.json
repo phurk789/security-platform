@@ -16,13 +16,16 @@
     {
       "type": "siyi-camera",
       "deviceId": "CAM-ZT30-01",
-      "model": "SIYI ZT30 on UGV-02",
+      "model": "SIYI ZT30 on 6 m mast, service gate",
       "host": "192.168.144.25",
       "port": 37260,
-      "pos": { "x": 214, "y": 218 },
+      "pos": { "x": 376, "y": 212 },
+      "mount": { "bearingDeg": 240, "heightM": 6.5, "fovDeg": 45, "rangeM": 250 },
       "stream": {
         "rtsp": "rtsp://192.168.144.25:8554/main.264",
-        "whep": "https://edge.example.com/cam-zt30-01/whep"
+        "whep": "https://edge.example.com/cam-zt30-01/whep",
+        "rtspSub": "rtsp://192.168.144.25:8554/sub.264",
+        "whepSub": "https://edge.example.com/cam-zt30-01-sub/whep"
       }
     }
   ]

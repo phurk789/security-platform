@@ -144,6 +144,7 @@ function IncidentPanel({ inc }: { inc: Incident }) {
               replay={replay}
               progress={m ? m.nextCp / m.checkpoints.length : 0}
               controls
+              aimIncidentId={inc.id}
             />
           ) : cam ? (
             <CameraFeed
@@ -153,6 +154,7 @@ function IncidentPanel({ inc }: { inc: Incident }) {
               freshness={replay ? 'live' : freshness(s, cam)}
               replay={replay}
               controls
+              aimIncidentId={inc.id}
             />
           ) : null}
         </div>

@@ -1,7 +1,7 @@
 // Adapter for SIYI gimbal cameras (ZT30, ZR30, ZR10, ZT6, A8 mini …) on a SIYI link.
 // Talks the SIYI SDK over UDP; the video itself goes through the site media server (RTSP → WebRTC).
 import dgram from 'node:dgram';
-import type { AdapterDeclaration, CameraAction, GimbalState, GwCameraResult, SrvCommand, StreamInfo } from '@13store/shared';
+import type { AdapterDeclaration, CameraAction, CameraMount, GimbalState, GwCameraResult, SrvCommand, StreamInfo } from '@13store/shared';
 import type { Adapter, AdapterContext } from '../sdk';
 import { CMD, SIYI_DEFAULT, decode, parseAttitude, parseCurrentZoom, parseFeedback, parseFirmware, parseGimbalInfo, req, type Frame } from './siyiProtocol';
 
@@ -21,6 +21,8 @@ export interface SiyiCameraConfig {
    * camera turns the other way on "pan right" (check on hardware; can differ by mounting).
    */
   yawSign?: 1 | -1;
+  /** Where the gimbal's centre points, lens height and field of view (for pointing at alerts). */
+  mount?: CameraMount;
 }
 
 const STALE_MS = 3000;
@@ -65,6 +67,7 @@ export class SiyiCameraAdapter implements Adapter {
       linkLossBehavior: 'Gimbal holds its last attitude; an active recording continues to the SD card.',
       view: undefined,
       stream: cfg.stream,
+      mount: cfg.mount,
     } as AdapterDeclaration;
   }
 

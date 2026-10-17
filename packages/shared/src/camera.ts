@@ -40,6 +40,10 @@ export interface StreamInfo {
   whep?: string;
   /** HLS fallback, e.g. https://edge.example/cam1/index.m3u8 */
   hls?: string;
+  /** Low-resolution sub-stream for small views and slow links (same forms as above). */
+  rtspSub?: string;
+  whepSub?: string;
+  hlsSub?: string;
 }
 
 export const CAMERA_ACTIONS: CameraAction['action'][] = ['gimbal_speed', 'gimbal_angle', 'center', 'zoom', 'zoom_to', 'photo', 'record'];

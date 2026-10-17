@@ -2,7 +2,7 @@
 .ptz {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: 'pad mid act' 'status status status';
+  grid-template-areas: 'pad mid act' 'aim aim aim' 'status status status';
   align-items: center;
   gap: 8px 12px;
   margin-top: 8px;
@@ -40,6 +40,9 @@
 .ptz-btn.rec.on { background: rgba(248, 113, 113, 0.16); border-color: var(--red); color: var(--red); animation: ptz-rec 1.2s ease-in-out infinite; }
 @keyframes ptz-rec { 50% { border-color: rgba(248, 113, 113, 0.35); } }
 
+.ptz-aim { grid-area: aim; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 32px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); border: 1px solid var(--cyan-d); color: var(--cyan); font-size: 0.82rem; font-weight: 600; }
+.ptz-aim .muted { font-weight: 400; font-size: 0.75rem; }
+.ptz-aim:not(:disabled):hover { background: rgba(56, 189, 248, 0.18); }
 .ptz-status { grid-area: status; font-size: 0.75rem; color: var(--text-3); min-height: 1.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ptz-status.ok { color: var(--green); }
 .ptz-status.warn { color: var(--amber); }
@@ -59,7 +62,11 @@
 .feed .whep-msg { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; font-size: 0.85rem; color: var(--text-2); background: #050a12; }
 
 @media (max-width: 480px) {
-  .ptz { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'pad mid' 'act act' 'status status'; }
+  .ptz { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'pad mid' 'act act' 'aim aim' 'status status'; }
   .ptz-act { flex-direction: row; }
   .ptz-act .ptz-btn { flex: 1; }
 }
+
+/* Video quality switch (SD sub-stream / HD main stream). */
+.feed-tags { display: inline-flex; gap: 6px; align-items: center; }
+.feed-q { pointer-events: auto; font-size: 0.66rem; font-weight: 700; padding: 2px 7px; border-radius: 4px; background: rgba(5, 10, 18, 0.6); border: 1px solid var(--line-2); color: #e6f4ff; }

@@ -498,4 +498,9 @@ export const TH: Record<string, string> = {
   'Media server error {code}.': 'เซิร์ฟเวอร์วิดีโอขัดข้อง ({code})',
   'Connecting to live video…': 'กำลังเชื่อมต่อวิดีโอสด…',
   'Video unavailable.': 'ไม่มีวิดีโอ',
+  'Pointed at {id}, {zoom}× zoom.': 'หันกล้องไปที่ {id} แล้ว ซูม {zoom}×',
+  'Cannot turn that far.': 'กล้องหมุนไปถึงมุมนั้นไม่ได้',
+  'Point at {id}': 'หันกล้องไปที่ {id}',
+  'Paused to save bandwidth. Resumes when visible.': 'หยุดสตรีมชั่วคราวเพื่อประหยัดแบนด์วิดท์ จะเล่นต่อเมื่อกลับมาแสดงผล',
+  'Switch video quality (SD uses less bandwidth)': 'สลับคุณภาพวิดีโอ (SD ใช้แบนด์วิดท์น้อยกว่า)',
 };

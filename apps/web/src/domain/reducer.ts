@@ -8,6 +8,12 @@ import {
   LINK_LOSS_FAILSAFE_MS,
   applyCameraAction,
   describeCameraAction,
+  aimAt,
+  lineOfSight,
+  mountOf,
+  pickCamera,
+  BUILDINGS,
+  type Aim,
   gimbalSample,
   newSimGimbal,
   stepSimGimbal,
@@ -66,6 +72,7 @@ export type Msg =
   | { type: 'issueCommand'; missionId: string; command: CommandType; idempotencyKey: string }
   | { type: 'handover'; deviceId: string; toUserId: string }
   | { type: 'cameraControl'; deviceId: string; action: CameraAction }
+  | { type: 'aimCamera'; deviceId: string; target: { incidentId: string } | Point }
   | { type: 'resolveIncident'; incidentId: string; outcome: string }
   | { type: 'closeIncident'; incidentId: string }
   | { type: 'addNote'; incidentId: string; text: string }
@@ -176,6 +183,41 @@ export const isTerminal = (c: Command) => TERMINAL.includes(c.status);
 function simFor(s: AppState, d: Device): VehicleSim {
   s.sim ??= {};
   return (s.sim[d.id] ??= { motion: newMotion(d.pos, d.heading ?? 90), sensors: newSensors(d.battery ?? 100, d.kind) });
+}
+
+/** Auto-aim leaves a camera alone this long after an operator used it (same as the server). */
+const MANUAL_CAMERA_HOLD_MS = 60_000;
+
+function gimbalOf(s: AppState, d: Device) {
+  const v = simFor(s, d);
+  v.gimbal ??= newSimGimbal(d.kind === 'cctv' ? -7 : 0);
+  return v;
+}
+
+/** Turn and zoom a simulated gimbal to an aim. */
+function aimSim(s: AppState, d: Device, aim: Aim) {
+  const v = gimbalOf(s, d);
+  applyCameraAction(v.gimbal!, { action: 'gimbal_angle', yaw: aim.yaw, pitch: aim.pitch });
+  if (d.capabilities.includes('zoom')) applyCameraAction(v.gimbal!, { action: 'zoom_to', level: aim.zoom });
+}
+
+/** New alert: the nearest fixed gimbal camera that can see it turns there, unless an operator is using it. */
+function autoAim(s: AppState, inc: Incident) {
+  const pick = pickCamera(
+    Object.values(s.devices),
+    inc.pos,
+    BUILDINGS,
+    (d) => !s.linkCut[d.id] && freshness(s, d) !== 'offline',
+    (id) => s.now - (s.sim?.[id]?.cameraManualAt ?? -Infinity) < MANUAL_CAMERA_HOLD_MS,
+  );
+  if (!pick) return;
+  aimSim(s, pick.device, pick.aim);
+  inc.cameraId ??= pick.device.id;
+  s.audit.push({ id: nextId(s, 'AUD'), at: s.now, actor: 'Auto camera', role: 'system', action: 'camera.control', object: pick.device.id, result: 'ok', detail: `auto-point at ${inc.id} (yaw ${pick.aim.yaw}°, pitch ${pick.aim.pitch}°, ${pick.aim.zoom}×)` });
+  event(s, inc.id, `${pick.device.id} turned to the alert automatically`, {
+    actor: 'Auto camera',
+    detail: `${pick.aim.distanceM} m away, ${pick.aim.zoom}× zoom. Confirmed by the camera. Operators can take over at any time.`,
+  });
 }
 
 const UAV_ORBIT = { cx: 318, cy: 52, rx: 34, ry: 26, rate: 0.08 };
@@ -674,12 +716,40 @@ export function reducer(prev: AppState, msg: Msg): AppState {
         audit(s, 'camera.control', d.id, 'error', `${describeCameraAction(msg.action)} — camera not responding`);
         return s;
       }
-      const v = simFor(s, d);
-      v.gimbal ??= newSimGimbal(d.kind === 'cctv' ? -7 : 0);
-      const answer = applyCameraAction(v.gimbal, msg.action);
-      d.gimbal = gimbalSample(v.gimbal);
+      const v = gimbalOf(s, d);
+      v.cameraManualAt = s.now;
+      const answer = applyCameraAction(v.gimbal!, msg.action);
+      d.gimbal = gimbalSample(v.gimbal!);
       audit(s, 'camera.control', d.id, 'ok', `${describeCameraAction(msg.action)} — ${answer}`);
       if (msg.action.action === 'photo' || msg.action.action === 'record') toast(s, 'ok', `${d.id}: ${answer}`);
+      return s;
+    }
+    case 'aimCamera': {
+      const d = s.devices[msg.deviceId];
+      if (!d || !guard(s, 'camera.control', msg.deviceId)) return s;
+      const inc = 'incidentId' in msg.target ? incident(s, msg.target.incidentId) : undefined;
+      const target = inc ? inc.pos : 'x' in msg.target ? msg.target : null;
+      const mount = mountOf(d);
+      if (!target || !mount || !d.capabilities.includes('gimbal')) {
+        toast(s, 'warn', `${d.id} cannot be pointed at that place.`);
+        return s;
+      }
+      if (d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== me.id) {
+        audit(s, 'camera.control', d.id, 'denied', 'another operator holds control');
+        toast(s, 'warn', `Another operator holds control of ${d.id}.`);
+        return s;
+      }
+      const aim = aimAt(d.pos, mount, target);
+      const label = inc ? inc.id : `${target.x.toFixed(0)}, ${target.y.toFixed(0)} m`;
+      if (!aim.reachable || s.linkCut[d.id]) {
+        audit(s, 'camera.control', d.id, 'error', `point at ${label} — ${s.linkCut[d.id] ? 'camera not responding' : 'out of reach'}`);
+        toast(s, 'warn', s.linkCut[d.id] ? `${d.id} is not responding.` : `${d.id} cannot turn that far.`);
+        return s;
+      }
+      aimSim(s, d, aim);
+      gimbalOf(s, d).cameraManualAt = s.now;
+      audit(s, 'camera.control', d.id, 'ok', `point at ${label} (yaw ${aim.yaw}°, pitch ${aim.pitch}°, ${aim.zoom}×, ${aim.distanceM} m)`);
+      if (!lineOfSight(d.pos, target, BUILDINGS, mount.heightM)) toast(s, 'warn', `${d.id}: a building may block the view of ${label}.`);
       return s;
     }
     case 'handover': {
@@ -719,6 +789,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       };
       s.incidents.unshift(inc);
       event(s, inc.id, 'Alert received', { actor: 'Gate sensor SG-2', tone: 'alert', receivedAt: s.now + 600, detail: 'Same sensor as INC-024. Possible duplicate.' });
+      autoAim(s, inc);
       toast(s, 'info', `New simulated alert ${inc.id}: ${inc.title}.`);
       return s;
     }

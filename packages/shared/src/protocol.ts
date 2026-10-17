@@ -19,6 +19,7 @@ import type {
 } from './types';
 import type { SiteGeometry } from './site';
 import type { GimbalState, GwCameraResult, SrvCamera, StreamInfo } from './camera';
+import type { CameraMount } from './aim';
 
 export const GATEWAY_PROTOCOL = 'ps-gw/1';
 
@@ -48,6 +49,8 @@ export interface AdapterDeclaration {
   view?: Device['view'];
   /** Live video published through the site media server. */
   stream?: StreamInfo;
+  /** Gimbal camera mounting (bearing of yaw zero, height, field of view). */
+  mount?: CameraMount;
 }
 
 // ---------------------------------------------------------------------------

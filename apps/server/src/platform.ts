@@ -50,6 +50,13 @@ import {
   type GwCameraResult,
   sanitizeCameraAction,
   describeCameraAction,
+  aimAt,
+  lineOfSight,
+  mountOf,
+  pickCamera,
+  type Aim,
+  type Building,
+  type CameraAction,
   type TimelineEvent,
   type User,
 } from '@13store/shared';
@@ -106,6 +113,8 @@ export interface GatewayLink {
 
 /** How long to wait for the gateway to answer a camera request. */
 export const CAMERA_REPLY_TIMEOUT_MS = 3_000;
+/** Auto-aim leaves a camera alone this long after an operator used it. */
+export const MANUAL_CAMERA_HOLD_MS = 60_000;
 /** Media tokens for the site media server (MediaMTX) are valid this long. */
 export const MEDIA_TOKEN_TTL_MS = 60_000;
 
@@ -128,6 +137,8 @@ export class Platform {
   private devices = new Map<string, Device & { orgId: string; siteId: string }>();
   private lastFresh = new Map<string, Freshness>();
   private lastSeq = new Map<string, number>();
+  /** When an operator last moved each camera; auto-aim leaves it alone for a while after. */
+  private manualCamera = new Map<string, number>();
   private cameraWaits = new Map<string, { orgId: string; deviceId: string; done: (r: CameraResult) => void }>();
   private sweepTimer?: NodeJS.Timeout;
   now: () => number = () => Date.now();
@@ -307,6 +318,7 @@ export class Platform {
       (i) => i.id !== inc.id && i.place === inc.place && !['closed', 'duplicate', 'dismissed'].includes(i.status),
     );
     if (dupe) this.event(null, a.orgId, siteId, inc.id, `Possible duplicate of ${dupe.id}`, { tone: 'warn', detail: 'Same place within 10 minutes. Review before acting.' });
+    if (input.pos) void this.autoAim(a.orgId, siteId, inc).catch((e) => console.error('[auto-aim]', e));
     return inc;
   }
 
@@ -951,6 +963,7 @@ export class Platform {
         rateMs: decl.rateMs,
         view: decl.view ?? d.view,
         stream: decl.stream,
+        mount: sanitizeMount(decl.mount) ?? d.mount,
       });
       this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
       this.lastSeq.delete(d.id); // a new connection may restart sequence numbers
@@ -1059,19 +1072,33 @@ export class Platform {
    * audited, and on a vehicle only the operator holding control may use it.
    */
   async cameraControl(a: Actor, deviceId: string, raw: unknown): Promise<CameraResult> {
+    const action = sanitizeCameraAction(raw);
+    const d = this.checkCameraControl(a, deviceId);
+    if (!action) return fail(400, 'invalid', 'Unknown or malformed camera action.');
+    if (a.kind === 'user') this.manualCamera.set(d.id, this.now());
+    const result = await this.sendCamera(d, action);
+    // Speed commands come in pairs (press, release); audit both so the record shows the full move.
+    this.audit(a, 'camera.control', d.id, result.ok ? 'ok' : 'error', `${describeCameraAction(action)} — ${result.detail}${result.ok && !result.confirmed ? ' (not confirmed)' : ''}`);
+    return result;
+  }
+
+  /** Permission, gimbal, control holder and freshness checks shared by all camera requests. */
+  private checkCameraControl(a: Actor, deviceId: string) {
     this.require(a, 'camera.control', deviceId);
     const d = this.getDevice(a, deviceId);
-    const action = sanitizeCameraAction(raw);
-    if (!action) return fail(400, 'invalid', 'Unknown or malformed camera action.');
     if (!d.capabilities.includes('gimbal')) return fail(400, 'invalid', `${d.id} has no gimbal camera.`);
-    if (d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== a.userId) {
+    if (d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== a.userId && a.role !== 'system') {
       this.audit(a, 'camera.control', d.id, 'denied', 'another operator holds control');
       return fail(409, 'not_control_owner', `Another operator holds control of ${d.id}. Ask them to hand over control.`);
     }
-    const fresh = freshnessAt(this.now(), d);
-    if (fresh === 'offline') return fail(409, 'device_offline', `${d.id} is offline. Camera control is unavailable.`);
+    if (freshnessAt(this.now(), d) === 'offline') return fail(409, 'device_offline', `${d.id} is offline. Camera control is unavailable.`);
+    return d;
+  }
+
+  /** One request to the camera through its gateway; resolves with the camera's answer or a timeout. */
+  private sendCamera(d: Device & { orgId: string }, action: CameraAction) {
     const requestId = `cam-${randomUUID()}`;
-    const result = await new Promise<CameraResult>((resolve) => {
+    return new Promise<CameraResult>((resolve) => {
       const timer = setTimeout(() => finish({ ok: false, confirmed: false, detail: 'No answer from the gateway. The camera may not have moved.' }), CAMERA_REPLY_TIMEOUT_MS);
       const finish = (r: CameraResult) => {
         clearTimeout(timer);
@@ -1082,9 +1109,78 @@ export class Platform {
       const msg = { t: 'camera', requestId, deviceId: d.id, ...action } as SrvCamera;
       if (!this.gateways.send(d.orgId, d.id, msg)) finish({ ok: false, confirmed: false, detail: `${d.id} gateway is not connected. Command not sent.` });
     });
-    // Speed commands come in pairs (press, release); audit both so the record shows the full move.
-    this.audit(a, 'camera.control', d.id, result.ok ? 'ok' : 'error', `${describeCameraAction(action)} — ${result.detail}${result.ok && !result.confirmed ? ' (not confirmed)' : ''}`);
-    return result;
+  }
+
+  /**
+   * Points a gimbal camera at a place on the site grid: turns it and zooms to frame about 8 m of
+   * scene. Fixed cameras use their configured mount; vehicle cameras the vehicle's heading.
+   */
+  async aimCamera(a: Actor, deviceId: string, input: { x?: unknown; y?: unknown; incidentId?: unknown }): Promise<CameraResult & { aim?: Aim; lineOfSight?: boolean }> {
+    let target: Point;
+    let label: string;
+    if (typeof input.incidentId === 'string' && input.incidentId) {
+      const inc = this.getIncident(a, input.incidentId);
+      target = inc.pos;
+      label = inc.id;
+    } else {
+      const x = Number(input.x);
+      const y = Number(input.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return fail(400, 'invalid', 'Give a site position {x, y} or an incidentId.');
+      target = { x, y };
+      label = `${x.toFixed(0)}, ${y.toFixed(0)} m`;
+    }
+    const d = this.checkCameraControl(a, deviceId);
+    const mount = mountOf(d);
+    if (!mount) return fail(400, 'invalid', `${d.id} has no mounting data, so it cannot be pointed at a place. Add "mount" to its adapter config.`);
+    const aim = aimAt(d.pos, mount, target);
+    if (!aim.reachable) return fail(409, 'out_of_reach', `${d.id} cannot turn that far (needs ${aim.yaw.toFixed(0)}°, limit ±135°).`);
+    if (a.kind === 'user') this.manualCamera.set(d.id, this.now());
+    const r = await this.aimSend(d, aim);
+    const los = lineOfSight(d.pos, target, this.buildingsOf(d.siteId), mount.heightM);
+    this.audit(a, 'camera.control', d.id, r.ok ? 'ok' : 'error', `point at ${label} (yaw ${aim.yaw}°, pitch ${aim.pitch}°, ${aim.zoom}×, ${aim.distanceM} m) — ${r.detail}`);
+    return { ...r, detail: los ? r.detail : `${r.detail} A building may block the view.`, aim, lineOfSight: los };
+  }
+
+  private async aimSend(d: Device & { orgId: string }, aim: Aim): Promise<CameraResult> {
+    const turn = await this.sendCamera(d, { action: 'gimbal_angle', yaw: aim.yaw, pitch: aim.pitch });
+    if (!turn.ok) return turn;
+    const zoom = d.capabilities.includes('zoom') ? await this.sendCamera(d, { action: 'zoom_to', level: aim.zoom }) : { ok: true, confirmed: true, detail: '' };
+    const confirmed = turn.confirmed && zoom.confirmed;
+    return { ok: zoom.ok, confirmed, detail: confirmed ? `Pointed at the target, ${aim.zoom}× zoom.` : zoom.ok ? 'Sent. The camera did not confirm every step.' : zoom.detail };
+  }
+
+  private buildingsOf(siteId: string): Building[] {
+    const r = this.db.prepare('SELECT geometry FROM sites WHERE id = ?').get(siteId) as { geometry: string } | undefined;
+    try {
+      return (r ? (JSON.parse(r.geometry) as SiteGeometry).buildings : []) ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * New alert with a known position: turn the nearest fixed gimbal camera that can see it, unless
+   * an operator used that camera in the last minute (manual control wins). Logged on the timeline.
+   */
+  private async autoAim(orgId: string, siteId: string, inc: Incident) {
+    const now = this.now();
+    const devices = [...this.devices.values()].filter((d) => d.orgId === orgId && d.siteId === siteId);
+    const busy = (id: string) => now - (this.manualCamera.get(id) ?? 0) < MANUAL_CAMERA_HOLD_MS;
+    const pick = pickCamera(devices, inc.pos, this.buildingsOf(siteId), (d) => freshnessAt(now, d) !== 'offline', busy);
+    if (!pick) return;
+    const d = this.devices.get(pick.device.id)!;
+    const r = await this.aimSend(d, pick.aim);
+    const sys = this.systemActor(orgId, 'system', 'Auto camera');
+    this.audit(sys, 'camera.control', d.id, r.ok ? 'ok' : 'error', `auto-point at ${inc.id} (yaw ${pick.aim.yaw}°, pitch ${pick.aim.pitch}°, ${pick.aim.zoom}×) — ${r.detail}`);
+    if (!inc.cameraId && r.ok) {
+      inc.cameraId = d.id;
+      this.saveIncident(orgId, siteId, inc);
+    }
+    this.event(null, orgId, siteId, inc.id, r.ok ? `${d.id} turned to the alert automatically` : `${d.id} could not be turned to the alert`, {
+      actor: 'Auto camera',
+      tone: r.ok ? undefined : 'warn',
+      detail: r.ok ? `${pick.aim.distanceM} m away, ${pick.aim.zoom}× zoom. ${r.confirmed ? 'Confirmed by the camera.' : 'Not confirmed by the camera.'} Operators can take over at any time.` : r.detail,
+    });
   }
 
   /** Answer from a gateway. Ignored unless it matches an open request from the same org and device. */
@@ -1377,10 +1473,11 @@ export class Platform {
     const label = d.integration === 'simulated' ? 'SIMULATED' : 'LIVE';
     // Real device with a stream on the site media server: hand out a short-lived token that the
     // media server checks with us (POST /api/v1/media/auth) before it serves any video.
-    if (d.integration !== 'simulated' && (d.stream?.whep || d.stream?.hls)) {
+    if (d.integration !== 'simulated' && (d.stream?.whep || d.stream?.hls || d.stream?.whepSub)) {
       const token = this.mediaToken(d.orgId, d.id, a.userId ?? '', this.now() + MEDIA_TOKEN_TTL_MS);
       const withToken = (u?: string) => (u ? `${u}${u.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : undefined);
-      return { url, expiresAt: exp, label, whep: withToken(d.stream.whep), hls: withToken(d.stream.hls), token };
+      const st = d.stream;
+      return { url, expiresAt: exp, label, whep: withToken(st.whep), hls: withToken(st.hls), whepSub: withToken(st.whepSub), hlsSub: withToken(st.hlsSub), token };
     }
     return { url, expiresAt: exp, label };
   }
@@ -1410,7 +1507,8 @@ export class Platform {
     const u = this.db.prepare('SELECT org_id FROM users WHERE id = ? AND active = 1').get(userId) as { org_id: string } | undefined;
     if (!u || u.org_id !== d.orgId) return false;
     // The token is for one device: the requested path must be that device's stream path.
-    const paths = [d.stream?.whep, d.stream?.hls].filter(Boolean).map((s) => streamPath(s!));
+    const st = d.stream ?? {};
+    const paths = [st.whep, st.hls, st.whepSub, st.hlsSub].filter(Boolean).map((s) => streamPath(s!));
     return paths.includes(String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
   }
 
@@ -1514,4 +1612,15 @@ export function streamPath(url: string) {
   } catch {
     return '';
   }
+}
+
+/** Mount data from a gateway declaration: numbers only, sane ranges. */
+function sanitizeMount(m: unknown): Device['mount'] {
+  const v = m as Record<string, unknown> | undefined;
+  if (!v || typeof v !== 'object') return undefined;
+  const n = (x: unknown, lo: number, hi: number) => (typeof x === 'number' && Number.isFinite(x) && x >= lo && x <= hi ? x : undefined);
+  const bearingDeg = n(v.bearingDeg, -360, 360);
+  const heightM = n(v.heightM, 0, 200);
+  if (bearingDeg === undefined || heightM === undefined) return undefined;
+  return { bearingDeg: (bearingDeg + 360) % 360, heightM, fovDeg: n(v.fovDeg, 1, 120), rangeM: n(v.rangeM, 1, 5000) };
 }

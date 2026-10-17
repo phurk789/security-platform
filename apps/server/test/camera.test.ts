@@ -1,7 +1,7 @@
 // Camera control (SIYI-style gimbal) and video access through the site media server.
 import WebSocket from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GATEWAY_PROTOCOL } from '@13store/shared';
+import { BUILDINGS, GATEWAY_PROTOCOL, aimAt, lineOfSight } from '@13store/shared';
 import { SANDBOX_GATEWAY_KEY } from '../src/seed';
 import { Client, startServer, waitFor, type TestServer } from './helpers';
 
@@ -17,6 +17,45 @@ beforeAll(async () => {
 afterAll(() => srv?.close());
 
 const sys = () => srv.built.platform.systemActor('org-demo');
+
+describe('pointing cameras at places', () => {
+  it('works out pan, tilt and zoom from the mount, and sees when a building is in the way', () => {
+    const mount = { bearingDeg: 240, heightM: 6.5, fovDeg: 52 };
+    const a = aimAt({ x: 376, y: 212 }, mount, { x: 335, y: 236 });
+    expect(a.reachable).toBe(true);
+    expect(Math.abs(a.yaw)).toBeLessThan(2); // INC-024 is straight ahead of CCTV-02
+    expect(a.pitch).toBeLessThan(-5);
+    expect(a.zoom).toBeGreaterThan(4);
+    expect(aimAt({ x: 376, y: 212 }, mount, { x: 420, y: 150 }).reachable).toBe(false); // behind the camera
+    expect(lineOfSight({ x: 376, y: 212 }, { x: 335, y: 236 }, BUILDINGS, 6.5)).toBe(true);
+    expect(lineOfSight({ x: 376, y: 212 }, { x: 320, y: 110 }, BUILDINGS, 6.5)).toBe(false); // Building 4
+  });
+
+  it('turns the nearest camera that can see a new alert, and logs it on the incident', async () => {
+    const inc = (await alex.post('/demo/inject-alert')).body;
+    await waitFor(async () => ((await alex.get(`/incidents/${inc.id}/timeline`)).body as any[]).some((e) => /CCTV-02 turned to the alert automatically/.test(e.title)));
+    const ev = ((await alex.get(`/incidents/${inc.id}/timeline`)).body as any[]).find((e) => /turned to the alert/.test(e.title));
+    expect(ev.detail).toMatch(/Confirmed by the camera/);
+    await waitFor(() => (srv.built.platform.getDevice(sys(), 'CCTV-02').gimbal?.zoom ?? 1) > 4);
+  });
+
+  it('points a camera at an incident on request, refuses places it cannot turn to', async () => {
+    const r = await alex.post('/devices/CCTV-02/aim', { incidentId: 'INC-024' });
+    expect(r.body).toMatchObject({ ok: true, confirmed: true, lineOfSight: true });
+    expect(r.body.aim.distanceM).toBe(48);
+    expect((await alex.post('/devices/CCTV-02/aim', { x: 420, y: 150 })).status).toBe(409);
+    expect((await alex.post('/devices/CCTV-02/aim', { x: 'here' })).status).toBe(400);
+    expect((await priya.post('/devices/CCTV-02/aim', { incidentId: 'INC-024' })).status).toBe(403);
+  });
+
+  it('leaves a camera alone for a minute after an operator used it', async () => {
+    // alex just pointed CCTV-02 by hand (previous test): a new alert must not move it.
+    const inc = (await alex.post('/demo/inject-alert')).body;
+    await new Promise((r) => setTimeout(r, 800));
+    const tl = (await alex.get(`/incidents/${inc.id}/timeline`)).body as any[];
+    expect(tl.some((e) => /turned to the alert/.test(e.title))).toBe(false);
+  });
+});
 
 describe('camera control on the simulated SIYI gimbal', () => {
   it('pans the camera, confirms only on the camera answer, reports the new attitude and audits it', async () => {
@@ -90,7 +129,7 @@ describe('real camera through a gateway (developer sandbox)', () => {
             rateMs: 1000,
             limitations: '',
             linkLossBehavior: 'stop',
-            stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', whep: 'https://edge.example:8889/sbx-zt30/whep' },
+            stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', whep: 'https://edge.example:8889/sbx-zt30/whep', whepSub: 'https://edge.example:8889/sbx-zt30-sub/whep' },
           },
         ],
       }),
@@ -141,6 +180,9 @@ describe('real camera through a gateway (developer sandbox)', () => {
     // What MediaMTX sends: action, path, query string.
     expect(await auth({ action: 'read', path: 'sbx-zt30', protocol: 'webrtc', query: `token=${token}` })).toBe(200);
     expect(await auth({ action: 'read', path: 'cam-other', protocol: 'webrtc', query: `token=${token}` })).toBe(401);
+    // Low-resolution sub-stream: its own link, same token rules.
+    expect(s.body.whepSub).toMatch(/\/sbx-zt30-sub\/whep\?token=/);
+    expect(await auth({ action: 'read', path: 'sbx-zt30-sub', protocol: 'webrtc', query: `token=${token}` })).toBe(200);
     expect(await auth({ action: 'publish', path: 'sbx-zt30', query: `token=${token}` })).toBe(401);
     expect(await auth({ action: 'read', path: 'sbx-zt30', query: `token=${token.slice(0, -2)}xx` })).toBe(401);
     expect(await auth({ action: 'read', path: 'sbx-zt30' })).toBe(401);

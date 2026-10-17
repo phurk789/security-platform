@@ -1,6 +1,6 @@
 // Site hardware configuration for the edge gateway (JSON file, path in GATEWAY_CONFIG).
 import { readFileSync } from 'node:fs';
-import type { GeoAnchor, StreamInfo } from '@13store/shared';
+import type { CameraMount, GeoAnchor, StreamInfo } from '@13store/shared';
 import { defaultAdapters } from '../adapters';
 import type { Adapter } from '../sdk';
 import { MavlinkVehicleAdapter, UNIRC7_DATALINK, type VehicleProfile } from './mavlinkVehicle';
@@ -30,6 +30,8 @@ export type DeviceConfig =
       stream?: StreamInfo;
       firmwareTested?: string;
       yawSign?: 1 | -1;
+      /** Bearing of the gimbal's centre position, lens height, field of view: lets the platform point it at alerts. */
+      mount?: CameraMount;
     }
   | { type: 'simulated'; offline?: string[] };
 
@@ -57,6 +59,7 @@ export function parseSiteConfig(json: unknown): SiteConfig {
     ids.add(d.deviceId);
     if (d.type === 'mavlink' && !['ardupilot-rover', 'ardupilot-copter', 'px4-rover', 'px4-multicopter'].includes(d.profile)) throw new ConfigError(`${d.deviceId}: unknown profile ${d.profile}`);
     if (d.type === 'siyi-camera' && (!d.pos || !Number.isFinite(d.pos.x) || !Number.isFinite(d.pos.y))) throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required.`);
+    if (d.type === 'siyi-camera' && d.mount && (!Number.isFinite(d.mount.bearingDeg) || !Number.isFinite(d.mount.heightM))) throw new ConfigError(`${d.deviceId}: mount needs bearingDeg and heightM.`);
   }
   return c;
 }
@@ -83,7 +86,7 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           firmwareTested: d.firmwareTested,
         }),
       );
-    else out.push(new SiyiCameraAdapter({ deviceId: d.deviceId, host: d.host ?? SIYI_DEFAULT.host, port: d.port ?? SIYI_DEFAULT.port, model: d.model, pos: d.pos, stream: d.stream, firmwareTested: d.firmwareTested, yawSign: d.yawSign }));
+    else out.push(new SiyiCameraAdapter({ deviceId: d.deviceId, host: d.host ?? SIYI_DEFAULT.host, port: d.port ?? SIYI_DEFAULT.port, model: d.model, pos: d.pos, stream: d.stream, firmwareTested: d.firmwareTested, yawSign: d.yawSign, mount: d.mount }));
   }
   return out;
 }

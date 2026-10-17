@@ -6,6 +6,7 @@ import { webglAvailable } from '../twin/world';
 import { useStore } from '../store';
 import { CameraControls } from './CameraControls';
 import { WhepVideo } from './WhepVideo';
+import { useState } from 'react';
 
 export type Scene = 'gate' | 'plaza' | 'path' | 'lot' | 'ugv' | 'equipment';
 
@@ -23,6 +24,7 @@ export function CameraFeed({
   progress = 0,
   deviceId,
   controls,
+  aimIncidentId,
 }: {
   scene: Scene;
   label: string;
@@ -36,6 +38,8 @@ export function CameraFeed({
   deviceId?: string;
   /** Show pan/tilt/zoom controls under the feed when the device has a gimbal. */
   controls?: boolean;
+  /** Incident the controls can point the camera at. */
+  aimIncidentId?: string;
 }) {
   const { s, session } = useStore();
   const frozen = freshness !== 'live';
@@ -45,15 +49,20 @@ export function CameraFeed({
   const liveStream = !compact && !replay && !!session && !!dev && dev.integration !== 'simulated' && !!dev.stream?.whep;
   const live3d = !compact && !liveStream && !!id && webglAvailable();
   const g = dev?.gimbal;
+  // Small view: low-resolution sub-stream when the camera has one; HD on request.
+  const hasSub = liveStream && !!dev?.stream?.whepSub;
+  const [hd, setHd] = useState(false);
+  const useSub = hasSub && !hd;
   const feed = (
     <div className={`feed${compact ? ' compact' : ''}${frozen && !liveStream ? ' frozen' : ''}${live3d ? ' feed-3d' : ''}`}>
       {liveStream ? (
         <WhepVideo
-          key={dev!.id}
+          key={`${dev!.id}:${useSub ? 'sub' : 'main'}`}
           getUrl={async () => {
             const r = await session!.mediaSession(dev!.id);
-            if (!r.whep) throw new Error(tr('No live stream for this device.'));
-            return r.whep;
+            const u = useSub ? r.whepSub : r.whep ?? r.whepSub;
+            if (!u) throw new Error(tr('No live stream for this device.'));
+            return u;
           }}
         />
       ) : live3d ? (
@@ -94,7 +103,14 @@ export function CameraFeed({
         <>
           <div className="feed-top">
             <span className="feed-label">{label}</span>
-            <span className={`feed-tag ${replay ? 'replay' : liveStream ? 'live' : ''}`}>{replay ? 'REPLAY' : liveStream ? 'LIVE' : 'SIMULATED FEED'}</span>
+            <span className="feed-tags">
+              {hasSub && (
+                <button className="feed-q" onClick={() => setHd((v) => !v)} title={tr('Switch video quality (SD uses less bandwidth)')}>
+                  {hd ? 'HD' : 'SD'}
+                </button>
+              )}
+              <span className={`feed-tag ${replay ? 'replay' : liveStream ? 'live' : ''}`}>{replay ? 'REPLAY' : liveStream ? 'LIVE' : 'SIMULATED FEED'}</span>
+            </span>
           </div>
           <div className="feed-bottom">
             <span>
@@ -111,7 +127,7 @@ export function CameraFeed({
   return (
     <>
       {feed}
-      <CameraControls device={dev} />
+      <CameraControls device={dev} aimAt={aimIncidentId ? { incidentId: aimIncidentId } : undefined} />
     </>
   );
 }

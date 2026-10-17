@@ -2,8 +2,8 @@
 // Press and hold an arrow to turn, release to stop — like the SIYI app. Every action is checked
 // and logged by the platform; the status line says "confirmed" only when the camera answered.
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { Camera, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, Crosshair, Minus, Plus } from 'lucide-react';
-import { describeCameraAction, type CameraAction, type Device } from '@13store/shared';
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, Crosshair, LocateFixed, Minus, Plus } from 'lucide-react';
+import { aimAt, describeCameraAction, mountOf, type CameraAction, type Device } from '@13store/shared';
 import { can, currentUser, freshness, userName } from '../domain/policy';
 import { useT } from '../i18n';
 import { useStore, type CameraResult } from '../store';
@@ -16,7 +16,7 @@ const KEYS: Record<string, Dir> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft:
 /** Slower turns when zoomed in, so the target stays in frame (as the SIYI app does). */
 const panSpeed = (zoom = 1) => Math.round(Math.min(60, Math.max(10, 60 / Math.sqrt(zoom))));
 
-export function CameraControls({ device: d }: { device: Device }) {
+export function CameraControls({ device: d, aimAt: target }: { device: Device; /** Incident this camera can be pointed at. */ aimAt?: { incidentId: string } }) {
   const { s, dispatch, session } = useStore();
   const t = useT();
   const me = currentUser(s);
@@ -118,6 +118,26 @@ export function CameraControls({ device: d }: { device: Device }) {
     if (KEYS[e.key] || ['+', '=', '-'].includes(e.key)) release();
   };
 
+  const inc = target ? s.incidents.find((i) => i.id === target.incidentId) : undefined;
+  const mount = mountOf(d);
+  const aim = inc && mount ? aimAt(d.pos, mount, inc.pos) : null;
+  const pointAt = async () => {
+    if (off || !inc) return;
+    setBusy(true);
+    let r: CameraResult;
+    if (session) r = await session.aimCamera(d.id, { incidentId: inc.id });
+    else {
+      dispatch({ type: 'aimCamera', deviceId: d.id, target: { incidentId: inc.id } });
+      r = s.linkCut[d.id]
+        ? { ok: false, confirmed: false, detail: t('Camera is not responding. Command not sent.') }
+        : aim?.reachable
+          ? { ok: true, confirmed: true, detail: t('Pointed at {id}, {zoom}× zoom.', { id: inc.id, zoom: aim.zoom }) }
+          : { ok: false, confirmed: false, detail: t('Cannot turn that far.') };
+    }
+    setBusy(false);
+    setStatus({ r, at: Date.now() });
+  };
+
   const fresh = status && Date.now() - status.at < 6000 ? status.r : null;
 
   return (
@@ -150,6 +170,13 @@ export function CameraControls({ device: d }: { device: Device }) {
           <Circle size={12} fill="currentColor" /> {g?.recording ? t('Stop REC') : t('Record')}
         </button>
       </div>
+
+      {inc && aim && (
+        <button className="ptz-aim" disabled={off || busy || !aim.reachable} onClick={() => void pointAt()} title={aim.reachable ? undefined : t('Cannot turn that far.')}>
+          <LocateFixed size={16} /> {t('Point at {id}', { id: inc.id })}
+          <span className="muted">· {aim.distanceM} m · {aim.zoom}×</span>
+        </button>
+      )}
 
       <div className={`ptz-status${fresh ? (fresh.ok ? (fresh.confirmed ? ' ok' : ' warn') : ' err') : ''}`} role="status">
         {reason ??

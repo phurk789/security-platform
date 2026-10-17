@@ -1,5 +1,6 @@
 // Domain model for the prototype. Names follow PRD R1 §4 and §6.
 import type { GimbalState, SimGimbal, StreamInfo } from './camera';
+import type { CameraMount } from './aim';
 
 export type Role = 'dispatcher' | 'supervisor' | 'operator' | 'responder' | 'auditor' | 'admin';
 
@@ -121,6 +122,8 @@ export interface Device {
   gimbal?: GimbalState;
   /** Live video from the site media server (real devices). */
   stream?: StreamInfo;
+  /** How a gimbal camera is mounted (for pointing it at a place). */
+  mount?: CameraMount;
 }
 
 export interface Incident {
@@ -207,7 +210,7 @@ export interface AuditEvent {
   id: string;
   at: number;
   actor: string;
-  role: Role;
+  role: Role | 'integration' | 'gateway' | 'system';
   action: string;
   object: string;
   result: 'ok' | 'denied' | 'error';
@@ -258,6 +261,8 @@ export interface VehicleSim {
   failsafeAt?: number;
   /** Simulated SIYI-style gimbal (devices with the `gimbal` capability). */
   gimbal?: SimGimbal;
+  /** When an operator last moved this camera (auto-aim waits a minute after). */
+  cameraManualAt?: number;
 }
 
 export interface Toast {

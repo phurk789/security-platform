@@ -36,6 +36,7 @@ export function declarationFrom(d: Device, rateMs = d.rateMs): AdapterDeclaratio
     limitations: d.limitations,
     linkLossBehavior: LINK_LOSS[d.kind],
     view: d.view,
+    mount: d.mount,
   };
 }
 

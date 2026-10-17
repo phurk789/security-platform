@@ -38,10 +38,15 @@ export function SceneFeed({ deviceId, ir, frozen }: { deviceId: string; ir: bool
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     let acc = 1;
     let drawn = false;
+    // Don't spend GPU on a feed nobody can see (scrolled away or tab hidden).
+    let onScreen = true;
+    const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver((e) => (onScreen = e[0]?.isIntersecting ?? true)) : null;
+    io?.observe(canvas.current!);
     const unsub = subscribeFrame((dt) => {
       acc += dt;
       if (acc < 1 / FPS) return;
       acc = 0;
+      if ((!onScreen || document.visibilityState === 'hidden') && drawn) return;
       if (frozenRef.current && drawn) return; // keep the last frame — never pretend it's live
       const cam = world.feedCamera(deviceId, 16 / 9);
       if (!cam) return;
@@ -50,6 +55,7 @@ export function SceneFeed({ deviceId, ir, frozen }: { deviceId: string; ir: bool
     });
     return () => {
       unsub();
+      io?.disconnect();
       renderer.dispose();
     };
   }, [deviceId, ir]);

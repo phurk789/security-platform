@@ -76,8 +76,19 @@ pitch −90…25°), `center`, `zoom` (dir −1/0/1), `zoom_to` (level 1–30), 
 (toggle). `confirmed` is true only when the camera answered; `ok: true, confirmed: false` means
 the request was sent but the camera did not reply. Every action is in the audit log.
 
+Point a camera at an incident or a place (it turns and zooms; fixed cameras need a `mount`):
+
+```bash
+curl -s -X POST localhost:8080/api/v1/devices/CCTV-02/aim -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"incidentId":"INC-024"}'
+# → {"ok":true,"confirmed":true,"aim":{"yaw":-0.3,"pitch":-6.4,"zoom":5.8,"distanceM":48},"lineOfSight":true,…}
+```
+
+New alerts with a position turn the nearest camera that can see them automatically (logged on
+the incident timeline), unless an operator used that camera in the last minute.
+
 Live video of a real camera: `POST /api/v1/media/{id}/session` returns `whep` (WebRTC) and
-`hls` links on the site media server with a 60-second token. MediaMTX checks each viewer with
+`hls` links (plus `whepSub` / `hlsSub` for a low-resolution sub-stream, if configured) on the site media server with a 60-second token. MediaMTX checks each viewer with
 `POST /api/v1/media/auth` (`authMethod: http`); only `read` of that device's path is allowed.
 See [`HARDWARE_SIYI.md`](HARDWARE_SIYI.md).
 

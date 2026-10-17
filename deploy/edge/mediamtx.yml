@@ -18,9 +18,20 @@ authHTTPExclude:
   - action: api
   - action: metrics
 
+# Streams are pulled from the camera only while someone is watching (sourceOnDemand), and the
+# browser drops its stream when the view is hidden, so an idle console uses no link bandwidth.
+pathDefaults:
+  rtspTransport: tcp
+  sourceOnDemand: yes
+  sourceOnDemandStartTimeout: 10s
+  sourceOnDemandCloseAfter: 10s
+
 paths:
   cam-zt30-01:
-    # SIYI cameras on a SIYI link: rtsp://192.168.144.25:8554/main.264 (check your model's manual)
+    # Main stream (full resolution). SIYI default: rtsp://192.168.144.25:8554/main.264
+    # (check your model's manual; IP and path can differ by model and firmware).
     source: rtsp://192.168.144.25:8554/main.264
-    rtspTransport: tcp
-    sourceOnDemand: yes
+  cam-zt30-01-sub:
+    # Low-resolution sub-stream for the console's small view and slow links. Not every SIYI
+    # model/firmware has one; remove this path and "whepSub" from site.json if yours does not.
+    source: rtsp://192.168.144.25:8554/sub.264

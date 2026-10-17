@@ -53,6 +53,21 @@ attitude, zoom and REC drawn over the video. Keyboard: arrow keys, + / −, C. D
 supervisors and operators may use it; on a vehicle, only the operator holding control. Every
 action is audited. Photos and recordings are saved on the camera's SD card, not the platform.
 
+**Pointing at alerts.** When an alert arrives with a position, the platform turns the nearest
+fixed gimbal camera that can see it (in range, within the ±135° pan limit, no building in the
+way) and zooms to frame about 8 m of scene. The incident timeline says which camera turned and
+whether the camera confirmed it. A camera an operator used in the last minute is left alone:
+manual control always wins. Operators can also press **Point at INC-…** under the video, or call
+`POST /api/v1/devices/{id}/aim`. This needs the camera's `mount` in `site.json`: `bearingDeg`
+(compass bearing the camera faces when centred, 0 = north, clockwise), `heightM`, `fovDeg`
+(vertical field of view at 1×) and `rangeM`.
+
+**Saving bandwidth.** Video is pulled from the camera only while someone watches
+(`sourceOnDemand`); the browser drops its stream 10 s after the view is hidden or scrolled away.
+If the camera has a low-resolution sub-stream, the console shows it by default (SD) with an HD
+switch. Add `rtspSub` / `whepSub` to the stream config and a `-sub` path in `mediamtx.yml`. Not
+every SIYI model or firmware has a sub-stream; check the manual.
+
 Confirmation rules are the same as for every device: a command shows **succeeded** only when
 telemetry shows the effect (moving after start; speed 0 after pause/stop). Camera actions show
 **confirmed** only when the camera answers; otherwise "sent, not confirmed".
@@ -138,6 +153,7 @@ physical E-stop in reach. Record firmware versions in the device's "firmware tes
 | 8 | Pilot override | Mode switch on the remote is reported; platform does not switch back |
 | 9 | Link loss | Unplug the edge PC from the UniRC: STALE ≤ 5 s, vehicle follows its failsafe; re-plug: failsafe reported, nothing replayed, mission paused |
 | 10 | Physical E-stop | Works with the platform disconnected |
+| 11a | Point at alert | Inject or trigger an alert at a surveyed point: camera centres on it (record the error in degrees); correct `bearingDeg` if needed |
 | 11 | Camera control | Pan/tilt/zoom/photo/record each confirmed by the camera; "pan right" turns right (else set `yawSign: -1`); pitch limits respected |
 | 12 | Video | Browser shows live video; an expired link is refused; another org cannot view |
 | 13 | Latency | Measure command → acknowledgement and glass-to-glass video delay; record both |

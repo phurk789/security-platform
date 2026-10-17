@@ -275,3 +275,27 @@ describe('gimbal camera control (offline demo)', () => {
     expect(s.devices['UGV-01'].gimbal!.yaw).toBe(45);
   });
 });
+
+describe('auto-aim (offline demo)', () => {
+  it('turns CCTV-02 to a new alert, unless an operator moved it in the last minute', () => {
+    let s = advance(makeInitialState(), 500);
+    s = run(s, { type: 'demoInjectAlert' });
+    const inc = s.incidents[0];
+    expect(s.timeline.some((e) => e.incidentId === inc.id && /CCTV-02 turned to the alert automatically/.test(e.title))).toBe(true);
+    s = advance(s, 2500);
+    expect(s.devices['CCTV-02'].gimbal!.zoom).toBeGreaterThan(4);
+
+    s = run(s, { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'center' } }, { type: 'demoInjectAlert' });
+    expect(s.timeline.some((e) => e.incidentId === s.incidents[0].id && /turned to the alert/.test(e.title))).toBe(false);
+  });
+
+  it('points a camera at an incident on request and logs it', () => {
+    let s = advance(makeInitialState(), 500);
+    s = run(s, { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'gimbal_angle', yaw: 60, pitch: 0 } });
+    s = advance(s, 1500);
+    s = run(s, { type: 'aimCamera', deviceId: 'CCTV-02', target: { incidentId: 'INC-024' } });
+    s = advance(s, 2000);
+    expect(Math.abs(s.devices['CCTV-02'].gimbal!.yaw)).toBeLessThan(2);
+    expect(s.audit.at(-1)?.detail).toMatch(/point at INC-024/);
+  });
+});

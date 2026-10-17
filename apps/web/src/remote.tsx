@@ -387,6 +387,13 @@ export function RemoteProvider({
       mediaSession(deviceId: string) {
         return api.post<MediaSession>(`/media/${encodeURIComponent(deviceId)}/session`);
       },
+      async aimCamera(deviceId: string, target: { incidentId: string } | { x: number; y: number }) {
+        try {
+          return await api.post<CameraResult>(`/devices/${encodeURIComponent(deviceId)}/aim`, target);
+        } catch (e) {
+          return { ok: false, confirmed: false, detail: e instanceof Error ? e.message : String(e) };
+        }
+      },
       async cameraControl(deviceId: string, action: CameraAction) {
         try {
           return await api.post<CameraResult>(`/devices/${encodeURIComponent(deviceId)}/camera`, action);

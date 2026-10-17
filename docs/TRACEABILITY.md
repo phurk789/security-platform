@@ -40,6 +40,11 @@ and on-video OSD (`CameraControls.tsx`). Permission `camera.control` (dispatcher
 operator); on vehicles only the control holder. The demo's CCTV-02 and UGV-01 run a simulated
 SIYI gimbal so the flow can be shown without hardware. Hardware checklist: `docs/HARDWARE_SIYI.md`.
 
+Camera-first efficiency: new alerts auto-point the nearest camera with line of sight (manual
+control wins for 60 s); "Point at incident" button and `/devices/{id}/aim`; video pulled only
+while watched, dropped when hidden; SD sub-stream by default with HD on request
+(`camera.test.ts`, `reducer.test.ts`).
+
 ## §11 Acceptance checklist
 
 | Check | Status | Where |

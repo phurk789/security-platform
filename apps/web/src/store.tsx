@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react';
-import type { AppState, CameraAction, Meta, SessionUser } from '@13store/shared';
+import type { AppState, CameraAction, Meta, Point, SessionUser } from '@13store/shared';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
 import type { Api } from './api';
 
@@ -20,6 +20,8 @@ export interface Session {
   mediaSession(deviceId: string): Promise<MediaSession>;
   /** Gimbal camera control (pan/tilt, zoom, photo, record). Never throws; failures come back in the result. */
   cameraControl(deviceId: string, action: CameraAction): Promise<CameraResult>;
+  /** Point a gimbal camera at an incident or a site position. */
+  aimCamera(deviceId: string, target: { incidentId: string } | Point): Promise<CameraResult>;
   reload(): Promise<void>;
 }
 
@@ -29,6 +31,8 @@ export interface MediaSession {
   label: 'SIMULATED' | 'LIVE';
   whep?: string;
   hls?: string;
+  whepSub?: string;
+  hlsSub?: string;
 }
 
 export interface CameraResult {

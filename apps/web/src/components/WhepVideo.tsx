@@ -1,10 +1,39 @@
 // Live video from the site media server over WebRTC (WHEP, as served by MediaMTX).
 // The link carries a 60-second token that the media server checks with the platform, so each
 // (re)connect asks the platform for a fresh link. Never shows a stale frame as live.
+// To save link bandwidth the stream is dropped while the view is hidden or scrolled away
+// (the media server then stops pulling from the camera) and resumes when it is visible again.
 import { useEffect, useRef, useState } from 'react';
 import { useT } from '../i18n';
 
-type State = 'connecting' | 'playing' | 'failed';
+type State = 'connecting' | 'playing' | 'failed' | 'paused';
+
+/** Keep the stream this long after the view was hidden, so quick tab switches don't reconnect. */
+const IDLE_CLOSE_MS = 10_000;
+
+/** True while the element is on screen and the page is visible (false after a grace period). */
+function useInView(el: React.RefObject<HTMLElement | null>) {
+  const [active, setActive] = useState(true);
+  useEffect(() => {
+    let onScreen = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const update = () => {
+      const want = onScreen && document.visibilityState !== 'hidden';
+      clearTimeout(timer);
+      if (want) setActive(true);
+      else timer = setTimeout(() => setActive(false), IDLE_CLOSE_MS);
+    };
+    const io = typeof IntersectionObserver !== 'undefined' && el.current ? new IntersectionObserver((e) => ((onScreen = e[0]?.isIntersecting ?? true), update())) : null;
+    if (io && el.current) io.observe(el.current);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      io?.disconnect();
+      document.removeEventListener('visibilitychange', update);
+      clearTimeout(timer);
+    };
+  }, [el]);
+  return active;
+}
 
 export function WhepVideo({ getUrl, onState }: { getUrl: () => Promise<string>; onState?: (s: State) => void }) {
   const t = useT();
@@ -15,8 +44,14 @@ export function WhepVideo({ getUrl, onState }: { getUrl: () => Promise<string>; 
   getUrlRef.current = getUrl;
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
+  const active = useInView(video);
 
   useEffect(() => {
+    if (!active) {
+      setState('paused');
+      onStateRef.current?.('paused');
+      return;
+    }
     let stopped = false;
     let pc: RTCPeerConnection | null = null;
     let resource: string | null = null;
@@ -83,12 +118,16 @@ export function WhepVideo({ getUrl, onState }: { getUrl: () => Promise<string>; 
       clearTimeout(retry);
       close();
     };
-  }, [t]);
+  }, [t, active]);
 
   return (
     <>
       <video ref={video} className="whep" autoPlay muted playsInline />
-      {state !== 'playing' && <div className="whep-msg">{state === 'connecting' ? t('Connecting to live video…') : why || t('Video unavailable.')}</div>}
+      {state !== 'playing' && (
+        <div className="whep-msg">
+          {state === 'connecting' ? t('Connecting to live video…') : state === 'paused' ? t('Paused to save bandwidth. Resumes when visible.') : why || t('Video unavailable.')}
+        </div>
+      )}
     </>
   );
 }
