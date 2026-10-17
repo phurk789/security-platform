@@ -545,6 +545,8 @@ html:lang(th) .meta dt { font-size: 0.78rem; }
 .t3-dev em { font-style: normal; font-size: 10px; font-weight: 700; border-radius: 3px; padding: 0 4px; }
 .t3-dev em.stale { background: var(--amber); color: #1a1405; }
 .t3-dev em.offline { background: var(--red); color: #200a0a; }
+.t3-dev u.say { text-decoration: none; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.18); color: var(--cyan); font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; animation: say-pulse 1s ease-in-out infinite; }
+@keyframes say-pulse { 50% { background: rgba(56, 189, 248, 0.32); } }
 .t3-dev.f-offline { opacity: 0.8; border-color: rgba(248, 113, 113, 0.6); }
 .t3-inc { pointer-events: auto !important; cursor: pointer; display: flex; align-items: center; gap: 7px; background: rgba(30, 22, 6, 0.9); border: 1px solid var(--amber); border-radius: 7px; padding: 4px 9px 4px 5px; color: var(--text); font-size: 12px; white-space: nowrap; }
 .t3-inc .mark { font-style: normal; width: 20px; height: 20px; border-radius: 50%; background: var(--amber); color: #1a1405; display: grid; place-items: center; font-weight: 800; }

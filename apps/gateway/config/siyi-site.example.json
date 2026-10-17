@@ -9,7 +9,9 @@
       "deviceId": "UGV-02",
       "kind": "ugv",
       "profile": "ardupilot-rover",
-      "model": "Patrol UGV · SIYI UniFC 6 Pico (ArduPilot Rover)",
+      "model": "D100 tracked UGV · SIYI UniFC 6 Pico (ArduPilot Rover)",
+      "catalogId": "D100",
+      "payload": { "module": "loudhailer-4in1", "spotlightRelay": 0, "beaconRelay": 1 },
       "link": { "mode": "client", "host": "192.168.144.20", "port": 19856 },
       "allowRemoteArm": false
     },

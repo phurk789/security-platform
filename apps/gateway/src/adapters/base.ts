@@ -37,6 +37,8 @@ export function declarationFrom(d: Device, rateMs = d.rateMs): AdapterDeclaratio
     linkLossBehavior: LINK_LOSS[d.kind],
     view: d.view,
     mount: d.mount,
+    catalogId: d.catalogId,
+    payloads: d.payloads,
   };
 }
 
@@ -61,7 +63,7 @@ export abstract class SimDevice implements Adapter {
   ) {
     this.declaration = declarationFrom(seed, opts.rateMs ?? seed.rateMs);
     this.linkCut = !!opts.offline;
-    if (seed.capabilities.includes('gimbal')) this.gimbal = newSimGimbal(seed.kind === 'cctv' ? -7 : 0);
+    if (['gimbal', 'spotlight', 'beacon', 'speaker'].some((c) => seed.capabilities.includes(c))) this.gimbal = newSimGimbal(seed.kind === 'cctv' ? -7 : 0);
   }
 
   start(ctx: AdapterContext) {
@@ -133,7 +135,7 @@ export abstract class SimDevice implements Adapter {
 
   /** Camera control. Answers like the real SIYI adapter: confirmed only when the camera replied. */
   onCamera(requestId: string, a: CameraAction) {
-    if (!this.gimbal) return this.ctx.cameraResult({ requestId, ok: false, confirmed: false, detail: 'This device has no gimbal.' });
+    if (!this.gimbal) return this.ctx.cameraResult({ requestId, ok: false, confirmed: false, detail: 'This device has no camera or payload control.' });
     if (this.linkCut) return this.ctx.cameraResult({ requestId, ok: false, confirmed: false, detail: 'Camera is not responding. Command not sent.' });
     const g = this.gimbal;
     this.later(60 + Math.random() * 90, () => {

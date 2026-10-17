@@ -11,7 +11,7 @@
 import dgram from 'node:dgram';
 import { PassThrough } from 'node:stream';
 import { MavLinkPacketParser, MavLinkPacketSplitter, MavLinkProtocolV2, ardupilotmega, common, minimal, type MavLinkPacket } from 'node-mavlink';
-import { geoToSite, headingToSite, siteToGeo, type AdapterDeclaration, type GeoAnchor, type Point, type SrvCommand } from '@13store/shared';
+import { PAYLOAD_CATALOG, VEHICLE_CATALOG, catalogCapabilities, geoToSite, headingToSite, siteToGeo, type AdapterDeclaration, type CameraAction, type GeoAnchor, type Point, type SrvCommand } from '@13store/shared';
 import { CommandLedger, admitCommand, type Adapter, type AdapterContext } from '../sdk';
 
 export type VehicleProfile = 'ardupilot-rover' | 'ardupilot-copter' | 'px4-rover' | 'px4-multicopter';
@@ -30,6 +30,14 @@ export interface MavlinkVehicleConfig {
   allowRemoteArm?: boolean;
   firmwareTested?: string;
   gcsSystemId?: number;
+  /** Catalogue model (e.g. D50, D100, D200): sets capabilities and rated specs. */
+  catalogId?: string;
+  /**
+   * 4-in-1 module wired to the flight controller's relay outputs (ArduPilot RELAYn_PIN / PX4
+   * actuator). The platform switches it with MAV_CMD_DO_SET_RELAY. Announcements are not sent over
+   * MAVLink; they use the module's own audio link.
+   */
+  payload?: { module: 'loudhailer-4in1'; spotlightRelay?: number; beaconRelay?: number };
 }
 
 /** UniRC 7 / 7 Pro datalink UDP server (SIYI manual: QGroundControl "server address"). */
@@ -39,7 +47,7 @@ const REGISTRY = { ...minimal.REGISTRY, ...common.REGISTRY, ...ardupilotmega.REG
 
 // MAVLink ids (common.xml)
 const MSG = { HEARTBEAT: 0, SYS_STATUS: 1, GPS_RAW_INT: 24, GLOBAL_POSITION_INT: 33, MISSION_REQUEST: 40, MISSION_CURRENT: 42, MISSION_ITEM_REACHED: 46, MISSION_ACK: 47, MISSION_REQUEST_INT: 51, VFR_HUD: 74, COMMAND_ACK: 77, RADIO_STATUS: 109, STATUSTEXT: 253 };
-const CMD = { NAV_WAYPOINT: 16, DO_SET_MODE: 176, DO_PAUSE_CONTINUE: 193, MISSION_START: 300, COMPONENT_ARM_DISARM: 400, SET_MESSAGE_INTERVAL: 511 };
+const CMD = { NAV_WAYPOINT: 16, DO_SET_RELAY: 181, DO_SET_MODE: 176, DO_PAUSE_CONTINUE: 193, MISSION_START: 300, COMPONENT_ARM_DISARM: 400, SET_MESSAGE_INTERVAL: 511 };
 const FRAME_GLOBAL_RELATIVE_ALT_INT = 6;
 const MAV_MODE_FLAG_SAFETY_ARMED = 128;
 const MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1;
@@ -108,6 +116,8 @@ export class MavlinkVehicleAdapter implements Adapter {
   private sys = 0;
   private comp = 0;
   private lastHeartbeat = 0;
+  private payloadState = { spotlight: false, beacon: false };
+  private payloadQueue: Promise<unknown> = Promise.resolve();
   private armed = false;
   private mode = -1;
   private pos?: Point;
@@ -139,7 +149,13 @@ export class MavlinkVehicleAdapter implements Adapter {
       protocolVersion: `MAVLink 2 · ${cfg.profile}`,
       firmwareTested: cfg.firmwareTested ?? 'not yet tested on hardware',
       integration: 'testing',
-      capabilities: uav ? ['camera', 'overwatch', 'waypoints'] : ['camera', 'ground_patrol', 'waypoints'],
+      capabilities: [
+        ...(cfg.catalogId && VEHICLE_CATALOG[cfg.catalogId] ? catalogCapabilities(cfg.catalogId) : uav ? ['camera', 'overwatch', 'waypoints'] : ['camera', 'ground_patrol', 'waypoints']),
+        ...(cfg.payload?.spotlightRelay !== undefined ? ['spotlight'] : []),
+        ...(cfg.payload?.beaconRelay !== undefined ? ['beacon'] : []),
+      ],
+      catalogId: cfg.catalogId && VEHICLE_CATALOG[cfg.catalogId] ? cfg.catalogId : undefined,
+      payloads: cfg.payload && PAYLOAD_CATALOG[cfg.payload.module] ? [cfg.payload.module] : undefined,
       commands: ['start', 'pause', 'resume', 'stop'],
       units: { position: 'site-m', altitude: 'm-site-datum', speed: 'm/s', battery: 'percent' },
       rateMs: 1000,
@@ -371,6 +387,8 @@ export class MavlinkVehicleAdapter implements Adapter {
           heading: this.headingDeg,
           signal: this.signal,
           satellites: this.satellites,
+          // 4-in-1 module state as last confirmed by the flight controller (no gimbal on this device)
+          gimbal: this.cfg.payload ? { yaw: 0, pitch: 0, spotlight: this.payloadState.spotlight, beacon: this.payloadState.beacon } : undefined,
         } as Parameters<AdapterContext['telemetry']>[0]);
       }
     }
@@ -444,6 +462,24 @@ export class MavlinkVehicleAdapter implements Adapter {
     return px
       ? this.command(CMD.DO_SET_MODE, [MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, (mode >> 16) & 0xff, (mode >> 24) & 0xff])
       : this.command(CMD.DO_SET_MODE, [MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, mode]);
+  }
+
+  /** 4-in-1 module: searchlight and warning light through the flight controller's relays. */
+  onCamera(requestId: string, a: CameraAction) {
+    const reply = (ok: boolean, confirmed: boolean, detail: string) => this.ctx.cameraResult({ requestId, ok, confirmed, detail });
+    if (a.action !== 'spotlight' && a.action !== 'beacon') {
+      return reply(false, false, a.action === 'announce' ? 'Announcements use the module’s own audio link, not MAVLink.' : 'This vehicle’s camera is a separate SIYI camera device.');
+    }
+    const relay = a.action === 'spotlight' ? this.cfg.payload?.spotlightRelay : this.cfg.payload?.beaconRelay;
+    if (relay === undefined) return reply(false, false, `No relay configured for the ${a.action === 'spotlight' ? 'searchlight' : 'warning light'}.`);
+    const now = this.ctx.now();
+    if (!this.lastHeartbeat || now - this.lastHeartbeat > LINK_STALE_MS) return reply(false, false, 'No heartbeat from the flight controller. Not sent.');
+    // One relay command at a time: acknowledgements are matched by command id.
+    this.payloadQueue = this.payloadQueue.then(async () => {
+      const r = await this.command(CMD.DO_SET_RELAY, [relay, a.on ? 1 : 0]);
+      if (r.ok) this.payloadState[a.action as 'spotlight' | 'beacon'] = a.on;
+      reply(r.ok, r.ok, r.ok ? `${a.action === 'spotlight' ? 'Searchlight' : 'Warning light'} ${a.on ? 'on' : 'off'} (relay ${relay}, confirmed by the flight controller).` : r.detail ?? 'Refused.');
+    });
   }
 
   onCommand(cmd: SrvCommand) {

@@ -106,6 +106,38 @@ describe('camera control on the simulated SIYI gimbal', () => {
   });
 });
 
+describe('4-in-1 module on the catalogue vehicles (simulated D50 / D100 / D200)', () => {
+  it('registers the D50, D100 and D200 with their catalogue models and modules', async () => {
+    const list = (await alex.get('/devices')).body as any[];
+    const ugvs = Object.fromEntries(list.filter((d) => d.kind === 'ugv').map((d) => [d.id, d]));
+    expect(ugvs['UGV-01']).toMatchObject({ catalogId: 'D50', payloads: ['loudhailer-4in1'] });
+    expect(ugvs['UGV-02']).toMatchObject({ catalogId: 'D100', payloads: ['loudhailer-4in1'] });
+    expect(ugvs['UGV-03'].catalogId).toBe('D200');
+    expect(ugvs['UGV-03'].capabilities).toContain('cargo');
+    expect(ugvs['UGV-03'].capabilities).not.toContain('spotlight');
+  });
+
+  it('switches the searchlight and warning light, plays a preset, and logs each one', async () => {
+    expect((await alex.post('/devices/UGV-02/camera', { action: 'spotlight', on: true })).body).toMatchObject({ ok: true, confirmed: true, detail: 'Searchlight on.' });
+    expect((await alex.post('/devices/UGV-02/camera', { action: 'beacon', on: true })).body.ok).toBe(true);
+    expect((await alex.post('/devices/UGV-02/camera', { action: 'announce', message: 'restricted' })).body.ok).toBe(true);
+    await waitFor(() => {
+      const g = srv.built.platform.getDevice(sys(), 'UGV-02').gimbal;
+      return !!g?.spotlight && !!g?.beacon && /restricted area/.test(g?.announcing ?? '');
+    });
+    const audit = ((await priya.get('/audit')).body.items ?? (await priya.get('/audit')).body) as any[];
+    expect(audit.some((e) => e.action === 'payload.control' && e.object === 'UGV-02' && /announce "This is a restricted area/.test(e.detail))).toBe(true);
+  });
+
+  it('refuses the module to roles without the permission and on vehicles that do not carry it', async () => {
+    expect((await priya.post('/devices/UGV-02/camera', { action: 'beacon', on: true })).status).toBe(403);
+    const r = await alex.post('/devices/UGV-03/camera', { action: 'spotlight', on: true });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/no searchlight/);
+    expect((await alex.post('/devices/UGV-02/camera', { action: 'announce', message: '' })).status).toBe(400);
+  });
+});
+
 describe('real camera through a gateway (developer sandbox)', () => {
   let gw: WebSocket;
   let answer = true;

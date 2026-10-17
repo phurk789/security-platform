@@ -51,7 +51,7 @@ export function CameraFeed({
   // Real camera with a stream on the site media server: play it over WebRTC. Not in replay.
   const liveStream = !compact && !replay && !!session && !!dev && dev.integration !== 'simulated' && !!dev.stream?.whep;
   const live3d = !compact && !liveStream && !!id && webglAvailable();
-  const g = dev?.gimbal;
+  const g = dev?.capabilities.includes('gimbal') ? dev.gimbal : undefined;
   // Small view: low-resolution sub-stream when the camera has one; HD on request.
   const hasSub = liveStream && !!dev?.stream?.whepSub;
   const [hd, setHd] = useState(false);
@@ -126,7 +126,7 @@ export function CameraFeed({
       )}
     </div>
   );
-  if (!controls || compact || !dev?.capabilities.includes('gimbal')) return feed;
+  if (!controls || compact || !dev || !['gimbal', 'spotlight', 'beacon', 'speaker'].some((c) => dev.capabilities.includes(c))) return feed;
   return (
     <>
       {feed}

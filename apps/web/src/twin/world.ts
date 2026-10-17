@@ -378,7 +378,8 @@ export class TwinWorld {
     const p = toWorld(d.pos.x, d.pos.y);
     const pos = new THREE.Vector3(p.x, 0, p.z);
     if (d.kind === 'ugv') {
-      const m = makeUgv();
+      const m = makeUgv({ model: d.catalogId, payload: !!d.payloads?.length });
+      if (m.spotBeam) overlay(m.spotBeam);
       m.root.scale.setScalar(SYMBOL_SCALE.ugv);
       m.root.userData = { kind: 'device', id: d.id };
       this.scene.add(m.root, overlay(ring), overlay(halo));
@@ -497,6 +498,20 @@ export class TwinWorld {
         m.beaconGlow.material.color.set(busy ? 0xfbbf24 : fresh === 'live' ? 0x4ade80 : 0xf87171);
         m.beaconGlow.material.opacity = on ? 0.95 : 0.1;
         m.headlight.intensity = fresh === 'offline' ? 0 : 30;
+        // 4-in-1 module: searchlight beam and red/blue warning light
+        const pl = fresh !== 'offline' ? d.gimbal : undefined;
+        if (m.spot && m.spotBeam) {
+          m.spot.intensity = pl?.spotlight ? 900 : 0;
+          m.spotBeam.visible = !!pl?.spotlight;
+        }
+        if (m.strobe) {
+          const on = !!pl?.beacon;
+          const red = Math.floor(this.t * 5) % 2 === 0;
+          (m.strobe.red.material as THREE.SpriteMaterial).opacity = on && red ? 1 : 0;
+          (m.strobe.blue.material as THREE.SpriteMaterial).opacity = on && !red ? 1 : 0;
+          m.strobe.light.color.set(red ? 0xff2a2a : 0x2a6bff);
+          m.strobe.light.intensity = on ? 80 : 0;
+        }
         const g = this.easeGimbal(d, dt);
         if (g && m.camHead) {
           m.camHead.rotation.order = 'YXZ';
@@ -559,7 +574,8 @@ export class TwinWorld {
       v.label.position.set(v.pos.x, h, v.pos.z);
       const sim = d.integration === 'simulated' ? '<i>SIM</i>' : '';
       const warn = fresh === 'live' ? '' : `<em class="${fresh}">${fresh === 'stale' ? 'STALE' : 'OFFLINE'}</em>`;
-      const html = `<b>${esc(d.id)}</b>${sim}${warn}`;
+      const say = d.gimbal?.announcing && fresh !== 'offline' ? `<u class="say">📢 ${esc(d.gimbal.announcing.length > 46 ? d.gimbal.announcing.slice(0, 44) + '…' : d.gimbal.announcing)}</u>` : '';
+      const html = `<b>${esc(d.id)}</b>${sim}${warn}${say}`;
       const div = v.label.element;
       if (div.dataset.html !== html) {
         div.innerHTML = html;

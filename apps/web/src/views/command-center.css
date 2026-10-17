@@ -107,3 +107,14 @@
 @media (prefers-reduced-motion: reduce) {
   .cc-cps li.next span, .spin-soft { animation: none; }
 }
+
+/* vehicle specs */
+.cc-specs { display: flex; flex-direction: column; gap: 8px; }
+.cc-spec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cc-spec-head b { font-family: var(--hud-font, var(--font)); letter-spacing: 0.03em; }
+.cc-role { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--cyan); border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 6px; }
+.cc-specs dl { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.cc-specs dt { font-size: 0.66rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.cc-specs dd { margin: 1px 0 0; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+.cc-specs dd small { color: var(--text-3); }
+.cc-payload { margin: 0; font-size: 0.78rem; color: var(--text-2); }

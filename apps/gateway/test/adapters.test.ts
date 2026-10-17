@@ -16,9 +16,9 @@ function ugv() {
 }
 
 describe('declarations', () => {
-  it('builds the six seed devices, all simulated, CCTV-04 offline by default', () => {
+  it('builds the eight seed devices, all simulated, CCTV-04 offline by default', () => {
     const list = defaultAdapters();
-    expect(list.map((a) => a.declaration.deviceId).sort()).toEqual(['CCTV-01', 'CCTV-02', 'CCTV-03', 'CCTV-04', 'UAV-02', 'UGV-01']);
+    expect(list.map((a) => a.declaration.deviceId).sort()).toEqual(['CCTV-01', 'CCTV-02', 'CCTV-03', 'CCTV-04', 'UAV-02', 'UGV-01', 'UGV-02', 'UGV-03']);
     expect(list.every((a) => a.declaration.integration === 'simulated')).toBe(true);
     const ugvDecl = list.find((a) => a.declaration.deviceId === 'UGV-01')!.declaration;
     expect(ugvDecl.commands).toEqual(['start', 'pause', 'resume', 'stop']);

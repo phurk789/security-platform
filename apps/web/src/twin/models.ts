@@ -38,9 +38,140 @@ export interface UgvModel {
   beaconGlow: THREE.Sprite;
   headlight: THREE.SpotLight;
   camHead: THREE.Object3D;
+  /** 4-in-1 module (if fitted): searchlight with its beam, and the red/blue warning light. */
+  spot?: THREE.SpotLight;
+  spotBeam?: THREE.Mesh;
+  strobe?: { red: THREE.Sprite; blue: THREE.Sprite; light: THREE.PointLight };
 }
 
-export function makeUgv(): UgvModel {
+/** UGV for a catalogue model (tracked D50 / D100 / D200), or the generic 6-wheel rover. */
+export function makeUgv(opts: { model?: string; payload?: boolean } = {}): UgvModel {
+  if (opts.model && TRACKED[opts.model]) return makeTracked(TRACKED[opts.model], !!opts.payload);
+  return makeWheeled();
+}
+
+const TRACKED: Record<string, { scale: number; color: string; deck: string; cargo?: boolean }> = {
+  D50: { scale: 0.85, color: '#58634f', deck: '#3d4538' },
+  D100: { scale: 1, color: '#c8a465', deck: '#8f7444' },
+  D200: { scale: 1.2, color: '#44513f', deck: '#2f382c', cargo: true },
+};
+
+function makeTracked(v: { scale: number; color: string; deck: string; cargo?: boolean }, payload: boolean): UgvModel {
+  const root = new THREE.Group();
+  const g = new THREE.Group();
+  g.scale.setScalar(v.scale);
+  root.add(g);
+  const body = mat(v.color, { metalness: 0.35, roughness: 0.55 });
+  const deck = mat(v.deck, { roughness: 0.8 });
+  const rubber = mat('#15181c', { roughness: 0.95 });
+  const steel = mat('#6b7480', { metalness: 0.7, roughness: 0.35 });
+  // hull: low wedge-nosed box between the tracks
+  g.add(box(0.74, 0.3, 1.3, body, 0, 0.42, 0));
+  g.add(box(0.7, 0.05, 1.22, deck, 0, 0.6, 0.02));
+  const nose = box(0.74, 0.18, 0.3, body, 0, 0.36, -0.72);
+  nose.rotation.x = 0.5;
+  g.add(nose);
+  // tracks with road wheels and sprockets
+  const wheels: THREE.Mesh[] = [];
+  for (const x of [-0.47, 0.47]) {
+    g.add(box(0.2, 0.3, 1.36, rubber, x, 0.2, 0));
+    for (const z of [-0.68, 0.68]) {
+      const end = cyl(0.15, 0.15, 0.2, rubber, 16);
+      end.rotation.z = Math.PI / 2;
+      end.position.set(x, 0.2, z);
+      g.add(end);
+    }
+    for (const z of [-0.68, -0.34, 0, 0.34, 0.68]) {
+      const w = cyl(0.1, 0.1, 0.21, steel, 10);
+      w.rotation.z = Math.PI / 2;
+      w.position.set(x + Math.sign(x) * 0.01, 0.2, z);
+      g.add(w);
+      wheels.push(w);
+    }
+  }
+  if (v.cargo) {
+    // D200: cargo bed with a tubular rail
+    const rail = mat('#2a2f36', { metalness: 0.6, roughness: 0.4 });
+    for (const x of [-0.36, 0.36]) g.add(box(0.03, 0.03, 1.1, rail, x, 0.84, 0.05));
+    for (const z of [-0.5, 0.6]) g.add(box(0.75, 0.03, 0.03, rail, 0, 0.84, z));
+    for (const [x, z] of [[-0.36, -0.5], [0.36, -0.5], [-0.36, 0.6], [0.36, 0.6]]) g.add(box(0.03, 0.22, 0.03, rail, x, 0.73, z));
+    g.add(box(0.36, 0.2, 0.3, mat('#6d5a3a'), -0.12, 0.72, 0.25)); // crate
+  }
+  // sensor mast and SIYI gimbal camera
+  const mast = cyl(0.03, 0.03, 0.5, steel);
+  mast.position.set(0, 0.86, -0.3);
+  g.add(mast);
+  const camHead = new THREE.Group();
+  camHead.position.set(0, 1.14, -0.34);
+  camHead.add(box(0.2, 0.16, 0.18, mat('#1f242b', { metalness: 0.5 })));
+  const lens = cyl(0.045, 0.045, 0.04, glow('#38bdf8'), 12);
+  lens.rotation.x = Math.PI / 2;
+  lens.position.set(0, 0, -0.1);
+  camHead.add(lens);
+  g.add(camHead);
+  // antenna
+  const ant = cyl(0.01, 0.01, 0.5, rubber, 6);
+  ant.position.set(-0.28, 0.88, 0.5);
+  g.add(ant);
+  // lights
+  g.add(box(0.12, 0.05, 0.02, glow('#f4f7ff'), 0.26, 0.48, -0.66));
+  g.add(box(0.12, 0.05, 0.02, glow('#f4f7ff'), -0.26, 0.48, -0.66));
+  g.add(box(0.1, 0.04, 0.02, glow('#ff3b3b'), 0.28, 0.48, 0.66));
+  g.add(box(0.1, 0.04, 0.02, glow('#ff3b3b'), -0.28, 0.48, 0.66));
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), glow('#fbbf24'));
+  beacon.position.set(0.28, 0.66, 0.5);
+  g.add(beacon);
+  const beaconGlow = sprite(0xfbbf24, 0.8, 0.9);
+  beaconGlow.position.copy(beacon.position);
+  g.add(beaconGlow);
+  const headlight = new THREE.SpotLight(0xe8f0ff, 30, 22, 0.55, 0.6, 1.5);
+  headlight.position.set(0, 0.48, -0.66);
+  headlight.target.position.set(0, 0, -8);
+  g.add(headlight, headlight.target);
+  const m: UgvModel = { root, wheels, beacon, beaconGlow, headlight, camHead };
+  if (payload) Object.assign(m, fourInOne(g));
+  return m;
+}
+
+/** 4-in-1 module on the front deck: loudspeaker horn, searchlight, red/blue warning light, camera. */
+function fourInOne(g: THREE.Group) {
+  const housing = mat('#2b3038', { metalness: 0.5, roughness: 0.45 });
+  const mod = new THREE.Group();
+  mod.position.set(0.14, 0.74, -0.42);
+  mod.add(box(0.26, 0.18, 0.3, housing));
+  const horn = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.09, 0.14, 16, 1, true), mat('#15181c', { side: THREE.DoubleSide }));
+  horn.rotation.x = Math.PI / 2;
+  horn.position.set(-0.05, 0, -0.2);
+  mod.add(horn);
+  mod.add(box(0.08, 0.05, 0.02, glow('#fff6d8'), 0.07, 0.03, -0.16)); // searchlight lens
+  const red = sprite(0xff2a2a, 0.5, 0);
+  const blue = sprite(0x2a6bff, 0.5, 0);
+  mod.add(box(0.07, 0.04, 0.07, glow('#7a1010'), -0.05, 0.11, 0));
+  mod.add(box(0.07, 0.04, 0.07, glow('#10287a'), 0.05, 0.11, 0));
+  red.position.set(-0.05, 0.13, 0);
+  blue.position.set(0.05, 0.13, 0);
+  mod.add(red, blue);
+  g.add(mod);
+  const spot = new THREE.SpotLight(0xfff1d0, 0, 70, 0.3, 0.45, 1.1);
+  spot.position.set(0.21, 0.77, -0.6);
+  spot.target.position.set(0.21, -0.6, -12);
+  g.add(spot, spot.target);
+  // visible beam (additive cone), drawn only when the searchlight is on
+  const beamGeo = new THREE.ConeGeometry(1, 1, 24, 1, true);
+  beamGeo.translate(0, -0.5, 0);
+  beamGeo.rotateX(Math.PI / 2 + 0.05);
+  const spotBeam = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({ color: 0xfff1c8, transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false }));
+  spotBeam.scale.set(0.9, 0.9, 6);
+  spotBeam.position.copy(spot.position);
+  spotBeam.visible = false;
+  g.add(spotBeam);
+  const light = new THREE.PointLight(0xff2a2a, 0, 14, 1.5);
+  light.position.set(0.14, 0.95, -0.42);
+  g.add(light);
+  return { spot, spotBeam, strobe: { red, blue, light } };
+}
+
+function makeWheeled(): UgvModel {
   const root = new THREE.Group();
   const body = mat('#39424f', { metalness: 0.55, roughness: 0.45 });
   const dark = mat('#1d232b', { roughness: 0.9 });

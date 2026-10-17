@@ -70,3 +70,17 @@
 /* Video quality switch (SD sub-stream / HD main stream). */
 .feed-tags { display: inline-flex; gap: 6px; align-items: center; }
 .feed-q { pointer-events: auto; font-size: 0.66rem; font-weight: 700; padding: 2px 7px; border-radius: 4px; background: rgba(5, 10, 18, 0.6); border: 1px solid var(--line-2); color: #e6f4ff; }
+
+/* 4-in-1 module row (searchlight, warning light, loudspeaker) */
+.ptz-payload { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px dashed var(--line-2); }
+.ptz-pl-row { display: flex; gap: 6px; min-width: 0; }
+.ptz-pl-row .ptz-btn { flex: 1; }
+.ptz-pl-row select { flex: 1; min-width: 0; height: 30px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); padding: 0 6px; font-size: 0.78rem; }
+.ptz-lang { flex: none; width: 36px; height: 30px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text-2); font-size: 0.72rem; font-weight: 700; }
+.ptz-btn.pl-spot.on { background: rgba(255, 236, 160, 0.18); border-color: #f5d76e; color: #f5d76e; }
+.ptz-btn.pl-beacon.on { border-color: var(--red); color: #fff; animation: pl-police 0.7s steps(2) infinite; }
+@keyframes pl-police { 0% { background: rgba(239, 68, 68, 0.55); } 50% { background: rgba(59, 130, 246, 0.55); } }
+.ptz-btn.pl-speak.on { border-color: var(--cyan); color: var(--cyan); }
+.ptz-pl-now { font-size: 0.76rem; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root[data-theme='light'] .ptz-btn.pl-spot.on { background: #fff6d6; border-color: #d4a514; color: #8a6400; }
+@media (prefers-reduced-motion: reduce) { .ptz-btn.pl-beacon.on { animation: none; background: rgba(239, 68, 68, 0.45); } }

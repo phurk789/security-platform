@@ -124,6 +124,9 @@ export interface Device {
   stream?: StreamInfo;
   /** How a gimbal camera is mounted (for pointing it at a place). */
   mount?: CameraMount;
+  /** Catalogue model (VEHICLE_CATALOG) and fitted payload modules (PAYLOAD_CATALOG). */
+  catalogId?: string;
+  payloads?: string[];
 }
 
 export interface Incident {

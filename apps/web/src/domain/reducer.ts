@@ -8,6 +8,8 @@ import {
   LINK_LOSS_FAILSAFE_MS,
   applyCameraAction,
   describeCameraAction,
+  actionCapability,
+  isPayloadAction,
   aimAt,
   lineOfSight,
   mountOf,
@@ -255,7 +257,7 @@ function tick(s: AppState, dt: number) {
       v.motion.y = next.y;
     }
     stepSensors(v.sensors, sec, d.kind, d.kind === 'ugv' ? v.motion.speed : 0);
-    if (d.capabilities.includes('gimbal')) {
+    if (['gimbal', 'spotlight', 'beacon', 'speaker'].some((c) => d.capabilities.includes(c))) {
       v.gimbal ??= newSimGimbal(d.kind === 'cctv' ? -7 : 0);
       stepSimGimbal(v.gimbal, sec);
       // Attitude rides with the video stream, so it updates every tick while the link is up.
@@ -702,9 +704,10 @@ export function reducer(prev: AppState, msg: Msg): AppState {
     }
     case 'cameraControl': {
       const d = s.devices[msg.deviceId];
-      if (!d || !guard(s, 'camera.control', msg.deviceId)) return s;
-      if (!d.capabilities.includes('gimbal')) {
-        toast(s, 'warn', `${d.id} has no gimbal camera.`);
+      const perm = isPayloadAction(msg.action) ? 'payload.control' : 'camera.control';
+      if (!d || !guard(s, perm, msg.deviceId)) return s;
+      if (!d.capabilities.includes(actionCapability(msg.action))) {
+        toast(s, 'warn', `${d.id} cannot do that (${actionCapability(msg.action)}).`);
         return s;
       }
       if (d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== me.id) {
@@ -720,8 +723,8 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       v.cameraManualAt = s.now;
       const answer = applyCameraAction(v.gimbal!, msg.action);
       d.gimbal = gimbalSample(v.gimbal!);
-      audit(s, 'camera.control', d.id, 'ok', `${describeCameraAction(msg.action)} — ${answer}`);
-      if (msg.action.action === 'photo' || msg.action.action === 'record') toast(s, 'ok', `${d.id}: ${answer}`);
+      audit(s, perm, d.id, 'ok', `${describeCameraAction(msg.action)} — ${answer}`);
+      if (['photo', 'record', 'announce'].includes(msg.action.action)) toast(s, 'ok', `${d.id}: ${answer}`);
       return s;
     }
     case 'aimCamera': {

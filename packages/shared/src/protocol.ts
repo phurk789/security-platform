@@ -51,6 +51,9 @@ export interface AdapterDeclaration {
   stream?: StreamInfo;
   /** Gimbal camera mounting (bearing of yaw zero, height, field of view). */
   mount?: CameraMount;
+  /** Catalogue vehicle model and fitted payload modules. */
+  catalogId?: string;
+  payloads?: string[];
 }
 
 // ---------------------------------------------------------------------------

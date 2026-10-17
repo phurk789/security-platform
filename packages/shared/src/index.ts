@@ -8,3 +8,4 @@ export * from './kinematics';
 export * from './geo';
 export * from './camera';
 export * from './aim';
+export * from './catalog';

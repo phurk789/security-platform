@@ -4,7 +4,7 @@
 // flow), camera control, unit activity log.
 import { useMemo, useState } from 'react';
 import { Activity, ArrowRight, Crosshair, Drone, Gauge, ListChecks, MapPinned, Navigation, Truck } from 'lucide-react';
-import { UGV_SPEED, dist, type Device, type Mission } from '@13store/shared';
+import { PAYLOAD_CATALOG, UGV_SPEED, VEHICLE_CATALOG, dist, runtimeLeftMin, type Device, type Mission } from '@13store/shared';
 import { can, currentUser, fmtTime, freshness, userName } from '../domain/policy';
 import { isTerminal } from '../domain/reducer';
 import { useT, type T } from '../i18n';
@@ -86,11 +86,19 @@ export function CommandCenter() {
                 <MissionControl d={d} m={m} />
               </div>
             </section>
-            {d.capabilities.includes('gimbal') && (
+            {['gimbal', 'spotlight', 'beacon', 'speaker'].some((c) => d.capabilities.includes(c)) && (
               <section className="panel cc-box">
-                <div className="panel-head"><h2>{t('Camera')}</h2></div>
+                <div className="panel-head"><h2>{d.payloads?.length ? t('Camera & 4-in-1 module') : t('Camera')}</h2></div>
                 <div className="cc-box-body">
                   <CameraControls device={d} aimAt={m ? { incidentId: m.incidentId } : undefined} />
+                </div>
+              </section>
+            )}
+            {d.catalogId && VEHICLE_CATALOG[d.catalogId] && (
+              <section className="panel cc-box">
+                <div className="panel-head"><h2>{t('Vehicle')}</h2></div>
+                <div className="cc-box-body">
+                  <VehicleSpecs d={d} />
                 </div>
               </section>
             )}
@@ -319,5 +327,36 @@ function ActivityLog({ d }: { d: Device }) {
         ),
       )}
     </ul>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle specs from the catalogue (manufacturer ratings) and rated runtime left
+// ---------------------------------------------------------------------------
+
+function VehicleSpecs({ d }: { d: Device }) {
+  const t = useT();
+  const m = VEHICLE_CATALOG[d.catalogId!];
+  const left = runtimeLeftMin(d.catalogId, d.battery);
+  const role = { patrol: t('Patrol'), recon: t('Reconnaissance'), transport: t('Transport') }[m.role];
+  return (
+    <div className="cc-specs">
+      <div className="cc-spec-head">
+        <b>{m.name}</b>
+        <span className="cc-role">{role}</span>
+      </div>
+      <dl>
+        <div><dt>{t('Rated runtime left')}</dt><dd>{left === null ? '—' : `≈ ${left} min`} <small>/ {m.enduranceMin} min</small></dd></div>
+        <div><dt>{t('Max speed')}</dt><dd>{m.maxSpeedKmh} km/h</dd></div>
+        <div><dt>{t('Payload')}</dt><dd>{m.payloadKg} kg</dd></div>
+        <div><dt>{t('Control range')}</dt><dd>{m.controlRangeM >= 1000 ? `${m.controlRangeM / 1000} km` : `${m.controlRangeM} m`}</dd></div>
+        <div><dt>{t('Climb / step / trench')}</dt><dd>{m.climbDeg}° · {m.obstacleMm} mm · {m.trenchMm} mm</dd></div>
+        <div><dt>{t('Size · mass')}</dt><dd>{m.dimsMm.join('×')} mm · {m.massKg} kg</dd></div>
+      </dl>
+      {d.payloads?.map((p) => (
+        <p key={p} className="cc-payload">+ {PAYLOAD_CATALOG[p]?.name ?? p}</p>
+      ))}
+      <p className="fine">{t('Manufacturer ratings, not measured on site.')} {m.notes}</p>
+    </div>
   );
 }

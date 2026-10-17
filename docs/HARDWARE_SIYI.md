@@ -136,6 +136,21 @@ device `type` (`mavlink` / `siyi-camera` / `simulated`), `deviceId`, `profile`
 fixed camera, `stream.whep` for the browser video URL, and `yawSign: -1` if "pan right" turns
 the camera left (SIYI yaw sign can differ by model and mounting; check it in test 11).
 
+### 5. Catalogue vehicles (D50 / D100 / D200) and the 4-in-1 module
+
+Set `catalogId` (`D50`, `D100`, `D200`) on a `mavlink` device: the platform then shows the rated
+specs, estimates the runtime left from the battery, and draws the right 3D model. The vehicles are
+registered in their unarmed configuration; weapon stations are not integrated.
+
+The **4-in-1 module** (two-way loudspeaker, searchlight, warning light, HD camera) connects in
+three parts:
+
+| Function | Path | Config |
+|---|---|---|
+| Searchlight, warning light | Flight-controller relay outputs → `MAV_CMD_DO_SET_RELAY` (ArduPilot `RELAYn_PIN`, `RELAYn_DEFAULT`) | `payload: { module: 'loudhailer-4in1', spotlightRelay: 0, beaconRelay: 1 }` |
+| Camera | RTSP to MediaMTX like any camera, or use the SIYI gimbal camera instead | `stream` |
+| Loudspeaker | The module's own audio link (not MAVLink). Preset announcements from the console are supported on the simulated units; for hardware, wire the module's audio input to the UniRC 7 Pro's audio or a separate intercom | — |
+
 ## Hardware test checklist (before marking VERIFIED)
 
 Run on the real vehicle in a closed area, with the pilot holding the UniRC 7 Pro and the vehicle's
@@ -154,6 +169,7 @@ physical E-stop in reach. Record firmware versions in the device's "firmware tes
 | 9 | Link loss | Unplug the edge PC from the UniRC: STALE ≤ 5 s, vehicle follows its failsafe; re-plug: failsafe reported, nothing replayed, mission paused |
 | 10 | Physical E-stop | Works with the platform disconnected |
 | 11a | Point at alert | Inject or trigger an alert at a surveyed point: camera centres on it (record the error in degrees); correct `bearingDeg` if needed |
+| 10a | 4-in-1 module | Searchlight and warning light switch from the console and the state shows on the unit card; relays confirmed by the flight controller |
 | 11 | Camera control | Pan/tilt/zoom/photo/record each confirmed by the camera; "pan right" turns right (else set `yawSign: -1`); pitch limits respected |
 | 12 | Video | Browser shows live video; an expired link is refused; another org cannot view |
 | 13 | Latency | Measure command → acknowledgement and glass-to-glass video delay; record both |

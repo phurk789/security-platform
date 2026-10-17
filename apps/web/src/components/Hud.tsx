@@ -169,7 +169,7 @@ export function FleetCard({ d, video }: { d: Device; video: boolean }) {
       <header>
         <span className={`fc-ico k-${d.kind}`}><Icon size={16} /></span>
         <b>{d.id}</b>
-        <span className="fc-kind">{d.kind === 'uav' ? 'UAV' : 'UGV'}{d.integration === 'simulated' ? ' · SIM' : ''}</span>
+        <span className="fc-kind">{d.catalogId ?? (d.kind === 'uav' ? 'UAV' : 'UGV')}{d.payloads?.length ? ' · 4in1' : ''}{d.integration === 'simulated' ? ' · SIM' : ''}</span>
         <span className="fc-fresh"><FreshBadge f={f} age={f === 'live' ? undefined : ago(ageMs(s, d))} /></span>
       </header>
       {video && d.capabilities.includes('camera') && (

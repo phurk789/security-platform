@@ -1,6 +1,6 @@
 // Site hardware configuration for the edge gateway (JSON file, path in GATEWAY_CONFIG).
 import { readFileSync } from 'node:fs';
-import type { CameraMount, GeoAnchor, StreamInfo } from '@13store/shared';
+import { PAYLOAD_CATALOG, VEHICLE_CATALOG, type CameraMount, type GeoAnchor, type StreamInfo } from '@13store/shared';
 import { defaultAdapters } from '../adapters';
 import type { Adapter } from '../sdk';
 import { MavlinkVehicleAdapter, UNIRC7_DATALINK, type VehicleProfile } from './mavlinkVehicle';
@@ -19,6 +19,10 @@ export type DeviceConfig =
       missionAltM?: number;
       allowRemoteArm?: boolean;
       firmwareTested?: string;
+      /** Catalogue model: D50, D100 or D200. */
+      catalogId?: string;
+      /** 4-in-1 module wired to flight-controller relays. */
+      payload?: { module: 'loudhailer-4in1'; spotlightRelay?: number; beaconRelay?: number };
     }
   | {
       type: 'siyi-camera';
@@ -57,6 +61,8 @@ export function parseSiteConfig(json: unknown): SiteConfig {
     if (!d.deviceId || !/^[A-Z0-9-]{3,32}$/.test(d.deviceId)) throw new ConfigError(`Bad deviceId: ${JSON.stringify(d.deviceId)}`);
     if (ids.has(d.deviceId)) throw new ConfigError(`Duplicate deviceId ${d.deviceId}`);
     ids.add(d.deviceId);
+    if (d.type === 'mavlink' && d.catalogId && !VEHICLE_CATALOG[d.catalogId]) throw new ConfigError(`${d.deviceId}: unknown catalogId ${d.catalogId} (known: ${Object.keys(VEHICLE_CATALOG).join(', ')})`);
+    if (d.type === 'mavlink' && d.payload && !PAYLOAD_CATALOG[d.payload.module]) throw new ConfigError(`${d.deviceId}: unknown payload module ${d.payload.module}`);
     if (d.type === 'mavlink' && !['ardupilot-rover', 'ardupilot-copter', 'px4-rover', 'px4-multicopter'].includes(d.profile)) throw new ConfigError(`${d.deviceId}: unknown profile ${d.profile}`);
     if (d.type === 'siyi-camera' && (!d.pos || !Number.isFinite(d.pos.x) || !Number.isFinite(d.pos.y))) throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required.`);
     if (d.type === 'siyi-camera' && d.mount && (!Number.isFinite(d.mount.bearingDeg) || !Number.isFinite(d.mount.heightM))) throw new ConfigError(`${d.deviceId}: mount needs bearingDeg and heightM.`);
@@ -84,6 +90,8 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           missionAltM: d.missionAltM,
           allowRemoteArm: d.allowRemoteArm,
           firmwareTested: d.firmwareTested,
+          catalogId: d.catalogId,
+          payload: d.payload,
         }),
       );
     else out.push(new SiyiCameraAdapter({ deviceId: d.deviceId, host: d.host ?? SIYI_DEFAULT.host, port: d.port ?? SIYI_DEFAULT.port, model: d.model, pos: d.pos, stream: d.stream, firmwareTested: d.firmwareTested, yawSign: d.yawSign, mount: d.mount }));

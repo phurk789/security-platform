@@ -87,9 +87,9 @@ describe('gateway ↔ server', () => {
     expect(server.paths[0]).toBe('/api/v1/gateway');
     const hello = server.of('hello')[0] as GwHello;
     expect(hello).toMatchObject({ protocol: GATEWAY_PROTOCOL, gatewayId: 'edge-test' });
-    expect(hello.adapters).toHaveLength(6);
+    expect(hello.adapters).toHaveLength(8);
     expect(hello.adapters.every((a) => a.integration === 'simulated' && a.units.position === 'site-m')).toBe(true);
-    await until(() => gw!.accepted.size === 6);
+    await until(() => gw!.accepted.size === 8);
     expect(gw!.connected).toBe(true);
   });
 
@@ -109,7 +109,7 @@ describe('gateway ↔ server', () => {
   it('routes commands to the adapter and relays its status updates', async () => {
     server = await new FakeServer().listen();
     start();
-    await until(() => gw!.accepted.size === 6);
+    await until(() => gw!.accepted.size === 8);
     server.send({ t: 'command', commandId: 'C1', idempotencyKey: 'k1', deviceId: 'UGV-01', type: 'start', route: DEFAULT_ROUTE, missionId: 'M1', expiresAt: Date.now() + 10_000 });
     await until(() => server!.of('cmd').some((c) => c.commandId === 'C1' && c.status === 'succeeded'));
     expect(server.of('cmd').filter((c) => c.commandId === 'C1').map((c) => c.status)).toEqual(['acknowledged', 'executing', 'succeeded']);
@@ -122,7 +122,7 @@ describe('gateway ↔ server', () => {
     server = await new FakeServer().listen();
     server.accept = (ids) => ids.filter((i) => i !== 'UGV-01');
     start();
-    await until(() => gw!.accepted.size === 5);
+    await until(() => gw!.accepted.size === 7);
     server.send({ t: 'command', commandId: 'C2', idempotencyKey: 'k2', deviceId: 'UGV-01', type: 'start', route: DEFAULT_ROUTE, missionId: 'M1', expiresAt: Date.now() + 10_000 });
     await wait(1200);
     expect(server.of('cmd')).toHaveLength(0);
@@ -131,7 +131,7 @@ describe('gateway ↔ server', () => {
   it('demo cut/restore over the wire: telemetry stops, failsafe_stop on restore', async () => {
     server = await new FakeServer().listen();
     start({ rateMs: 200 });
-    await until(() => gw!.accepted.size === 6);
+    await until(() => gw!.accepted.size === 8);
     server.send({ t: 'command', commandId: 'C3', idempotencyKey: 'k3', deviceId: 'UGV-01', type: 'start', route: DEFAULT_ROUTE, missionId: 'M1', expiresAt: Date.now() + 10_000 });
     await until(() => server!.of('cmd').some((c) => c.commandId === 'C3' && c.status === 'succeeded'));
     server.send({ t: 'demo', deviceId: 'UGV-01', action: 'cut_link' });
@@ -152,7 +152,7 @@ describe('gateway ↔ server', () => {
   it('reconnects after the server restarts and says hello again', async () => {
     server = await new FakeServer().listen();
     start();
-    await until(() => gw!.accepted.size === 6);
+    await until(() => gw!.accepted.size === 8);
     const port = server.port;
     await server.close();
     await until(() => !gw!.connected);
@@ -164,7 +164,7 @@ describe('gateway ↔ server', () => {
   it('keeps adapters running while disconnected and does not buffer telemetry', async () => {
     server = await new FakeServer().listen();
     start({ rateMs: 100 });
-    await until(() => gw!.accepted.size === 6);
+    await until(() => gw!.accepted.size === 8);
     const port = server.port;
     await server.close();
     await wait(600);

@@ -50,6 +50,10 @@ import {
   type GwCameraResult,
   sanitizeCameraAction,
   describeCameraAction,
+  actionCapability,
+  isPayloadAction,
+  VEHICLE_CATALOG,
+  PAYLOAD_CATALOG,
   aimAt,
   lineOfSight,
   mountOf,
@@ -964,6 +968,8 @@ export class Platform {
         view: decl.view ?? d.view,
         stream: decl.stream,
         mount: sanitizeMount(decl.mount) ?? d.mount,
+        catalogId: decl.catalogId && VEHICLE_CATALOG[decl.catalogId] ? decl.catalogId : d.catalogId,
+        payloads: Array.isArray(decl.payloads) ? decl.payloads.filter((p) => typeof p === 'string' && PAYLOAD_CATALOG[p]) : d.payloads,
       });
       this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
       this.lastSeq.delete(d.id); // a new connection may restart sequence numbers
@@ -1006,7 +1012,17 @@ export class Platform {
     if (t.temperatureC !== undefined) d.temperatureC = t.temperatureC;
     if (t.gimbal && Number.isFinite(t.gimbal.yaw) && Number.isFinite(t.gimbal.pitch)) {
       const g = t.gimbal;
-      d.gimbal = { yaw: +g.yaw, pitch: +g.pitch, roll: Number.isFinite(g.roll) ? g.roll : undefined, zoom: Number.isFinite(g.zoom) ? g.zoom : undefined, recording: typeof g.recording === 'boolean' ? g.recording : undefined };
+      const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
+      d.gimbal = {
+        yaw: +g.yaw,
+        pitch: +g.pitch,
+        roll: Number.isFinite(g.roll) ? g.roll : undefined,
+        zoom: Number.isFinite(g.zoom) ? g.zoom : undefined,
+        recording: bool(g.recording),
+        spotlight: bool(g.spotlight),
+        beacon: bool(g.beacon),
+        announcing: typeof g.announcing === 'string' && g.announcing ? g.announcing.slice(0, 160) : undefined,
+      };
     }
     // Source → received delay. Clamp at 0 in case the device clock runs slightly ahead.
     d.latencyMs = Math.max(0, now - t.sourceTime);
@@ -1073,20 +1089,27 @@ export class Platform {
    */
   async cameraControl(a: Actor, deviceId: string, raw: unknown): Promise<CameraResult> {
     const action = sanitizeCameraAction(raw);
-    const d = this.checkCameraControl(a, deviceId);
-    if (!action) return fail(400, 'invalid', 'Unknown or malformed camera action.');
+    if (!action) {
+      this.require(a, 'camera.control', deviceId);
+      return fail(400, 'invalid', 'Unknown or malformed camera action.');
+    }
+    const d = this.checkCameraControl(a, deviceId, action);
     if (a.kind === 'user') this.manualCamera.set(d.id, this.now());
     const result = await this.sendCamera(d, action);
     // Speed commands come in pairs (press, release); audit both so the record shows the full move.
-    this.audit(a, 'camera.control', d.id, result.ok ? 'ok' : 'error', `${describeCameraAction(action)} — ${result.detail}${result.ok && !result.confirmed ? ' (not confirmed)' : ''}`);
+    this.audit(a, isPayloadAction(action) ? 'payload.control' : 'camera.control', d.id, result.ok ? 'ok' : 'error', `${describeCameraAction(action)} — ${result.detail}${result.ok && !result.confirmed ? ' (not confirmed)' : ''}`);
     return result;
   }
 
   /** Permission, gimbal, control holder and freshness checks shared by all camera requests. */
-  private checkCameraControl(a: Actor, deviceId: string) {
-    this.require(a, 'camera.control', deviceId);
+  private checkCameraControl(a: Actor, deviceId: string, action?: CameraAction) {
+    this.require(a, action && isPayloadAction(action) ? 'payload.control' : 'camera.control', deviceId);
     const d = this.getDevice(a, deviceId);
-    if (!d.capabilities.includes('gimbal')) return fail(400, 'invalid', `${d.id} has no gimbal camera.`);
+    const need = action ? actionCapability(action) : 'gimbal';
+    if (!d.capabilities.includes(need)) {
+      const what: Record<string, string> = { gimbal: 'gimbal camera', spotlight: 'searchlight', beacon: 'warning light', speaker: 'loudspeaker', zoom: 'zoom', photo: 'photo function', record: 'recording' };
+      return fail(400, 'invalid', `${d.id} has no ${what[need] ?? need}.`);
+    }
     if (d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== a.userId && a.role !== 'system') {
       this.audit(a, 'camera.control', d.id, 'denied', 'another operator holds control');
       return fail(409, 'not_control_owner', `Another operator holds control of ${d.id}. Ask them to hand over control.`);

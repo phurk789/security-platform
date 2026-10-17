@@ -123,7 +123,7 @@ function fakeRover(opts: { armed?: boolean } = {}) {
   const input = new PassThrough();
   let seq = 0;
   let gcs: { port: number; address: string } | null = null;
-  const st = { armed: opts.armed ?? true, mode: 4 /* HOLD */, pos: { x: 214, y: 218 }, speed: 0, mission: [] as { lat: number; lon: number }[], expected: 0, received: [] as number[], silent: false };
+  const st = { armed: opts.armed ?? true, mode: 4 /* HOLD */, pos: { x: 214, y: 218 }, speed: 0, mission: [] as { lat: number; lon: number }[], expected: 0, received: [] as number[], silent: false, relays: {} as Record<number, number> };
   const send = (m: unknown) => gcs && !st.silent && sock.send(proto.serialize(m as never, seq++ & 0xff), gcs.port, gcs.address);
   input.pipe(new MavLinkPacketSplitter()).pipe(new MavLinkPacketParser()).on('data', (p: MavLinkPacket) => {
     st.received.push(p.header.msgid);
@@ -163,6 +163,7 @@ function fakeRover(opts: { armed?: boolean } = {}) {
         st.speed = st.mode === 10 ? 2 : 0;
       }
       if (d.command === 193) st.speed = d._param1 ? 2 : 0;
+      if (d.command === 181) st.relays[d._param1] = d._param2; // DO_SET_RELAY
       send(ack);
     }
   });
@@ -262,6 +263,36 @@ describe('MAVLink vehicle adapter (UniFC 6 Pico class, via UniRC datalink)', () 
     expect(got.updates[0].detail).toMatch(/disarmed/);
     expect(rover.st.received).not.toContain(44); // no mission upload attempted
   }, 10_000);
+
+  it('switches the 4-in-1 module through flight-controller relays and declares the catalogue model', async () => {
+    const rover = await fakeRover();
+    const a = new MavlinkVehicleAdapter({
+      deviceId: 'UGV-04',
+      kind: 'ugv',
+      profile: 'ardupilot-rover',
+      catalogId: 'D100',
+      payload: { module: 'loudhailer-4in1', spotlightRelay: 0, beaconRelay: 1 },
+      link: { mode: 'client', host: '127.0.0.1', port: rover.port },
+      geo: GEO,
+    });
+    expect(a.declaration).toMatchObject({ catalogId: 'D100', payloads: ['loudhailer-4in1'] });
+    expect(a.declaration.capabilities).toEqual(expect.arrayContaining(['ground_patrol', 'spotlight', 'beacon']));
+    expect(a.declaration.capabilities).not.toContain('speaker'); // no MAVLink path for announcements
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), rover.close);
+    await until(() => got.telemetry.length > 0);
+    a.onCamera('r1', { action: 'spotlight', on: true });
+    a.onCamera('r2', { action: 'beacon', on: true });
+    await until(() => got.camera.length === 2, 6000);
+    expect(got.camera.every((r) => r.ok && r.confirmed)).toBe(true);
+    expect(rover.st.relays).toEqual({ 0: 1, 1: 1 });
+    await until(() => !!got.telemetry.at(-1)?.gimbal?.beacon);
+    expect(got.telemetry.at(-1)!.gimbal).toMatchObject({ spotlight: true, beacon: true });
+    a.onCamera('r3', { action: 'announce', message: 'hello' });
+    await until(() => got.camera.length === 3);
+    expect(got.camera[2]).toMatchObject({ ok: false, confirmed: false });
+  }, 15_000);
 
   it('reports a mode change made on the remote and goes quiet when the link drops', async () => {
     const rover = await fakeRover();
