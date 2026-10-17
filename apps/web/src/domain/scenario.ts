@@ -37,6 +37,7 @@ export function initialState(): AppState {
     assignments: [],
     geofences: DEFAULT_GEOFENCES.map((g) => ({ ...g, poly: g.poly.map((p) => ({ ...p })) })),
     geo: { ...SITE.geo },
+    detections: [],
     patrols: [],
     playbooks: DEFAULT_PLAYBOOKS,
     dataLabel: 'OFFLINE DEMO',

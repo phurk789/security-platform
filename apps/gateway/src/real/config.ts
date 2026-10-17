@@ -8,6 +8,7 @@ import { SiyiCameraAdapter } from './siyiCamera';
 import { OnvifCameraAdapter, type OnvifCameraConfig } from './onvifCamera';
 import { RosNav2Adapter, type RosNav2Config } from './rosNav2';
 import { SIYI_DEFAULT } from './siyiProtocol';
+import { VisionCameraAdapter, type VisionCameraConfig } from '../vision/adapter';
 
 export type DeviceConfig =
   | {
@@ -46,6 +47,7 @@ export type DeviceConfig =
       mount?: CameraMount;
     }
   | ({ type: 'onvif' } & OnvifCameraConfig)
+  | ({ type: 'vision' } & VisionCameraConfig)
   | { type: 'simulated'; offline?: string[] };
 
 export interface SiteConfig {
@@ -122,6 +124,9 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
     else if (d.type === 'onvif') {
       const { type: _t, ...cfg } = d;
       out.push(new OnvifCameraAdapter(cfg));
+    } else if (d.type === 'vision') {
+      const { type: _t, ...cfg } = d;
+      out.push(new VisionCameraAdapter(cfg));
     } else
       out.push(
         new SiyiCameraAdapter({

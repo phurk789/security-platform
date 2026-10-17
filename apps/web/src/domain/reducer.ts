@@ -40,7 +40,7 @@ import {
   type Action,
 } from './policy';
 import { initialState } from './scenario';
-import type { AppState, Command, CommandStatus, CommandType, Incident, Layers, Device, Mission, Point, TimelineEvent, VehicleSim, View } from '@13store/shared';
+import type { AppState, Command, CommandStatus, CommandType, Detection, Incident, Layers, Device, Mission, Point, TimelineEvent, VehicleSim, View } from '@13store/shared';
 import { pickPlaybook } from '@13store/shared';
 
 export type Msg =
@@ -889,6 +889,24 @@ export function reducer(prev: AppState, msg: Msg): AppState {
         simulated: true,
       });
       event(s, inc.id, 'Snapshot attached', { actor: source, detail: `${source}: ${inc.title.split(' · ')[0]}` });
+      const det: Detection = {
+        id: nextId(s, 'DET'),
+        at: s.now,
+        receivedAt: s.now,
+        type: thermal ? 'thermal_hotspot' : 'person',
+        confidence: thermal ? 0.93 : 0.87,
+        source,
+        deviceId: 'CCTV-02',
+        zone: inc.zone,
+        place: inc.place,
+        pos: inc.pos,
+        attributes: thermal ? { temperatureC: 78.5 } : undefined,
+        bbox: thermal ? [0.58, 0.42, 0.12, 0.16] : [0.47, 0.49, 0.1, 0.39],
+        outcome: 'incident',
+        incidentId: inc.id,
+        ruleId: thermal ? 'fire' : 'intrusion',
+      };
+      s.detections = [det, ...s.detections].slice(0, 200);
       autoAim(s, inc);
       toast(s, 'info', `AI detection ${inc.id}: ${inc.title} (rule: ${thermal ? 'fire' : 'intrusion'}).`);
       return s;

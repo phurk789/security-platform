@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@13store/shared": "*",
+    "jpeg-js": "^0.4.4",
     "node-mavlink": "^2.3.0",
     "ws": "^8.22.0"
   },

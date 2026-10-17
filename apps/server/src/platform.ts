@@ -68,7 +68,6 @@ import {
   type OrgSettings,
   type Detection,
   type DetectionOutcome,
-  DETECTION_LABEL,
   type Geofence,
   type Patrol,
   type DeviceStats,
@@ -106,7 +105,7 @@ import { appendAudit } from './audit';
 import { createBackup, pruneBackups } from './backup';
 import { License } from './license';
 import { getOrgSettings, maskChannels, privacyErase, privacyExport, purgeExpired, setOrgSettings } from './retention';
-import { detectionDetail, detectionTitle, matchRule, sanitizeDetection } from './detections';
+import { detectionDetail, detectionTitle, matchRule, sanitizeDetection, detectionLabel } from './detections';
 import { Notifier, type Outbound } from './notify';
 import type { Config } from './config';
 import { nextNumber, tx, type DB } from './db';
@@ -1582,6 +1581,27 @@ export class Platform {
       }
       return;
     }
+    if (e.kind === 'analytics') {
+      if (!e.analytics || typeof e.analytics !== 'object') return;
+      const a = e.analytics;
+      d.analytics = {
+        provider: String(a.provider ?? 'edge-vision').slice(0, 40),
+        running: !!a.running,
+        source: a.source ? String(a.source).slice(0, 20) : undefined,
+        fps: Number.isFinite(a.fps) ? Math.round(Number(a.fps) * 100) / 100 : undefined,
+        frames: Number.isFinite(a.frames) ? Number(a.frames) : undefined,
+        lastFrameAt: Number.isFinite(a.lastFrameAt) ? Number(a.lastFrameAt) : undefined,
+        detections: Number.isFinite(a.detections) ? Number(a.detections) : undefined,
+        lastDetectionAt: Number.isFinite(a.lastDetectionAt) ? Number(a.lastDetectionAt) : undefined,
+        detectors: a.detectors && typeof a.detectors === 'object' ? JSON.parse(JSON.stringify(a.detectors).slice(0, 4000)) : undefined,
+        model: a.model ? String(a.model).slice(0, 120) : undefined,
+        errors: Number.isFinite(a.errors) ? Number(a.errors) : undefined,
+        lastError: a.lastError ? String(a.lastError).slice(0, 200) : undefined,
+        updatedAt: e.at,
+      };
+      this.saveDevice(d);
+      return;
+    }
     const m = this.activeMission(d.id);
     tx(this.db, () => {
       switch (e.kind) {
@@ -1731,7 +1751,7 @@ export class Platform {
           {
             siteId,
             title: `${title}${d ? ` · ${d.id}` : ''}`,
-            type: `Detection: ${det.attributes?.label ?? DETECTION_LABEL[det.type]}`,
+            type: `Detection: ${detectionLabel(det)}`,
             severity: rule.severity,
             zone: det.zone,
             place: det.place,
@@ -1768,6 +1788,7 @@ export class Platform {
         det.snapshotEvidenceId = ev.id;
       }
     }
+    if (input.bbox) det.bbox = input.bbox;
     this.db
       .prepare(
         'INSERT INTO detections (id, org_id, site_id, at, received_at, device_id, type, confidence, outcome, incident_id, rule_id, external_id, data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -1787,6 +1808,7 @@ export class Platform {
         input.externalId ?? null,
         JSON.stringify(det),
       );
+    this.publish({ orgId: a.orgId, siteId, event: { type: 'detection', detection: det } });
     this.bus.emit('detection', { orgId: a.orgId, detection: det });
     return det;
   }
@@ -3126,6 +3148,7 @@ export class Platform {
     const e = m.event;
     if (e.type === 'resync' || e.type === 'notice') return true;
     if (e.type === 'geofence' || e.type === 'site') return true;
+    if (e.type === 'detection') return a.role !== 'responder' && a.role !== 'admin' && can(a.role as Role, 'media.view');
     if (e.type === 'patrol') return a.role !== 'responder' && a.role !== 'admin';
     if (a.role === 'admin') return e.type === 'audit' || e.type === 'device';
     if (e.type === 'audit') return can(a.role as Role, 'audit.view');

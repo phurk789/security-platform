@@ -1100,4 +1100,8 @@ export const TH: Record<string, string> = {
   '{n} features skipped': 'ข้าม {n} รายการ',
   'Lat / Lon': 'ละติจูด / ลองจิจูด',
   'WGS 84 anchor': 'จุดอ้างอิง WGS 84',
+  AI: 'AI',
+  Analytics: 'ระบบวิเคราะห์ภาพ',
+  '{n} detections': 'ตรวจจับ {n} ครั้ง',
+  stopped: 'หยุดทำงาน',
 };

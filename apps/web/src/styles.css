@@ -3831,3 +3831,55 @@ a.latlon:hover {
   padding-left: 18px;
   color: var(--warn, #f59e0b);
 }
+
+/* Analytics boxes over a camera feed */
+.det-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.det-box {
+  position: absolute;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.5s linear;
+}
+.det-box.alert {
+  border-color: #f87171;
+}
+.det-box.muted {
+  border-color: rgba(255, 255, 255, 0.5);
+  border-style: dashed;
+}
+.det-label {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  font: 600 10px/1.4 var(--font-mono, ui-monospace, monospace);
+  color: #fff;
+  background: rgba(8, 16, 28, 0.85);
+  padding: 1px 5px;
+  border-radius: 3px 3px 0 0;
+  white-space: nowrap;
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.det-box.alert .det-label {
+  background: rgba(185, 28, 28, 0.9);
+}
+.det-tag {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  font: 700 10px/1 var(--font-mono, ui-monospace, monospace);
+  color: #0b1626;
+  background: var(--accent);
+  padding: 3px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.08em;
+}
+.dp-caption.dim {
+  opacity: 0.6;
+}

@@ -162,6 +162,17 @@ function FeedTab({ d }: { d: Device }) {
         </p>
       )}
       {!cams.length && <p className="fine">{t('No camera declared by the adapter; the picture comes from the device model.')}</p>}
+      {d.analytics && (
+        <p className={`dp-caption${d.analytics.running ? '' : ' dim'}`}>
+          <ScanLine size={12} /> {t('Analytics')} · {d.analytics.provider}
+          {d.analytics.model ? ` · ${d.analytics.model.split(/[\\/]/).pop()}` : ''}
+          {d.analytics.detectors ? ` · ${Object.keys(d.analytics.detectors).join(', ')}` : ''}
+          {d.analytics.fps !== undefined ? ` · ${d.analytics.fps} fps` : ''}
+          {d.analytics.detections !== undefined ? ` · ${t('{n} detections', { n: d.analytics.detections })}` : ''}
+          {d.analytics.lastError ? ` · ${d.analytics.lastError}` : ''}
+          {!d.analytics.running ? ` · ${t('stopped')}` : ''}
+        </p>
+      )}
     </section>
   );
 }

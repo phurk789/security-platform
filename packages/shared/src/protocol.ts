@@ -120,13 +120,35 @@ export interface GwDeviceEvent {
   t: 'event';
   deviceId: string;
   at: number;
-  kind: 'failsafe_stop' | 'route_complete' | 'checkpoint' | 'snapshot' | 'fault' | 'detection';
+  kind: 'failsafe_stop' | 'route_complete' | 'checkpoint' | 'snapshot' | 'fault' | 'detection' | 'analytics';
   detail?: string;
   /** For snapshot: base64 SVG/JPEG frame. */
   frame?: { mime: string; base64: string };
   checkpoint?: number;
   /** For detection: what the camera's analytics saw (device id and time come from the event). */
   detection?: Omit<DetectionInput, 'deviceId' | 'at'>;
+  /** For analytics: health of the vision pipeline watching this camera. */
+  analytics?: DeviceAnalytics;
+}
+
+/** State of the analytics (edge vision or camera-side) attached to a camera, shown in the console. */
+export interface DeviceAnalytics {
+  /** "edge-vision" (gateway pipeline), "camera" (ONVIF/vendor analytics), "nvr", … */
+  provider: string;
+  running: boolean;
+  /** Frame source kind: snapshot, mjpeg, ffmpeg, folder, events. */
+  source?: string;
+  fps?: number;
+  frames?: number;
+  lastFrameAt?: number;
+  detections?: number;
+  lastDetectionAt?: number;
+  /** Detector names and their state (e.g. onnx model, thermal threshold). */
+  detectors?: Record<string, Record<string, unknown>>;
+  model?: string;
+  errors?: number;
+  lastError?: string;
+  updatedAt: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +208,8 @@ export interface Detection {
   place?: string;
   pos?: Point;
   attributes?: DetectionInput['attributes'];
+  /** Normalised box in the frame when the analytics gave one (drawn over the live feed). */
+  bbox?: [number, number, number, number];
   outcome: DetectionOutcome;
   incidentId?: string;
   ruleId?: string;
@@ -439,6 +463,7 @@ export type ConsoleEvent =
     }
   | { type: 'geofence'; geofence: Geofence; deleted?: boolean }
   | { type: 'site'; site: SiteInfo }
+  | { type: 'detection'; detection: Detection }
   | { type: 'patrol'; patrol: Patrol; deleted?: boolean }
   | { type: 'timeline'; event: TimelineEvent }
   | { type: 'evidence'; evidence: Evidence }

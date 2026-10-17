@@ -148,12 +148,19 @@ export function sanitizeDetection(raw: unknown, now: number): DetectionInput & {
 }
 
 /** Human title for an incident raised from a detection, e.g. "Thermal hotspot 84 °C". */
+/** The platform's name for the type; a free label only names an `other` detection. */
+export function detectionLabel(d: { type: DetectionType; attributes?: DetectionInput['attributes'] }) {
+  return d.type === 'other' && d.attributes?.label ? d.attributes.label : DETECTION_LABEL[d.type];
+}
+
 export function detectionTitle(d: { type: DetectionType; confidence: number; attributes?: DetectionInput['attributes'] }) {
-  const label = d.attributes?.label ?? DETECTION_LABEL[d.type];
+  const label = detectionLabel(d);
   if (d.type === 'thermal_hotspot' && d.attributes?.temperatureC !== undefined) return `${label} ${d.attributes.temperatureC} °C`;
   if (d.type === 'lpr' && d.attributes?.plate) return `${label} ${d.attributes.plate}`;
   if (d.type === 'crowd' && d.attributes?.count !== undefined) return `${label} of ${d.attributes.count}`;
-  return `${label} detected`;
+  // A model class that differs from the platform type is kept as detail: "Intrusion detected (person)".
+  const cls = d.attributes?.label;
+  return `${label} detected${cls && cls.toLowerCase() !== d.type && cls.toLowerCase() !== label.toLowerCase() ? ` (${cls})` : ''}`;
 }
 
 export function detectionDetail(d: {

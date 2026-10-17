@@ -10,6 +10,7 @@ import { useAppearance } from './Hud';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Film } from 'lucide-react';
+import { DetectionOverlay } from './DetectionOverlay';
 import { RecordedFeed } from './RecordedFeed';
 import { LocalCameraFeed } from './LocalCameraFeed';
 import { localCameraAvailable, setFeedSource, setWebcamDevice, useFeedPrefs, useSampleClip } from '../media/feeds';
@@ -129,6 +130,7 @@ export function CameraFeed({
           <rect width="320" height="180" className="scan" />
         </svg>
       )}
+      {!replay && <DetectionOverlay deviceId={id} />}
       {!compact && g && !frozen && (
         <>
           <div className="feed-reticle" />

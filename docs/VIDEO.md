@@ -120,6 +120,10 @@ API: `GET /media/{id}/recordings?from&to`, `POST /media/{id}/clip {start, durati
 
 ## Detections and rules
 
+Cameras without analytics of their own get them from the edge gateway's vision pipeline (motion, thermal
+hotspot, ONNX/YOLO object detection, image zones, loitering and crowd): see `VISION.md`. Its detections
+arrive through the same path as camera-side analytics and follow the same rules.
+
 ### Sending detections
 
 Any system with an **integration API key** posts one detection or a list:

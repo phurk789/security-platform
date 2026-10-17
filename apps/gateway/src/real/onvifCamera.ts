@@ -5,6 +5,9 @@
 import type { AdapterDeclaration, CameraAction, CameraMount, GimbalState, GwCameraResult, SrvCommand, StreamInfo } from '@13store/shared';
 import { ComponentTracker } from '../adapters/components';
 import type { Adapter, AdapterContext } from '../sdk';
+import { attachVision } from '../vision/adapter';
+import { FfmpegSource, SnapshotSource } from '../vision/sources';
+import type { VisionConfig } from '../vision/pipeline';
 import { interpretEvent, OnvifClient, OnvifError, type OnvifProfile } from './onvif';
 
 export interface OnvifCameraConfig {
@@ -34,6 +37,8 @@ export interface OnvifCameraConfig {
   /** false = do not subscribe to the camera's events. */
   events?: boolean;
   pollMs?: number;
+  /** Run the edge vision pipeline on this camera's pictures (snapshot URI by default, or its RTSP stream through ffmpeg). */
+  vision?: VisionConfig & { frames?: 'snapshot' | 'rtsp'; intervalMs?: number; fps?: number };
 }
 
 const RETRY_MS = 5000;
@@ -52,6 +57,7 @@ export class OnvifCameraAdapter implements Adapter {
   private telSeq = 0;
   private profile?: OnvifProfile;
   private snapshotUri?: string;
+  private vision?: ReturnType<typeof attachVision>;
   private ptzOk = false;
   private gimbal: GimbalState = { yaw: 0, pitch: 0, zoom: 1 };
   private eventsAbort?: { stopped: boolean };
@@ -120,6 +126,8 @@ export class OnvifCameraAdapter implements Adapter {
     this.running = false;
     this.timers.forEach(clearInterval);
     this.timers = [];
+    this.vision?.stop();
+    this.vision = undefined;
     if (this.retry) clearTimeout(this.retry);
     if (this.eventsAbort) this.eventsAbort.stopped = true;
     this.connected = false;
@@ -167,6 +175,7 @@ export class OnvifCameraAdapter implements Adapter {
       } catch {
         this.snapshotUri = undefined;
       }
+      if (this.cfg.vision && !this.vision) this.startVision(rtsp);
       if (this.wantPtz) {
         if (services.ptz && this.profile.ptz) {
           await this.pollPtz();
@@ -275,6 +284,35 @@ export class OnvifCameraAdapter implements Adapter {
       }
     }
     if (subscription) void this.client.unsubscribe(subscription).catch(() => {});
+  }
+
+  /** Edge vision on this camera: poll its snapshot URI, or sample its RTSP stream with ffmpeg. */
+  private startVision(rtsp?: string) {
+    const v = this.cfg.vision!;
+    const useRtsp = v.frames === 'rtsp' || (!v.frames && !this.snapshotUri && rtsp);
+    let source;
+    if (v.source)
+      source = undefined; // the config names its own source
+    else if (useRtsp && rtsp) {
+      const u = new URL(rtsp);
+      if (!u.username) {
+        u.username = encodeURIComponent(this.cfg.username);
+        u.password = encodeURIComponent(this.cfg.password);
+      }
+      source = new FfmpegSource({ input: u.toString(), fps: v.fps ?? 1, width: 640 }, () => this.ctx.now());
+    } else if (this.snapshotUri) {
+      const uri = this.snapshotUri;
+      source = new SnapshotSource(
+        async () => (await this.client.getBytes(uri)).bytes,
+        v.intervalMs ?? 1000,
+        () => this.ctx.now(),
+      );
+    } else {
+      this.ctx.log.warn(`${this.cfg.deviceId}: vision configured but the camera offers neither a snapshot URI nor RTSP`);
+      return;
+    }
+    this.vision = attachVision(this.ctx, v, { source, label: this.cfg.deviceId });
+    this.comps.set('vision', { status: 'ok', detail: `Edge vision: ${Object.keys(v.detectors).join(', ')} · ${source?.kind ?? v.source?.kind}` });
   }
 
   private onEvent(e: Parameters<typeof interpretEvent>[0]) {

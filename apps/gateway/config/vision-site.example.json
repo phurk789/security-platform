@@ -1,0 +1,119 @@
+{
+  "gatewayId": "edge-civic-01",
+  "serverUrl": "wss://console.example.go.th",
+  "key": "gw_…",
+  "geo": { "originLat": 13.7563, "originLon": 100.5018, "rotationDeg": 0 },
+  "devices": [
+    {
+      "type": "onvif",
+      "deviceId": "CCTV-02",
+      "host": "192.168.10.22",
+      "username": "platform",
+      "password": "…",
+      "model": "Hikvision DS-2DE4A425IWG-E",
+      "pos": { "x": 322, "y": 236 },
+      "stream": { "whep": "https://edge.example.go.th:8889/cctv-02/whep", "playback": "https://edge.example.go.th:9996" },
+      "vision": {
+        "frames": "rtsp",
+        "fps": 2,
+        "detectors": {
+          "motion": { "width": 160, "minArea": 0.006 },
+          "onnx": { "model": "/opt/pst/models/yolov8n.onnx", "minConfidence": 0.4, "include": ["person", "car", "truck", "motorcycle", "bus"] }
+        },
+        "zones": [
+          {
+            "id": "gate",
+            "name": "Service gate",
+            "kind": "protected",
+            "poly": [
+              [0.35, 0.45],
+              [0.75, 0.45],
+              [0.8, 1],
+              [0.3, 1]
+            ],
+            "zone": "Zone B",
+            "place": "Service gate",
+            "pos": { "x": 341, "y": 238 }
+          },
+          {
+            "id": "road",
+            "name": "Public road",
+            "kind": "ignore",
+            "poly": [
+              [0, 0],
+              [1, 0],
+              [1, 0.3],
+              [0, 0.3]
+            ]
+          }
+        ],
+        "minFrames": 2,
+        "cooldownS": 30,
+        "loiterS": 90,
+        "zone": "Zone B",
+        "place": "Service gate"
+      }
+    },
+    {
+      "type": "onvif",
+      "deviceId": "CCTV-06",
+      "host": "192.168.10.26",
+      "username": "platform",
+      "password": "…",
+      "model": "Thermal camera (fixed span 0–150 °C)",
+      "pos": { "x": 352, "y": 232 },
+      "vision": {
+        "frames": "snapshot",
+        "intervalMs": 2000,
+        "detectors": { "thermal": { "minC": 0, "maxC": 150, "thresholdC": 70, "minArea": 0.001 } },
+        "minFrames": 1,
+        "cooldownS": 120,
+        "zone": "Zone B",
+        "place": "Transformer yard",
+        "pos": { "x": 352, "y": 232 }
+      }
+    },
+    {
+      "type": "vision",
+      "deviceId": "CAM-NVR-7",
+      "model": "NVR channel 7 (Dahua)",
+      "pos": { "x": 120, "y": 200 },
+      "vision": {
+        "source": { "kind": "ffmpeg", "input": "rtsp://user:pass@192.168.10.5:554/cam/realmonitor?channel=7&subtype=1", "fps": 1, "width": 640 },
+        "detectors": { "onnx": { "model": "/opt/pst/models/yolov8n.onnx", "providers": ["cpu"] } },
+        "zones": [
+          {
+            "id": "plaza",
+            "name": "Plaza",
+            "kind": "count",
+            "poly": [
+              [0, 0.4],
+              [1, 0.4],
+              [1, 1],
+              [0, 1]
+            ],
+            "crowdMin": 8,
+            "zone": "Zone A",
+            "place": "Plaza"
+          }
+        ],
+        "loiterS": 120,
+        "zone": "Zone A",
+        "place": "Plaza"
+      }
+    },
+    {
+      "type": "vision",
+      "deviceId": "CAM-MJPEG-1",
+      "model": "Axis M3045 (MJPEG)",
+      "pos": { "x": 60, "y": 40 },
+      "vision": {
+        "source": { "kind": "mjpeg", "url": "http://192.168.10.31/axis-cgi/mjpg/video.cgi?resolution=640x360", "auth": { "username": "viewer", "password": "…" } },
+        "detectors": { "motion": true },
+        "cooldownS": 60,
+        "zone": "Zone A",
+        "place": "Building 1 west"
+      }
+    }
+  ]
+}

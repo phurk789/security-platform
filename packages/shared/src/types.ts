@@ -3,7 +3,7 @@ import type { GeoAnchor } from './geo';
 import type { GimbalState, SimGimbal, StreamInfo } from './camera';
 import type { Geofence } from './routing';
 import type { ChecklistItem, Playbook, SlaStage } from './ops';
-import type { Patrol } from './protocol';
+import type { Patrol, Detection, DeviceAnalytics } from './protocol';
 import type { CameraMount } from './aim';
 
 export type Role = 'dispatcher' | 'supervisor' | 'operator' | 'responder' | 'auditor' | 'admin';
@@ -131,6 +131,8 @@ export interface Device {
   components?: DeviceComponent[];
   /** Usage counters and service state (vehicles). */
   stats?: DeviceStats;
+  /** Analytics watching this camera (edge vision pipeline or camera-side), as last reported. */
+  analytics?: DeviceAnalytics;
   /** Catalogue model (VEHICLE_CATALOG) and fitted payload modules (PAYLOAD_CATALOG). */
   catalogId?: string;
   payloads?: string[];
@@ -394,6 +396,8 @@ export interface AppState {
   geofences: Geofence[];
   /** WGS 84 anchor of the site grid (from the server's site record; the demo anchor offline). */
   geo: GeoAnchor;
+  /** Recent AI / sensor detections (newest first, bounded) for feed overlays and lists. */
+  detections: Detection[];
   /** Scheduled patrols (server only; empty in the offline demo). */
   patrols: Patrol[];
   /** SOP playbooks with SLA limits (organisation settings; defaults offline). */
