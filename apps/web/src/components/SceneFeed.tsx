@@ -23,7 +23,8 @@ function noise() {
   return noiseUrl;
 }
 
-export function SceneFeed({ deviceId, ir, frozen }: { deviceId: string; ir: boolean; frozen: boolean }) {
+export function SceneFeed({ deviceId, ir, frozen, day = false }: { deviceId: string; ir: boolean; frozen: boolean; /** Daytime lighting (light theme). */ day?: boolean }) {
+  getWorld().setDaylight(day);
   const canvas = useRef<HTMLCanvasElement>(null);
   const frozenRef = useRef(frozen);
   frozenRef.current = frozen;
@@ -50,6 +51,7 @@ export function SceneFeed({ deviceId, ir, frozen }: { deviceId: string; ir: bool
       if (frozenRef.current && drawn) return; // keep the last frame — never pretend it's live
       const cam = world.feedCamera(deviceId, 16 / 9);
       if (!cam) return;
+      renderer.toneMappingExposure = (ir ? 2.4 : 1.6) * (world.daylight ? 0.6 : 1);
       renderer.render(world.scene, cam);
       drawn = true;
     });

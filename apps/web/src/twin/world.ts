@@ -73,6 +73,13 @@ export class TwinWorld {
   labelsVisible = true;
   /** Holographic extras for the Twin HUD theme: building outlines, grid, perimeter, sweep. */
   readonly hud = new THREE.Group();
+  /** Daytime (light theme) vs pre-dawn night. */
+  daylight = false;
+  /** Tone-mapping exposure the renderers should use for the current lighting. */
+  exposure = 1.35;
+  private sky?: { mat: THREE.ShaderMaterial; hemi: THREE.HemisphereLight; sun: THREE.DirectionalLight; outer: THREE.MeshStandardMaterial; road: THREE.MeshStandardMaterial };
+  private nightOnly: THREE.Object3D[] = [];
+  private windowMats: THREE.MeshStandardMaterial[] = [];
   private hudPulse?: THREE.Mesh;
   buildingLabels: CSS2DObject[] = [];
 
@@ -94,9 +101,10 @@ export class TwinWorld {
         side: THREE.BackSide,
         depthWrite: false,
         fog: false,
-        uniforms: {},
+        uniforms: { uDay: { value: 0 } },
         vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
         fragmentShader: `varying vec3 vDir;
+          uniform float uDay;
           void main(){
             float h = clamp(vDir.y, -0.1, 1.0);
             vec3 top = vec3(0.020, 0.035, 0.075);
@@ -105,6 +113,9 @@ export class TwinWorld {
             float east = max(0.0, dot(normalize(vec3(vDir.x, 0.0, vDir.z)), vec3(1.0, 0.0, -0.25)));
             float glow = pow(east, 6.0) * exp(-max(h, 0.0) * 9.0);
             col += vec3(0.42, 0.22, 0.10) * glow * 0.55;
+            // Daytime: clear blue overhead, pale haze at the horizon.
+            vec3 day = mix(vec3(0.80, 0.88, 0.96), vec3(0.36, 0.58, 0.88), smoothstep(0.0, 0.6, h));
+            col = mix(col, day, uDay);
             gl_FragColor = vec4(col, 1.0);
           }`,
       }),
@@ -113,7 +124,8 @@ export class TwinWorld {
     s.add(sky);
     s.fog = new THREE.FogExp2('#0c1527', 0.0014);
 
-    s.add(new THREE.HemisphereLight('#5b75a3', '#1a2230', 1.9));
+    const hemi = new THREE.HemisphereLight('#5b75a3', '#1a2230', 1.9);
+    s.add(hemi);
     const moon = new THREE.DirectionalLight('#b8c9e8', 2.1);
     moon.position.set(-160, 260, -140);
     moon.castShadow = true;
@@ -130,13 +142,16 @@ export class TwinWorld {
     s.add(moon);
 
     // ground: outer land + painted site plan
-    const outer = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.MeshStandardMaterial({ color: '#0d1612', roughness: 1 }));
+    const outerMat = new THREE.MeshStandardMaterial({ color: '#0d1612', roughness: 1 });
+    const outer = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), outerMat);
     outer.rotation.x = -Math.PI / 2;
     outer.position.y = -0.05;
     outer.receiveShadow = true;
     s.add(outer);
     // road continues beyond the site
-    const roadOut = new THREE.Mesh(new THREE.PlaneGeometry(2400, ROAD.h), new THREE.MeshStandardMaterial({ color: '#161c23', roughness: 0.95 }));
+    const roadMat = new THREE.MeshStandardMaterial({ color: '#161c23', roughness: 0.95 });
+    const roadOut = new THREE.Mesh(new THREE.PlaneGeometry(2400, ROAD.h), roadMat);
+    this.sky = { mat: sky.material as THREE.ShaderMaterial, hemi, sun: moon, outer: outerMat, road: roadMat };
     roadOut.rotation.x = -Math.PI / 2;
     roadOut.position.set(0, -0.02, toWorld(0, ROAD.y + ROAD.h / 2).z);
     s.add(roadOut);
@@ -178,6 +193,7 @@ export class TwinWorld {
       [map, emissive, sideX, sideXE].forEach((t) => (t.needsUpdate = true));
       const front = new THREE.MeshStandardMaterial({ map, emissiveMap: emissive, emissive: '#ffffff', emissiveIntensity: 0.55, roughness: 0.75, metalness: 0.15 });
       const side = new THREE.MeshStandardMaterial({ map: sideX, emissiveMap: sideXE, emissive: '#ffffff', emissiveIntensity: 0.55, roughness: 0.75, metalness: 0.15 });
+      this.windowMats.push(front, side);
       const r = roof.clone();
       r.repeat.set(b.w / 12, b.d / 12);
       r.needsUpdate = true;
@@ -214,6 +230,7 @@ export class TwinWorld {
       const pool = lampPool(7);
       pool.position.set(door.x, 0.07, door.z + 4);
       s.add(canopy, doorGlow, pool);
+      this.nightOnly.push(pool);
       // label
       const label = new CSS2DObject(el('t3-bld', `<b>${esc(b.name)}</b><span>${esc(b.use)}</span>`));
       label.position.set(p.x, b.h + 6, p.z);
@@ -250,13 +267,16 @@ export class TwinWorld {
       lamp.position.set(p.x, 0, p.z);
       lamp.rotation.y = l.y > FENCE_Y ? Math.PI : 0;
       s.add(lamp);
+      lamp.traverse((o) => o instanceof THREE.Sprite && this.nightOnly.push(o));
       const pool = lampPool(10);
       pool.position.set(p.x, 0.06, p.z + (l.y > FENCE_Y ? 1.2 : -1.2));
       s.add(pool);
+      this.nightOnly.push(pool);
       if (LIT_LAMPS.includes(i)) {
         const light = new THREE.PointLight('#ffcf8a', 120, 34, 1.6);
         light.position.set(p.x, 7, p.z + (l.y > FENCE_Y ? 1.2 : -1.2));
         s.add(light);
+        this.nightOnly.push(light);
       }
     });
 
@@ -696,6 +716,29 @@ export class TwinWorld {
   }
 
   /** Advance animations and sync with state. Called once per frame by the ticker. */
+  /** Daytime lighting for the light theme; pre-dawn night otherwise. Cheap to call every render. */
+  setDaylight(day: boolean) {
+    if (day === this.daylight || !this.sky) return;
+    this.daylight = day;
+    const k = this.sky;
+    k.mat.uniforms.uDay.value = day ? 1 : 0;
+    this.scene.background = new THREE.Color(day ? '#c8d9ea' : '#070d18');
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.set(day ? '#cddbe8' : '#0c1527');
+    fog.density = day ? 0.0011 : 0.0014;
+    k.hemi.color.set(day ? '#dfeaff' : '#5b75a3');
+    k.hemi.groundColor.set(day ? '#5d6650' : '#1a2230');
+    k.hemi.intensity = day ? 1.6 : 1.9;
+    k.sun.color.set(day ? '#fff3df' : '#b8c9e8');
+    k.sun.intensity = day ? 3.4 : 2.1;
+    k.sun.position.set(day ? 170 : -160, day ? 330 : 260, day ? 120 : -140);
+    k.outer.color.set(day ? '#6f7d5e' : '#0d1612');
+    k.road.color.set(day ? '#565e68' : '#161c23');
+    for (const m of this.windowMats) m.emissiveIntensity = day ? 0.03 : 0.55;
+    for (const o of this.nightOnly) o.visible = !day;
+    this.exposure = day ? 0.95 : 1.35;
+  }
+
   /** Turn the holographic HUD extras on or off. */
   setHud(on: boolean) {
     this.hud.visible = on;

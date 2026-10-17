@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { useStore } from '../store';
 import { getWorld, subscribeFrame } from '../twin/world';
-import { useTheme } from './Hud';
+import { useAppearance, useTheme } from './Hud';
 
 export interface Twin3DApi {
   zoom(factor: number): void;
@@ -21,6 +21,7 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
   const world = getWorld();
   world.setState(s);
   world.setHud(useTheme() === 'hud');
+  world.setDaylight(useAppearance() === 'light');
   world.callbacks = {
     selectDevice: (id) => dispatch({ type: 'selectDevice', id }),
     selectIncident: (id) => dispatch({ type: 'selectIncident', id }),
@@ -118,6 +119,7 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void;
         }
       }
       controls.update();
+      renderer.toneMappingExposure = world.exposure;
       renderer.render(world.scene, camera);
       labels.render(world.scene, camera);
       const az = THREE.MathUtils.radToDeg(controls.getAzimuthalAngle());

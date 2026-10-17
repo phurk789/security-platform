@@ -539,4 +539,6 @@ export const TH: Record<string, string> = {
   'Waiting for a supervisor to approve the route.': 'รอหัวหน้าเวรอนุมัติเส้นทาง',
   'Approved. The operator accepts the mission and takes control.': 'อนุมัติแล้ว ผู้ควบคุมต้องรับภารกิจและถือสิทธิ์ควบคุม',
   'No activity yet.': 'ยังไม่มีกิจกรรม',
+  'Switch to the light theme': 'สลับเป็นธีมสว่าง (ขาว)',
+  'Switch to the dark theme': 'สลับเป็นธีมมืด',
 };

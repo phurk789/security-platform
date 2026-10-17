@@ -6,6 +6,7 @@ import { webglAvailable } from '../twin/world';
 import { useStore } from '../store';
 import { CameraControls } from './CameraControls';
 import { WhepVideo } from './WhepVideo';
+import { useAppearance } from './Hud';
 import { useState } from 'react';
 
 export type Scene = 'gate' | 'plaza' | 'path' | 'lot' | 'ugv' | 'equipment';
@@ -42,6 +43,8 @@ export function CameraFeed({
   aimIncidentId?: string;
 }) {
   const { s, session } = useStore();
+  // Night: fixed cameras switch to IR. Daytime twin (light theme): colour.
+  const night = useAppearance() === 'dark';
   const frozen = freshness !== 'live';
   const id = deviceId ?? label.match(/^[A-Z]{2,5}(?:-[A-Z0-9]+)+/)?.[0];
   const dev = id ? s.devices[id] : undefined;
@@ -66,7 +69,7 @@ export function CameraFeed({
           }}
         />
       ) : live3d ? (
-        <SceneFeed deviceId={id!} ir={id!.startsWith('CCTV')} frozen={frozen} />
+        <SceneFeed deviceId={id!} ir={night && id!.startsWith('CCTV')} frozen={frozen} day={!night} />
       ) : (
       <svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-label={tr('{label} simulated camera view', { label })}>
         <defs>
@@ -116,7 +119,7 @@ export function CameraFeed({
             <span>
               {fmtDate(time)} &nbsp;{fmtTime(time, true)}
             </span>
-            {live3d && !frozen && <span className="feed-meta">{id!.startsWith('CCTV') ? 'IR · ' : ''}12 fps · 1.8 Mbps</span>}
+            {live3d && !frozen && <span className="feed-meta">{night && id!.startsWith('CCTV') ? 'IR · ' : ''}12 fps · 1.8 Mbps</span>}
             {frozen && <span className="feed-frozen">{freshness === 'offline' ? `NO SIGNAL · ${tr('last frame')}` : `FEED DELAYED · ${tr('frame frozen')}`}</span>}
           </div>
         </>

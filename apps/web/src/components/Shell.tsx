@@ -34,7 +34,7 @@ import { useStore } from '../store';
 import { LangToggle, ago, roleLabel, useLang, useT, type T } from '../i18n';
 import { IncidentBadge } from './Badges';
 import { CameraFeed } from './CameraFeed';
-import { ThemeToggle } from './Hud';
+import { AppearanceToggle, ThemeToggle } from './Hud';
 
 export function TopBar() {
   const { s, dispatch, session, mode } = useStore();
@@ -67,6 +67,7 @@ export function TopBar() {
         </span>
         <span className="clock"><Calendar size={16} /> {fmtDate(s.now)} &nbsp; {fmtTime(s.now)}</span>
         <ThemeToggle />
+        <AppearanceToggle />
         <LangToggle />
         <div className="user">
           <button className="user-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>

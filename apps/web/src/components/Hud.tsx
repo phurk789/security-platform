@@ -1,7 +1,7 @@
 // "Twin HUD" theme: full-screen 3D city with glass panels floating around it, focused on the
 // UGV and drone fleet (live onboard video, battery, speed/altitude, link, mission progress).
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Drone, LayoutDashboard, LayoutPanelLeft, Satellite, Truck } from 'lucide-react';
+import { Drone, LayoutDashboard, LayoutPanelLeft, Moon, Satellite, Sun, Truck } from 'lucide-react';
 import type { Device } from '@13store/shared';
 import { ageMs, can, currentUser, freshness, userName } from '../domain/policy';
 import { ago, useT } from '../i18n';
@@ -58,6 +58,56 @@ export function useWide(min = 1200) {
     return () => m.removeEventListener('change', on);
   }, [q]);
   return wide;
+}
+
+// ---------------------------------------------------------------------------
+// Appearance: dark (control room, default) or light (white theme, daytime twin)
+// ---------------------------------------------------------------------------
+
+export type Appearance = 'dark' | 'light';
+const AKEY = 'ps-appearance';
+const aListeners = new Set<() => void>();
+function readAppearance(): Appearance {
+  try {
+    return localStorage.getItem(AKEY) === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+let appearance: Appearance = readAppearance();
+applyAppearance(appearance);
+
+function applyAppearance(a: Appearance) {
+  if (typeof document !== 'undefined') document.documentElement.dataset.theme = a;
+}
+
+export function setAppearance(a: Appearance) {
+  try {
+    localStorage.setItem(AKEY, a);
+  } catch {
+    /* keep for this page only */
+  }
+  appearance = a;
+  applyAppearance(a);
+  aListeners.forEach((l) => l());
+}
+
+export function useAppearance(): Appearance {
+  return useSyncExternalStore(
+    (cb) => (aListeners.add(cb), () => aListeners.delete(cb)),
+    () => appearance,
+    () => appearance,
+  );
+}
+
+export function AppearanceToggle() {
+  const t = useT();
+  const a = useAppearance();
+  return (
+    <button className="appearance-toggle" onClick={() => setAppearance(a === 'dark' ? 'light' : 'dark')} title={a === 'dark' ? t('Switch to the light theme') : t('Switch to the dark theme')} aria-label={a === 'dark' ? t('Switch to the light theme') : t('Switch to the dark theme')}>
+      {a === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
+  );
 }
 
 export function ThemeToggle() {
