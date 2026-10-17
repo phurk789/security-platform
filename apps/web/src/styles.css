@@ -686,3 +686,4 @@ html:lang(th) .meta dt { font-size: 0.78rem; }
 .t3-callout.below .co-card { bottom: auto; top: 36px; }
 .t3-callout.below .co-lead { bottom: auto; top: 0; transform: scaleY(-1); }
 .t3-callout.flip.below .co-lead { transform: scale(-1, -1); }
+.t3-labels .t3-callout { z-index: 1000 !important; }

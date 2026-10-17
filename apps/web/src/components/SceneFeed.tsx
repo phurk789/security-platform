@@ -23,7 +23,19 @@ function noise() {
   return noiseUrl;
 }
 
-export function SceneFeed({ deviceId, ir, frozen, day = false }: { deviceId: string; ir: boolean; frozen: boolean; /** Daytime lighting (light theme). */ day?: boolean }) {
+export function SceneFeed({
+  deviceId,
+  ir,
+  frozen,
+  day = false,
+  facing = 'front',
+}: {
+  deviceId: string;
+  ir: boolean;
+  frozen: boolean;
+  /** Daytime lighting (light theme). */ day?: boolean;
+  /** Which camera on the vehicle. */ facing?: 'front' | 'rear' | 'left' | 'right' | 'down';
+}) {
   getWorld().setDaylight(day);
   const canvas = useRef<HTMLCanvasElement>(null);
   const frozenRef = useRef(frozen);
@@ -49,7 +61,7 @@ export function SceneFeed({ deviceId, ir, frozen, day = false }: { deviceId: str
       acc = 0;
       if ((!onScreen || document.visibilityState === 'hidden') && drawn) return;
       if (frozenRef.current && drawn) return; // keep the last frame — never pretend it's live
-      const cam = world.feedCamera(deviceId, 16 / 9);
+      const cam = world.feedCamera(deviceId, 16 / 9, facing);
       if (!cam) return;
       renderer.toneMappingExposure = (ir ? 2.4 : 1.6) * (world.daylight ? 0.6 : 1);
       renderer.render(world.scene, cam);
@@ -60,7 +72,7 @@ export function SceneFeed({ deviceId, ir, frozen, day = false }: { deviceId: str
       io?.disconnect();
       renderer.dispose();
     };
-  }, [deviceId, ir]);
+  }, [deviceId, ir, facing]);
 
   return (
     <div className={`scene-feed${ir ? ' ir' : ''}${frozen ? ' frozen' : ''}`}>

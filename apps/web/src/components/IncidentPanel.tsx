@@ -34,7 +34,8 @@ import { ReasonDialog } from './Dialog';
 import { TelemetryPanel } from './TelemetryPanel';
 import { BuildingPanel } from './BuildingPanel';
 import { SiteOverview } from './SiteOverview';
-import { BUILDINGS, floorPlan, roomAt } from '@13store/shared';
+import { DevicePanel } from './DevicePanel';
+import { BUILDINGS, floorPlan } from '@13store/shared';
 import { ago, useT } from '../i18n';
 
 const SEV = { low: 'Low', medium: 'Medium', high: 'High' } as const;
@@ -863,121 +864,6 @@ export function LiveMission({ m }: { m: Mission }) {
         </ul>
       </section>
     </>
-  );
-}
-
-function DevicePanel({ d }: { d: Device }) {
-  const { s, dispatch } = useStore();
-  const t = useT();
-  const me = currentUser(s);
-  const f = freshness(s, d);
-  return (
-    <aside className="panel right">
-      <div className="panel-head">
-        <h2>{t('Device')}</h2>
-        <button className="icon-btn" aria-label={t('Close device')} onClick={() => dispatch({ type: 'selectDevice', id: null })}>
-          <X size={18} />
-        </button>
-      </div>
-      <div className="inc-head">
-        <div className="row gap">
-          <span className="inc-big-id">{d.id}</span>
-          <IntegrationBadge i={d.integration} />
-        </div>
-        <h3>{d.model}</h3>
-        <div className="row gap-s">
-          <FreshBadge f={f} age={ago(ageMs(s, d))} />
-        </div>
-      </div>
-      {d.kind === 'cctv' && (
-        <div className="feed-wrap">
-          <CameraFeed scene={d.view ?? 'plaza'} label={d.id} time={f === 'live' ? s.now : d.lastSeen} freshness={f} replay={s.replay.active} controls />
-        </div>
-      )}
-      {d.kind !== 'cctv' && d.capabilities.includes('camera') && (
-        <div className="feed-wrap">
-          <CameraFeed
-            scene="ugv"
-            label={t('{id} onboard', { id: d.id })}
-            deviceId={d.id}
-            time={f === 'live' ? s.now : d.lastSeen}
-            freshness={f}
-            replay={s.replay.active}
-            controls
-          />
-        </div>
-      )}
-      <div className="panel-body">
-        <section className="step">
-          <dl className="meta">
-            <div>
-              <dt>{t('Zone')}</dt>
-              <dd>{d.zone}</dd>
-            </div>
-            <div>
-              <dt>{t('Position')}</dt>
-              <dd>
-                {d.pos.x.toFixed(0)}, {d.pos.y.toFixed(0)} m ± {d.accuracyM} m
-              </dd>
-            </div>
-            {d.indoor && (
-              <div>
-                <dt>{t('Indoor')}</dt>
-                <dd>
-                  {t(BUILDINGS.find((b) => b.id === d.indoor!.buildingId)?.name ?? d.indoor.buildingId)} · {t('Level {n}', { n: d.indoor.level })}
-                  {d.indoor.positioning && d.indoor.positioning !== 'fixed' ? ` · ${{ slam: t('LiDAR SLAM'), uwb: 'UWB', vision: t('visual SLAM') }[d.indoor.positioning]}` : ''}
-                  {(() => {
-                    const r = roomAt(
-                      floorPlan(d.indoor.buildingId, d.indoor.level) ?? { walls: [], rooms: [], doors: [], noGo: [], patrolRoute: [], buildingId: '', level: 0, name: '' },
-                      d.pos,
-                    );
-                    return r ? ` · ${t(r.name.replace(/ \d+\.\d+$/, ''))}` : '';
-                  })()}{' '}
-                  <button className="link" onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: d.indoor!.buildingId, level: d.indoor!.level } })}>
-                    {t('Floor plan')}
-                  </button>
-                </dd>
-              </div>
-            )}
-            {d.alt !== undefined && (
-              <div>
-                <dt>{t('Altitude')}</dt>
-                <dd>{t('{alt} m (site datum, simulated)', { alt: d.alt })}</dd>
-              </div>
-            )}
-            {d.battery !== undefined && (
-              <div>
-                <dt>{t('Battery')}</dt>
-                <dd>{Math.round(d.battery)}%</dd>
-              </div>
-            )}
-            <div>
-              <dt>{t('Adapter')}</dt>
-              <dd>{d.adapterVersion}</dd>
-            </div>
-            <div>
-              <dt>{t('Firmware tested')}</dt>
-              <dd>{d.firmwareTested}</dd>
-            </div>
-            <div>
-              <dt>{t('Control')}</dt>
-              <dd>{userName(s, d.controlOwner)}</dd>
-            </div>
-            <div>
-              <dt>{t('Commands')}</dt>
-              <dd>{d.commands.length ? d.commands.join(', ') : t('none (view only)')}</dd>
-            </div>
-          </dl>
-          {d.kind !== 'cctv' && <TelemetryPanel deviceId={d.id} />}
-          <p className="muted">{d.limitations}</p>
-          {d.controlOwner && can(me.role, 'control.handover') && d.controlOwner !== me.id && !s.replay.active && (
-            <button className="btn-secondary wide" onClick={() => dispatch({ type: 'handover', deviceId: d.id, toUserId: me.id })}>
-              <Hand size={16} /> {t('Take over control (logged)')}
-            </button>
-          )}
-        </section>
-      </div>
-    </aside>
   );
 }
 

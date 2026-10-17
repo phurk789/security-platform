@@ -47,6 +47,17 @@ flowchart LR
 | UniFC 6 Pico (PX4 / ArduPilot) via UniRC 7 Pro | `mavlink` | MAVLink 2 over UDP to the UniRC datalink server `192.168.144.20:19856` (or the FC's own Ethernet port, `listen` mode) | Position (GLOBAL_POSITION_INT → site grid), heading, ground speed, battery, satellites, GPS accuracy (hAcc/eph), radio RSSI, mission progress, flight mode, armed state, critical STATUSTEXT | Upload the approved route (mission protocol), AUTO + MISSION_START, pause (DO_PAUSE_CONTINUE or HOLD), resume, stop (HOLD) |
 | SIYI gimbal camera | `siyi-camera` | SIYI Gimbal Camera SDK over UDP `192.168.144.25:37260` | Gimbal yaw/pitch/roll, zoom level, recording state, firmware | Pan/tilt by speed or to an angle, centre, zoom in/out or to a level, take a photo, start/stop recording |
 
+**Equipment tab.** Each adapter declares the parts it talks to (`components` in the hello:
+flight controller, GNSS, radio, battery, 4-in-1 module for the vehicle; camera, gimbal and media
+stream for the SIYI camera; Nav2, SLAM and battery for the ROS 2 vehicle). Every part starts as
+*Interface verification pending* and turns OK the first time the adapter actually hears from it
+(heartbeat, GPS_RAW_INT, RADIO_STATUS, SYS_STATUS, a relay acknowledgement, an SDK firmware
+reply, a SLAM pose…), with the version it read where the protocol gives one. Status changes
+ride in telemetry (`components: [{id, status, version?, detail?}]`), so the device panel shows
+which interfaces have really been exercised on hardware, separate from the device being online
+and from the adapter's TESTING / VERIFIED label. Name the parts in the device config
+(`flightController`, `radio`) so the tab reads "SIYI UniFC 6 Pico" rather than "Flight controller".
+
 **In the console**, any device with a gimbal shows a control pad under its video: hold an arrow
 to pan/tilt (slower when zoomed in), − / + to zoom, centre, photo, record, with the gimbal
 attitude, zoom and REC drawn over the video. Keyboard: arrow keys, + / −, C. Dispatchers,

@@ -1,6 +1,8 @@
 // Wire contracts between the Edge Gateway, the server and the clients.
 // Gateway protocol version — bump on any breaking change.
 import type {
+  ComponentUpdate,
+  DeviceComponent,
   IndoorState,
   Assignment,
   AuditEvent,
@@ -57,6 +59,8 @@ export interface AdapterDeclaration {
   payloads?: string[];
   /** Indoor device: building, floor and positioning source. */
   indoor?: IndoorState;
+  /** Equipment on the device. Status starts `pending` until the adapter has talked to the part. */
+  components?: DeviceComponent[];
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +98,8 @@ export interface GwTelemetry {
   gimbal?: GimbalState;
   /** Indoor vehicles: floor the position refers to (building from the declaration). */
   level?: number;
+  /** Equipment status changes since the last sample (merged by component id). */
+  components?: ComponentUpdate[];
 }
 
 export interface GwCommandUpdate {
@@ -200,16 +206,7 @@ export interface Snapshot {
 
 export interface ApiError {
   error: string;
-  code:
-    | 'unauthenticated'
-    | 'forbidden'
-    | 'step_up_required'
-    | 'not_found'
-    | 'invalid'
-    | 'conflict'
-    | 'replay_mode'
-    | 'stale_telemetry'
-    | 'control_held';
+  code: 'unauthenticated' | 'forbidden' | 'step_up_required' | 'not_found' | 'invalid' | 'conflict' | 'replay_mode' | 'stale_telemetry' | 'control_held';
 }
 
 // ---------------------------------------------------------------------------

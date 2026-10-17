@@ -105,6 +105,16 @@ Open `ws://host/api/v1/ws`, send `{"type":"auth","token":"<session token>"}`, re
 `timeline`, `evidence`, `assignment`, `audit` (if permitted), `notice`, `resync` (reload the
 snapshot). Events are filtered by the same organisation, site and role rules as the REST API.
 
+
+### Device equipment
+
+`GET /api/v1/devices/:id` includes `components`: the parts the adapter declared
+(`id`, `name`, `kind`, `version?`, `status`, `detail?`, `facing?` for cameras, `stream?`).
+`status` is one of `ok | warn | fault | offline | pending`; `pending` means the interface to
+that part has not been exercised yet. Gateways declare the list in `hello` and send changes in
+telemetry as `components: [{id, status?, version?, detail?}]`; unknown ids are ignored, strings
+are bounded and unknown kinds/statuses fall back to `other` / `pending`.
+
 ## Replay
 
 Clients showing past data send `X-Console-Mode: replay`. The server then refuses every change

@@ -9,9 +9,22 @@
 //  • A command is confirmed only when telemetry shows the effect (moving, or stopped).
 //  • Mode changes made on the remote (manual override) are reported, never fought.
 import dgram from 'node:dgram';
+import { ComponentTracker } from '../adapters/components';
 import { PassThrough } from 'node:stream';
 import { MavLinkPacketParser, MavLinkPacketSplitter, MavLinkProtocolV2, ardupilotmega, common, minimal, type MavLinkPacket } from 'node-mavlink';
-import { PAYLOAD_CATALOG, VEHICLE_CATALOG, catalogCapabilities, geoToSite, headingToSite, siteToGeo, type AdapterDeclaration, type CameraAction, type GeoAnchor, type Point, type SrvCommand } from '@13store/shared';
+import {
+  PAYLOAD_CATALOG,
+  VEHICLE_CATALOG,
+  catalogCapabilities,
+  geoToSite,
+  headingToSite,
+  siteToGeo,
+  type AdapterDeclaration,
+  type CameraAction,
+  type GeoAnchor,
+  type Point,
+  type SrvCommand,
+} from '@13store/shared';
 import { CommandLedger, admitCommand, type Adapter, type AdapterContext } from '../sdk';
 
 export type VehicleProfile = 'ardupilot-rover' | 'ardupilot-copter' | 'px4-rover' | 'px4-multicopter';
@@ -29,6 +42,8 @@ export interface MavlinkVehicleConfig {
   /** Allow the platform to arm the vehicle. Default false — arm on the remote. */
   allowRemoteArm?: boolean;
   firmwareTested?: string;
+  flightController?: string;
+  radio?: string;
   gcsSystemId?: number;
   /** Catalogue model (e.g. D50, D100, D200): sets capabilities and rated specs. */
   catalogId?: string;
@@ -52,7 +67,22 @@ export const UNIRC7_DATALINK = { host: '192.168.144.20', port: 19856 };
 const REGISTRY = { ...minimal.REGISTRY, ...common.REGISTRY, ...ardupilotmega.REGISTRY };
 
 // MAVLink ids (common.xml)
-const MSG = { HEARTBEAT: 0, SYS_STATUS: 1, GPS_RAW_INT: 24, LOCAL_POSITION_NED: 32, GLOBAL_POSITION_INT: 33, MISSION_REQUEST: 40, MISSION_CURRENT: 42, MISSION_ITEM_REACHED: 46, MISSION_ACK: 47, MISSION_REQUEST_INT: 51, VFR_HUD: 74, COMMAND_ACK: 77, RADIO_STATUS: 109, STATUSTEXT: 253 };
+const MSG = {
+  HEARTBEAT: 0,
+  SYS_STATUS: 1,
+  GPS_RAW_INT: 24,
+  LOCAL_POSITION_NED: 32,
+  GLOBAL_POSITION_INT: 33,
+  MISSION_REQUEST: 40,
+  MISSION_CURRENT: 42,
+  MISSION_ITEM_REACHED: 46,
+  MISSION_ACK: 47,
+  MISSION_REQUEST_INT: 51,
+  VFR_HUD: 74,
+  COMMAND_ACK: 77,
+  RADIO_STATUS: 109,
+  STATUSTEXT: 253,
+};
 const CMD = { NAV_WAYPOINT: 16, DO_SET_RELAY: 181, DO_SET_MODE: 176, DO_PAUSE_CONTINUE: 193, MISSION_START: 300, COMPONENT_ARM_DISARM: 400, SET_MESSAGE_INTERVAL: 511 };
 const FRAME_GLOBAL_RELATIVE_ALT_INT = 6;
 const MAV_MODE_FLAG_SAFETY_ARMED = 128;
@@ -123,6 +153,7 @@ export class MavlinkVehicleAdapter implements Adapter {
   private comp = 0;
   private lastHeartbeat = 0;
   private payloadState = { spotlight: false, beacon: false };
+  private comps: ComponentTracker;
   private payloadQueue: Promise<unknown> = Promise.resolve();
   private armed = false;
   private mode = -1;
@@ -147,6 +178,15 @@ export class MavlinkVehicleAdapter implements Adapter {
   constructor(private cfg: MavlinkVehicleConfig) {
     this.proto = new MavLinkProtocolV2(cfg.gcsSystemId ?? 255, 190);
     const uav = cfg.kind === 'uav';
+    this.comps = new ComponentTracker([
+      { id: 'fc', name: cfg.flightController ?? 'Flight controller (MAVLink)', kind: 'flight_controller', status: 'pending', detail: 'Waiting for the first heartbeat' },
+      ...(cfg.indoor ? [] : [{ id: 'gnss', name: 'GNSS receiver', kind: 'gnss' as const, status: 'pending' as const, detail: 'Waiting for GPS_RAW_INT' }]),
+      { id: 'radio', name: cfg.radio ?? 'Telemetry radio', kind: 'radio', status: 'pending', detail: 'Waiting for RADIO_STATUS' },
+      { id: 'battery', name: 'Battery', kind: 'battery', status: 'pending', detail: 'Waiting for SYS_STATUS' },
+      ...(cfg.payload && PAYLOAD_CATALOG[cfg.payload.module]
+        ? [{ id: 'payload', name: PAYLOAD_CATALOG[cfg.payload.module].name, kind: 'payload' as const, status: 'pending' as const, detail: 'Relay outputs not yet exercised' }]
+        : []),
+    ]);
     this.declaration = {
       deviceId: cfg.deviceId,
       kind: cfg.kind,
@@ -156,7 +196,11 @@ export class MavlinkVehicleAdapter implements Adapter {
       firmwareTested: cfg.firmwareTested ?? 'not yet tested on hardware',
       integration: 'testing',
       capabilities: [
-        ...(cfg.catalogId && VEHICLE_CATALOG[cfg.catalogId] ? catalogCapabilities(cfg.catalogId) : uav ? ['camera', 'overwatch', 'waypoints'] : ['camera', 'ground_patrol', 'waypoints']),
+        ...(cfg.catalogId && VEHICLE_CATALOG[cfg.catalogId]
+          ? catalogCapabilities(cfg.catalogId)
+          : uav
+            ? ['camera', 'overwatch', 'waypoints']
+            : ['camera', 'ground_patrol', 'waypoints']),
         ...(cfg.payload?.spotlightRelay !== undefined ? ['spotlight'] : []),
         ...(cfg.payload?.beaconRelay !== undefined ? ['beacon'] : []),
       ],
@@ -164,10 +208,13 @@ export class MavlinkVehicleAdapter implements Adapter {
       indoor: cfg.indoor ? { buildingId: cfg.indoor.buildingId, level: cfg.indoor.level, positioning: 'slam' } : undefined,
       payloads: cfg.payload && PAYLOAD_CATALOG[cfg.payload.module] ? [cfg.payload.module] : undefined,
       commands: ['start', 'pause', 'resume', 'stop'],
+      components: this.comps.list(),
       units: { position: 'site-m', altitude: 'm-site-datum', speed: 'm/s', battery: 'percent' },
       rateMs: 1000,
       limitations: `Flight controller via ${cfg.link.mode === 'client' ? `${cfg.link.host}:${cfg.link.port}` : `UDP :${cfg.link.port}`}. ${cfg.allowRemoteArm ? 'Remote arming enabled.' : 'Arm on the remote; the platform will not arm.'}`,
-      linkLossBehavior: uav ? 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE / NAV_DLL_ACT): RTL or loiter as configured on the vehicle.' : 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE, FS_ACTION=Hold): stop in place as configured on the vehicle.',
+      linkLossBehavior: uav
+        ? 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE / NAV_DLL_ACT): RTL or loiter as configured on the vehicle.'
+        : 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE, FS_ACTION=Hold): stop in place as configured on the vehicle.',
     };
   }
 
@@ -266,11 +313,18 @@ export class MavlinkVehicleAdapter implements Adapter {
       if (!this.sys) {
         this.sys = p.header.sysid;
         this.comp = p.header.compid;
-        this.ctx.log.info(`${this.cfg.deviceId}: vehicle found (sys ${this.sys}, ${(hb.autopilot as number) === 12 ? 'PX4' : (hb.autopilot as number) === 3 ? 'ArduPilot' : `autopilot ${hb.autopilot}`})`);
+        this.ctx.log.info(
+          `${this.cfg.deviceId}: vehicle found (sys ${this.sys}, ${(hb.autopilot as number) === 12 ? 'PX4' : (hb.autopilot as number) === 3 ? 'ArduPilot' : `autopilot ${hb.autopilot}`})`,
+        );
         this.requestStreams();
       }
       if (p.header.sysid !== this.sys) return;
       const now = this.ctx.now();
+      this.comps.set('fc', {
+        status: 'ok',
+        version: (hb.autopilot as number) === 12 ? 'PX4' : (hb.autopilot as number) === 3 ? 'ArduPilot' : `autopilot ${hb.autopilot}`,
+        detail: `sys ${this.sys} · ${MODES[this.cfg.profile].name(hb.customMode)}`,
+      });
       if (this.wasStale && this.lastHeartbeat) this.onReconnect(hb.customMode);
       this.wasStale = false;
       this.lastHeartbeat = now;
@@ -305,17 +359,31 @@ export class MavlinkVehicleAdapter implements Adapter {
         this.speed = data.groundspeed as number;
         break;
       case MSG.SYS_STATUS:
-        if ((data.batteryRemaining as number) >= 0) this.battery = data.batteryRemaining as number;
+        if ((data.batteryRemaining as number) >= 0) {
+          this.battery = data.batteryRemaining as number;
+          this.comps.set('battery', {
+            status: this.battery < 15 ? 'fault' : this.battery < 30 ? 'warn' : 'ok',
+            detail: `${this.battery}%${(data.voltageBattery as number) > 0 && (data.voltageBattery as number) !== 65535 ? ` · ${((data.voltageBattery as number) / 1000).toFixed(1)} V` : ''}`,
+          });
+        }
         break;
       case MSG.GPS_RAW_INT: {
         this.satellites = data.satellitesVisible as number;
         const hAcc = (data.hAcc as number) ?? 0;
         const eph = data.eph as number;
         this.accuracyM = hAcc > 0 ? hAcc / 1000 : eph && eph !== 65535 ? (eph / 100) * 2.5 : 5;
+        const fix = data.fixType as number;
+        this.comps.set('gnss', {
+          status: fix >= 3 ? 'ok' : 'warn',
+          detail: fix >= 3 ? `${this.satellites} sats · ${fix >= 5 ? 'RTK' : '3D'} fix · ±${this.accuracyM.toFixed(1)} m` : `${this.satellites} sats · no 3D fix`,
+        });
         break;
       }
       case MSG.RADIO_STATUS:
-        if ((data.rssi as number) !== 255) this.signal = Math.round(((data.rssi as number) / 254) * 100);
+        if ((data.rssi as number) !== 255) {
+          this.signal = Math.round(((data.rssi as number) / 254) * 100);
+          this.comps.set('radio', { status: this.signal < 25 ? 'warn' : 'ok', detail: `RSSI ${this.signal}%` });
+        }
         break;
       case MSG.MISSION_CURRENT:
         this.nextCp = Math.max(0, Math.min(this.missionLength, (data.seq as number) - this.missionOffset));
@@ -388,6 +456,7 @@ export class MavlinkVehicleAdapter implements Adapter {
     const fresh = this.lastHeartbeat && now - this.lastHeartbeat < LINK_STALE_MS;
     if (!fresh) {
       this.wasStale = true;
+      this.comps.set('fc', { status: 'offline', detail: 'No heartbeat' });
       return; // no telemetry → the platform shows STALE, then OFFLINE
     }
     if (now - this.lastTel >= 1000) {
@@ -409,6 +478,7 @@ export class MavlinkVehicleAdapter implements Adapter {
           level: this.cfg.indoor?.level,
           // 4-in-1 module state as last confirmed by the flight controller (no gimbal on this device)
           gimbal: this.cfg.payload ? { yaw: 0, pitch: 0, spotlight: this.payloadState.spotlight, beacon: this.payloadState.beacon } : undefined,
+          components: this.comps.flush(),
         } as Parameters<AdapterContext['telemetry']>[0]);
       }
     }
@@ -462,10 +532,13 @@ export class MavlinkVehicleAdapter implements Adapter {
   private uploadMission(route: Point[]): Promise<{ ok: boolean; detail?: string }> {
     return new Promise((resolve) => {
       const items = this.buildMission(route);
-      const timer = setTimeout(() => {
-        this.missionWaiter = null;
-        resolve({ ok: false, detail: 'Mission upload timed out.' });
-      }, 2000 + items.length * 700);
+      const timer = setTimeout(
+        () => {
+          this.missionWaiter = null;
+          resolve({ ok: false, detail: 'Mission upload timed out.' });
+        },
+        2000 + items.length * 700,
+      );
       this.missionWaiter = { items, done: { timer, resolve: (ok, detail) => resolve({ ok, detail }) } };
       const count = new common.MissionCount();
       count.targetSystem = this.sys;
@@ -488,7 +561,11 @@ export class MavlinkVehicleAdapter implements Adapter {
   onCamera(requestId: string, a: CameraAction) {
     const reply = (ok: boolean, confirmed: boolean, detail: string) => this.ctx.cameraResult({ requestId, ok, confirmed, detail });
     if (a.action !== 'spotlight' && a.action !== 'beacon') {
-      return reply(false, false, a.action === 'announce' ? 'Announcements use the module’s own audio link, not MAVLink.' : 'This vehicle’s camera is a separate SIYI camera device.');
+      return reply(
+        false,
+        false,
+        a.action === 'announce' ? 'Announcements use the module’s own audio link, not MAVLink.' : 'This vehicle’s camera is a separate SIYI camera device.',
+      );
     }
     const relay = a.action === 'spotlight' ? this.cfg.payload?.spotlightRelay : this.cfg.payload?.beaconRelay;
     if (relay === undefined) return reply(false, false, `No relay configured for the ${a.action === 'spotlight' ? 'searchlight' : 'warning light'}.`);
@@ -497,8 +574,17 @@ export class MavlinkVehicleAdapter implements Adapter {
     // One relay command at a time: acknowledgements are matched by command id.
     this.payloadQueue = this.payloadQueue.then(async () => {
       const r = await this.command(CMD.DO_SET_RELAY, [relay, a.on ? 1 : 0]);
-      if (r.ok) this.payloadState[a.action as 'spotlight' | 'beacon'] = a.on;
-      reply(r.ok, r.ok, r.ok ? `${a.action === 'spotlight' ? 'Searchlight' : 'Warning light'} ${a.on ? 'on' : 'off'} (relay ${relay}, confirmed by the flight controller).` : r.detail ?? 'Refused.');
+      if (r.ok) {
+        this.payloadState[a.action as 'spotlight' | 'beacon'] = a.on;
+        this.comps.set('payload', { status: 'ok', detail: `Relays confirmed by the flight controller` });
+      }
+      reply(
+        r.ok,
+        r.ok,
+        r.ok
+          ? `${a.action === 'spotlight' ? 'Searchlight' : 'Warning light'} ${a.on ? 'on' : 'off'} (relay ${relay}, confirmed by the flight controller).`
+          : (r.detail ?? 'Refused.'),
+      );
     });
   }
 

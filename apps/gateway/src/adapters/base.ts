@@ -1,5 +1,18 @@
 // Shared plumbing for simulated devices: telemetry ticker, link-loss simulation, timers.
-import { applyCameraAction, gimbalSample, newSimGimbal, sampleLatency, stepSimGimbal, type CameraAction, type SimGimbal, type AdapterDeclaration, type Device, type GwTelemetry, type SrvCommand, type SrvDemo } from '@13store/shared';
+import {
+  applyCameraAction,
+  gimbalSample,
+  newSimGimbal,
+  sampleLatency,
+  stepSimGimbal,
+  type CameraAction,
+  type SimGimbal,
+  type AdapterDeclaration,
+  type Device,
+  type GwTelemetry,
+  type SrvCommand,
+  type SrvDemo,
+} from '@13store/shared';
 import { CommandLedger, type Adapter, type AdapterContext, type EventReport } from '../sdk';
 
 export interface SimOptions {
@@ -40,6 +53,7 @@ export function declarationFrom(d: Device, rateMs = d.rateMs): AdapterDeclaratio
     catalogId: d.catalogId,
     payloads: d.payloads,
     indoor: d.indoor,
+    components: d.components,
   };
 }
 
@@ -165,7 +179,8 @@ export abstract class SimDevice implements Adapter {
   protected publish(sample: Omit<GwTelemetry, 't' | 'deviceId'>) {
     if (this.gimbal) sample = { ...sample, gimbal: gimbalSample(this.gimbal) };
     // Indoor: no satellites, SLAM-grade accuracy, and the floor the position refers to.
-    if (this.seed.indoor) sample = { ...sample, level: this.seed.indoor.level, satellites: undefined, accuracyM: Math.min(sample.accuracyM, 0.3 + Math.random() * 0.15), quality: 'good' };
+    if (this.seed.indoor)
+      sample = { ...sample, level: this.seed.indoor.level, satellites: undefined, accuracyM: Math.min(sample.accuracyM, 0.3 + Math.random() * 0.15), quality: 'good' };
     if (!this.opts.latency) return this.ctx.telemetry(sample);
     const now = this.ctx.now();
     // Keep samples in order: a later sample never overtakes an earlier one.

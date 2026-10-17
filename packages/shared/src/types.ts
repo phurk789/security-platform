@@ -52,6 +52,33 @@ export interface Point {
   y: number;
 }
 
+export type ComponentStatus = 'ok' | 'warn' | 'fault' | 'offline' | 'pending';
+export type ComponentKind = 'flight_controller' | 'computer' | 'camera' | 'gimbal' | 'radio' | 'remote' | 'gnss' | 'lidar' | 'battery' | 'payload' | 'network' | 'other';
+
+/** A piece of equipment on a device (flight controller, camera, radio, …) as the adapter reports it. */
+export interface DeviceComponent {
+  id: string;
+  name: string;
+  kind: ComponentKind;
+  /** Firmware / hardware version as read from the part, if the adapter can read it. */
+  version?: string;
+  /** `pending` = the interface to this part has not been exercised yet (verification pending). */
+  status: ComponentStatus;
+  detail?: string;
+  /** Cameras on a vehicle: which way the lens points (each camera gets its own feed tab). */
+  facing?: 'front' | 'rear' | 'left' | 'right' | 'down';
+  /** Cameras with their own stream on the site media server. */
+  stream?: StreamInfo;
+}
+
+/** A status change for one component, carried in telemetry. */
+export interface ComponentUpdate {
+  id: string;
+  status?: ComponentStatus;
+  version?: string;
+  detail?: string;
+}
+
 export interface Device {
   id: string;
   kind: DeviceKind;
@@ -96,6 +123,8 @@ export interface Device {
   stream?: StreamInfo;
   /** How a gimbal camera is mounted (for pointing it at a place). */
   mount?: CameraMount;
+  /** Equipment fitted to the device, with interface status (Equipment tab). */
+  components?: DeviceComponent[];
   /** Catalogue model (VEHICLE_CATALOG) and fitted payload modules (PAYLOAD_CATALOG). */
   catalogId?: string;
   payloads?: string[];

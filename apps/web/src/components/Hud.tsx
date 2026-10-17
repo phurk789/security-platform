@@ -8,6 +8,7 @@ import { ago, useT } from '../i18n';
 import { useStore } from '../store';
 import { FreshBadge } from './Badges';
 import { CameraFeed } from './CameraFeed';
+import { vehicleThumb } from '../twin/thumbs';
 import './hud.css';
 
 // ---------------------------------------------------------------------------
@@ -104,7 +105,12 @@ export function AppearanceToggle() {
   const t = useT();
   const a = useAppearance();
   return (
-    <button className="appearance-toggle" onClick={() => setAppearance(a === 'dark' ? 'light' : 'dark')} title={a === 'dark' ? t('Switch to the light theme') : t('Switch to the dark theme')} aria-label={a === 'dark' ? t('Switch to the light theme') : t('Switch to the dark theme')}>
+    <button
+      className="appearance-toggle"
+      onClick={() => setAppearance(a === 'dark' ? 'light' : 'dark')}
+      title={a === 'dark' ? t('Switch to the light theme') : t('Switch to the dark theme')}
+      aria-label={a === 'dark' ? t('Switch to the light theme') : t('Switch to the dark theme')}
+    >
       {a === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
     </button>
   );
@@ -115,7 +121,12 @@ export function ThemeToggle() {
   const theme = useTheme();
   const next = theme === 'hud' ? 'classic' : 'hud';
   return (
-    <button className="theme-toggle" onClick={() => setTheme(next)} title={theme === 'hud' ? t('Switch to the classic layout') : t('Switch to the Twin HUD layout')} aria-label={t('Layout')}>
+    <button
+      className="theme-toggle"
+      onClick={() => setTheme(next)}
+      title={theme === 'hud' ? t('Switch to the classic layout') : t('Switch to the Twin HUD layout')}
+      aria-label={t('Layout')}
+    >
       {theme === 'hud' ? <LayoutDashboard size={16} /> : <LayoutPanelLeft size={16} />}
       <span>{theme === 'hud' ? 'HUD' : t('Classic')}</span>
     </button>
@@ -137,7 +148,12 @@ export function FleetPanel() {
   return (
     <section className="panel hud-fleet">
       <div className="panel-head">
-        <h2>{t('Fleet')} <small className="hud-count">{live}/{fleet.length} LIVE</small></h2>
+        <h2>
+          {t('Fleet')}{' '}
+          <small className="hud-count">
+            {live}/{fleet.length} LIVE
+          </small>
+        </h2>
         <button className={`hud-chip${video ? ' on' : ''}`} onClick={() => setVideo((v) => !v)} aria-pressed={video}>
           {t('Video')}
         </button>
@@ -164,13 +180,26 @@ export function FleetCard({ d, video }: { d: Device; video: boolean }) {
   const battery = d.battery ?? 0;
   const progress = m ? Math.min(1, m.nextCp / Math.max(1, m.checkpoints.length)) : 0;
   const state = !known ? t('No data') : m ? statusText(m.status, t) : d.commands.length ? t('Standby') : t('Display only');
+  const thumb = useVehicleThumb(d);
   return (
     <article className={`fleet-card f-${f}${sel ? ' sel' : ''}`} onClick={() => dispatch({ type: 'selectDevice', id: d.id })}>
       <header>
-        <span className={`fc-ico k-${d.kind}`}><Icon size={16} /></span>
+        {thumb ? (
+          <img className={`fc-thumb k-${d.kind}`} src={thumb} alt="" />
+        ) : (
+          <span className={`fc-ico k-${d.kind}`}>
+            <Icon size={16} />
+          </span>
+        )}
         <b>{d.id}</b>
-        <span className="fc-kind">{d.catalogId ?? (d.kind === 'uav' ? 'UAV' : 'UGV')}{d.payloads?.length ? ' · 4in1' : ''}{d.integration === 'simulated' ? ' · SIM' : ''}</span>
-        <span className="fc-fresh"><FreshBadge f={f} age={f === 'live' ? undefined : ago(ageMs(s, d))} /></span>
+        <span className="fc-kind">
+          {d.catalogId ?? (d.kind === 'uav' ? 'UAV' : 'UGV')}
+          {d.payloads?.length ? ' · 4in1' : ''}
+          {d.integration === 'simulated' ? ' · SIM' : ''}
+        </span>
+        <span className="fc-fresh">
+          <FreshBadge f={f} age={f === 'live' ? undefined : ago(ageMs(s, d))} />
+        </span>
       </header>
       {video && d.capabilities.includes('camera') && (
         <div className="fc-feed" onClick={(e) => e.stopPropagation()}>
@@ -184,7 +213,11 @@ export function FleetCard({ d, video }: { d: Device; video: boolean }) {
       <div className="fc-stats">
         <Ring value={known ? battery : null} label="BAT" />
         <Stat label={t('Speed')} value={known ? d.speed.toFixed(1) : '—'} unit="m/s" />
-        {d.kind === 'uav' ? <Stat label={t('Altitude')} value={known && d.alt !== undefined ? d.alt.toFixed(0) : '—'} unit="m" /> : <Stat label="GNSS" value={known && d.satellites !== undefined ? String(d.satellites) : '—'} unit={<Satellite size={11} />} />}
+        {d.kind === 'uav' ? (
+          <Stat label={t('Altitude')} value={known && d.alt !== undefined ? d.alt.toFixed(0) : '—'} unit="m" />
+        ) : (
+          <Stat label="GNSS" value={known && d.satellites !== undefined ? String(d.satellites) : '—'} unit={<Satellite size={11} />} />
+        )}
         <div className="fc-stat">
           <small>{t('Link')}</small>
           <Bars v={known ? d.signal : undefined} />
@@ -193,17 +226,40 @@ export function FleetCard({ d, video }: { d: Device; video: boolean }) {
       <footer>
         <div className="fc-state">
           <span>{state}</span>
-          {m && <span className="muted">{m.id} · CP {Math.min(m.nextCp + 1, m.checkpoints.length)}/{m.checkpoints.length}</span>}
+          {m && (
+            <span className="muted">
+              {m.id} · CP {Math.min(m.nextCp + 1, m.checkpoints.length)}/{m.checkpoints.length}
+            </span>
+          )}
         </div>
         {m && (
           <div className="fc-bar">
             <i style={{ width: `${progress * 100}%` }} />
           </div>
         )}
-        {d.controlOwner && <div className="fc-ctl">{t('Controlled by')} {userName(s, d.controlOwner)}</div>}
+        {d.controlOwner && (
+          <div className="fc-ctl">
+            {t('Controlled by')} {userName(s, d.controlOwner)}
+          </div>
+        )}
       </footer>
     </article>
   );
+}
+
+/** Rendered picture of the vehicle's 3D model (cached per model); null until ready or without WebGL. */
+export function useVehicleThumb(d: Device) {
+  const [url, setUrl] = useState<string | null>(null);
+  const key = d.kind === 'cctv' ? '' : `${d.kind}|${d.catalogId ?? ''}|${d.payloads?.length ? 1 : 0}`;
+  useEffect(() => {
+    if (!key) return;
+    let live = true;
+    void vehicleThumb(d.kind as 'ugv' | 'uav', d.catalogId, !!d.payloads?.length).then((u) => live && setUrl(u));
+    return () => {
+      live = false;
+    };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  return url;
 }
 
 function statusText(st: string, t: ReturnType<typeof useT>) {

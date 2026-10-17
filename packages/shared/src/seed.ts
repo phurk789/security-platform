@@ -39,6 +39,10 @@ export function seedDevices(now: number): Record<string, Device> {
       rateMs: 1000,
       speed: 0,
       view: 'plaza',
+      components: [
+        { id: 'cam', name: 'Fixed dome 4MP', kind: 'camera', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'net', name: 'PoE network link', kind: 'network', status: 'ok', detail: 'Simulated part' },
+      ],
     },
     {
       id: 'CCTV-02',
@@ -58,6 +62,11 @@ export function seedDevices(now: number): Record<string, Device> {
       rateMs: 1000,
       speed: 0,
       view: 'gate',
+      components: [
+        { id: 'cam', name: 'SIYI ZT30 (thermal 640 · 30× zoom · laser rangefinder)', kind: 'camera', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'gimbal', name: 'ZT30 3-axis gimbal', kind: 'gimbal', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'net', name: 'PoE+ mast link', kind: 'network', status: 'ok', detail: 'Simulated part' },
+      ],
     },
     {
       id: 'CCTV-03',
@@ -76,6 +85,10 @@ export function seedDevices(now: number): Record<string, Device> {
       rateMs: 1000,
       speed: 0,
       view: 'path',
+      components: [
+        { id: 'cam', name: 'Fixed dome 4MP', kind: 'camera', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'net', name: 'PoE network link', kind: 'network', status: 'ok', detail: 'Simulated part' },
+      ],
     },
     {
       id: 'CCTV-04',
@@ -94,6 +107,10 @@ export function seedDevices(now: number): Record<string, Device> {
       rateMs: 1000,
       speed: 0,
       view: 'lot',
+      components: [
+        { id: 'cam', name: 'Bullet 2MP', kind: 'camera', version: 'sim', status: 'offline', detail: 'No video since 05:13 (INC-022)' },
+        { id: 'net', name: 'PoE network link', kind: 'network', status: 'offline', detail: 'Switch port down' },
+      ],
     },
     {
       id: 'UGV-01',
@@ -115,6 +132,23 @@ export function seedDevices(now: number): Record<string, Device> {
       lastSeen: now - 1000,
       rateMs: 1000,
       speed: 0,
+      components: [
+        { id: 'fc', name: 'SIYI UniFC 6 Pico', kind: 'flight_controller', version: 'ArduRover 4.5 (sim)', status: 'ok', detail: 'Simulated part' },
+        { id: 'cam', name: 'SIYI A8 mini gimbal camera', kind: 'camera', version: 'fw 1.3 (sim)', status: 'ok', detail: 'Simulated part', facing: 'front' },
+        { id: 'gimbal', name: 'A8 mini 3-axis gimbal', kind: 'gimbal', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'radio', name: 'SIYI MK32 air unit', kind: 'radio', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'remote', name: 'SIYI UniRC 7 Pro', kind: 'remote', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'gnss', name: 'UniFC GNSS (RTK-ready)', kind: 'gnss', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'battery', name: 'LiFePO4 48 V pack', kind: 'battery', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        {
+          id: 'payload',
+          name: 'Loudhailer 4-in-1 module (speaker · searchlight · warning light · camera)',
+          kind: 'payload',
+          version: 'rev B (sim)',
+          status: 'ok',
+          detail: 'Simulated part',
+        },
+      ],
     },
     {
       id: 'UGV-02',
@@ -136,6 +170,24 @@ export function seedDevices(now: number): Record<string, Device> {
       lastSeen: now - 1000,
       rateMs: 1000,
       speed: 0,
+      components: [
+        { id: 'fc', name: 'SIYI UniFC 6 Pico', kind: 'flight_controller', version: 'ArduRover 4.5 (sim)', status: 'ok', detail: 'Simulated part' },
+        { id: 'cam', name: 'SIYI ZR10 gimbal camera (10× zoom)', kind: 'camera', version: 'fw 1.2 (sim)', status: 'ok', detail: 'Simulated part', facing: 'front' },
+        { id: 'cam-rear', name: 'SIYI A2 mini (rear view)', kind: 'camera', version: 'fw 1.1 (sim)', status: 'ok', detail: 'Simulated part', facing: 'rear' },
+        { id: 'gimbal', name: 'ZR10 3-axis gimbal', kind: 'gimbal', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'radio', name: 'SIYI HM30 air unit', kind: 'radio', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'remote', name: 'SIYI UniRC 7 Pro', kind: 'remote', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'gnss', name: 'UniFC GNSS (RTK-ready)', kind: 'gnss', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'battery', name: 'LiFePO4 48 V pack', kind: 'battery', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        {
+          id: 'payload',
+          name: 'Loudhailer 4-in-1 module (speaker · searchlight · warning light · camera)',
+          kind: 'payload',
+          version: 'rev B (sim)',
+          status: 'ok',
+          detail: 'Simulated part',
+        },
+      ],
     },
     {
       id: 'UGV-03',
@@ -155,6 +207,14 @@ export function seedDevices(now: number): Record<string, Device> {
       lastSeen: now - 1000,
       rateMs: 1000,
       speed: 0,
+      components: [
+        { id: 'fc', name: 'SIYI UniFC 6 Pico', kind: 'flight_controller', version: 'ArduRover 4.5 (sim)', status: 'ok', detail: 'Simulated part' },
+        { id: 'cam', name: 'Front 1080p FPV camera', kind: 'camera', version: 'sim', status: 'ok', detail: 'Simulated part', facing: 'front' },
+        { id: 'radio', name: 'SIYI MK32 air unit', kind: 'radio', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'remote', name: 'SIYI UniRC 7 Pro', kind: 'remote', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'gnss', name: 'GPS / GLONASS / BDS / Galileo (±1 m)', kind: 'gnss', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'battery', name: '48 V 80 Ah pack', kind: 'battery', version: 'sim', status: 'ok', detail: 'Simulated part' },
+      ],
     },
     {
       id: 'UGV-04',
@@ -177,6 +237,14 @@ export function seedDevices(now: number): Record<string, Device> {
       lastSeen: now - 1000,
       rateMs: 1000,
       speed: 0,
+      components: [
+        { id: 'fc', name: 'SIYI UniFC 6 Pico', kind: 'flight_controller', version: 'ArduRover 4.5 (sim)', status: 'ok', detail: 'Simulated part' },
+        { id: 'computer', name: 'Edge computer · ROS 2 Nav2', kind: 'computer', version: 'Humble (sim)', status: 'ok', detail: 'Simulated part' },
+        { id: 'lidar', name: 'Livox Mid-360 LiDAR (SLAM)', kind: 'lidar', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'cam', name: 'SIYI A8 mini gimbal camera', kind: 'camera', version: 'fw 1.3 (sim)', status: 'ok', detail: 'Simulated part', facing: 'front' },
+        { id: 'radio', name: 'Wi-Fi 6 mesh', kind: 'radio', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'battery', name: 'LiFePO4 48 V pack', kind: 'battery', version: 'sim', status: 'ok', detail: 'Simulated part' },
+      ],
     },
     {
       id: 'CCTV-05',
@@ -197,6 +265,10 @@ export function seedDevices(now: number): Record<string, Device> {
       rateMs: 1000,
       speed: 0,
       view: 'path',
+      components: [
+        { id: 'cam', name: 'Indoor dome 4MP', kind: 'camera', version: 'sim', status: 'ok', detail: 'Simulated part' },
+        { id: 'net', name: 'PoE network link', kind: 'network', status: 'ok', detail: 'Simulated part' },
+      ],
     },
     {
       id: 'UAV-02',
@@ -216,6 +288,13 @@ export function seedDevices(now: number): Record<string, Device> {
       lastSeen: now,
       rateMs: 1000,
       speed: 0,
+      components: [
+        { id: 'fc', name: 'SIYI UniFC 6 Pico', kind: 'flight_controller', version: 'display model', status: 'ok', detail: 'Display airframe — not flown' },
+        { id: 'cam', name: 'SIYI A8 mini gimbal camera', kind: 'camera', version: 'display model', status: 'ok', detail: 'Display airframe — not flown', facing: 'down' },
+        { id: 'radio', name: 'SIYI MK15 air unit', kind: 'radio', version: 'display model', status: 'ok', detail: 'Display airframe — not flown' },
+        { id: 'remote', name: 'SIYI UniRC 7 Pro', kind: 'remote', version: 'display model', status: 'ok', detail: 'Display airframe — not flown' },
+        { id: 'battery', name: '6S Li-ion pack', kind: 'battery', version: 'display model', status: 'ok', detail: 'Display airframe — not flown' },
+      ],
     },
   ];
   return Object.fromEntries(list.map((d) => [d.id, d]));
@@ -272,10 +351,35 @@ export function seedIncidents(now: number): Incident[] {
 export function seedTimeline(now: number): TimelineEvent[] {
   return [
     { id: 't1', incidentId: 'INC-022', at: now - 14 * MIN, receivedAt: now - 14 * MIN + 900, actor: 'System', title: 'CCTV-04 stopped reporting', tone: 'warn' },
-    { id: 't2', incidentId: 'INC-022', at: now - 13 * MIN, receivedAt: now - 13 * MIN, actor: 'Alex Chen', title: 'Triage started', detail: 'Checking power and network at east car park.' },
-    { id: 't3', incidentId: 'INC-023', at: now - 8 * MIN, receivedAt: now - 8 * MIN + 2000, actor: 'Field team 2', title: 'Report received', detail: 'Delivery cart blocking west walkway.' },
+    {
+      id: 't2',
+      incidentId: 'INC-022',
+      at: now - 13 * MIN,
+      receivedAt: now - 13 * MIN,
+      actor: 'Alex Chen',
+      title: 'Triage started',
+      detail: 'Checking power and network at east car park.',
+    },
+    {
+      id: 't3',
+      incidentId: 'INC-023',
+      at: now - 8 * MIN,
+      receivedAt: now - 8 * MIN + 2000,
+      actor: 'Field team 2',
+      title: 'Report received',
+      detail: 'Delivery cart blocking west walkway.',
+    },
     { id: 't4', incidentId: 'INC-023', at: now - 7 * MIN, receivedAt: now - 7 * MIN, actor: 'Alex Chen', title: 'Confirmed and assigned to Field team 2', tone: 'ok' },
-    { id: 't5', incidentId: 'INC-024', at: now - 2 * MIN - 48_000, receivedAt: now - 2 * MIN - 47_200, actor: 'Gate sensor SG-2', title: 'Alert received', detail: 'Service gate sensor triggered outside operating hours.', tone: 'alert' },
+    {
+      id: 't5',
+      incidentId: 'INC-024',
+      at: now - 2 * MIN - 48_000,
+      receivedAt: now - 2 * MIN - 47_200,
+      actor: 'Gate sensor SG-2',
+      title: 'Alert received',
+      detail: 'Service gate sensor triggered outside operating hours.',
+      tone: 'alert',
+    },
   ];
 }
 

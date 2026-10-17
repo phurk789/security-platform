@@ -33,6 +33,7 @@ export function CameraFeed({
   deviceId,
   controls,
   aimIncidentId,
+  facing = 'front',
 }: {
   scene: Scene;
   label: string;
@@ -48,6 +49,8 @@ export function CameraFeed({
   controls?: boolean;
   /** Incident the controls can point the camera at. */
   aimIncidentId?: string;
+  /** Which camera on a multi-camera vehicle (secondary cameras are fixed, no PTZ). */
+  facing?: 'front' | 'rear' | 'left' | 'right' | 'down';
 }) {
   const { s, session } = useStore();
   // Night: fixed cameras switch to IR. Daytime twin (light theme): colour.
@@ -104,7 +107,7 @@ export function CameraFeed({
           }}
         />
       ) : live3d ? (
-        <SceneFeed deviceId={id!} ir={night && id!.startsWith('CCTV')} frozen={frozen} day={!night} />
+        <SceneFeed deviceId={id!} ir={night && id!.startsWith('CCTV')} frozen={frozen} day={!night} facing={facing} />
       ) : (
         <svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-label={tr('{label} simulated camera view', { label })}>
           <defs>

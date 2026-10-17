@@ -162,19 +162,39 @@ describe('real camera through a gateway (developer sandbox)', () => {
             limitations: '',
             linkLossBehavior: 'stop',
             stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', whep: 'https://edge.example:8889/sbx-zt30/whep', whepSub: 'https://edge.example:8889/sbx-zt30-sub/whep' },
+            components: [
+              { id: 'cam', name: 'SIYI ZT30', kind: 'camera', status: 'pending', facing: 'front' },
+              { id: 'fc', name: 'Flight controller', kind: 'flight_controller', status: 'nonsense', detail: 'x'.repeat(500) },
+              { id: 'bad id!', name: 'dropped', kind: 'camera', status: 'ok' },
+              { id: 'cam', name: 'duplicate id dropped', kind: 'camera', status: 'ok' },
+            ],
           },
         ],
       }),
     );
     expect((await welcome).accepted).toEqual(['SBX-ROVER-01']);
     let seq = 0;
-    const tel = () => gw.send(JSON.stringify({ t: 'telemetry', deviceId: 'SBX-ROVER-01', seq: ++seq, sourceTime: Date.now(), pos: { x: 10, y: 10 }, accuracyM: 1, speed: 0, quality: 'good', gimbal: { yaw: 12.5, pitch: -20, zoom: 2 } }));
+    const tel = () =>
+      gw.send(
+        JSON.stringify({
+          t: 'telemetry',
+          deviceId: 'SBX-ROVER-01',
+          seq: ++seq,
+          sourceTime: Date.now(),
+          pos: { x: 10, y: 10 },
+          accuracyM: 1,
+          speed: 0,
+          quality: 'good',
+          gimbal: { yaw: 12.5, pitch: -20, zoom: 2 },
+        }),
+      );
     tel();
     const timer = setInterval(tel, 500);
     gw.on('close', () => clearInterval(timer));
     gw.on('message', (raw) => {
       const m = JSON.parse(String(raw));
-      if (m.t === 'camera' && answer) gw.send(JSON.stringify({ t: 'camera_result', requestId: m.requestId, deviceId: m.deviceId, ok: true, confirmed: true, detail: `camera got ${m.action}` }));
+      if (m.t === 'camera' && answer)
+        gw.send(JSON.stringify({ t: 'camera_result', requestId: m.requestId, deviceId: m.deviceId, ok: true, confirmed: true, detail: `camera got ${m.action}` }));
     });
     await waitFor(async () => (await devop.get('/devices/SBX-ROVER-01')).body.gimbal?.yaw === 12.5);
   });
@@ -184,6 +204,33 @@ describe('real camera through a gateway (developer sandbox)', () => {
     gw.close();
     await closed;
     await new Promise((r) => setTimeout(r, 50)); // let the server record the disconnect
+  });
+
+  it('keeps the declared equipment (sanitised) and applies status updates from telemetry', async () => {
+    const d0 = (await devop.get('/devices/SBX-ROVER-01')).body;
+    expect(d0.components.map((c: { id: string }) => c.id)).toEqual(['cam', 'fc']);
+    expect(d0.components[1]).toMatchObject({ status: 'pending', kind: 'flight_controller' });
+    expect(d0.components[1].detail).toHaveLength(160);
+    gw.send(
+      JSON.stringify({
+        t: 'telemetry',
+        deviceId: 'SBX-ROVER-01',
+        seq: 10_000,
+        sourceTime: Date.now(),
+        pos: { x: 10, y: 10 },
+        accuracyM: 1,
+        speed: 0,
+        quality: 'good',
+        components: [
+          { id: 'cam', status: 'ok', version: 'camera 1.2.3 · gimbal 2.0' },
+          { id: 'ghost', status: 'ok' },
+        ],
+      }),
+    );
+    await waitFor(async () => (await devop.get('/devices/SBX-ROVER-01')).body.components?.[0]?.status === 'ok');
+    const d1 = (await devop.get('/devices/SBX-ROVER-01')).body;
+    expect(d1.components[0]).toMatchObject({ id: 'cam', status: 'ok', version: 'camera 1.2.3 · gimbal 2.0' });
+    expect(d1.components).toHaveLength(2);
   });
 
   it('routes the request to the gateway and returns the camera answer', async () => {
@@ -208,7 +255,8 @@ describe('real camera through a gateway (developer sandbox)', () => {
     expect(s.body.label).toBe('LIVE');
     expect(s.body.whep).toMatch(/^https:\/\/edge\.example:8889\/sbx-zt30\/whep\?token=/);
     const token = new URL(s.body.whep).searchParams.get('token')!;
-    const auth = (b: object) => fetch(`${srv.url}/api/v1/media/auth`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.status);
+    const auth = (b: object) =>
+      fetch(`${srv.url}/api/v1/media/auth`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.status);
     // What MediaMTX sends: action, path, query string.
     expect(await auth({ action: 'read', path: 'sbx-zt30', protocol: 'webrtc', query: `token=${token}` })).toBe(200);
     expect(await auth({ action: 'read', path: 'cam-other', protocol: 'webrtc', query: `token=${token}` })).toBe(401);

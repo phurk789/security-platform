@@ -1,6 +1,7 @@
 // Adapter for SIYI gimbal cameras (ZT30, ZR30, ZR10, ZT6, A8 mini …) on a SIYI link.
 // Talks the SIYI SDK over UDP; the video itself goes through the site media server (RTSP → WebRTC).
 import dgram from 'node:dgram';
+import { ComponentTracker } from '../adapters/components';
 import type { AdapterDeclaration, CameraAction, CameraMount, GimbalState, GwCameraResult, SrvCommand, StreamInfo } from '@13store/shared';
 import type { Adapter, AdapterContext } from '../sdk';
 import { CMD, SIYI_DEFAULT, decode, parseAttitude, parseCurrentZoom, parseFeedback, parseFirmware, parseGimbalInfo, req, type Frame } from './siyiProtocol';
@@ -37,6 +38,7 @@ export class SiyiCameraAdapter implements Adapter {
   private lastReply = 0;
   private gimbal: GimbalState = { yaw: 0, pitch: 0 };
   private firmware?: string;
+  private comps: ComponentTracker;
   private pending = new Map<number, { requestId: string; timer: ReturnType<typeof setTimeout>; done: (r: Omit<GwCameraResult, 't' | 'deviceId' | 'requestId'>) => void }>();
   private host: string;
   private port: number;
@@ -51,6 +53,11 @@ export class SiyiCameraAdapter implements Adapter {
   constructor(private cfg: SiyiCameraConfig) {
     this.host = cfg.host ?? SIYI_DEFAULT.host;
     this.port = cfg.port ?? SIYI_DEFAULT.port;
+    this.comps = new ComponentTracker([
+      { id: 'cam', name: cfg.model ?? 'SIYI gimbal camera', kind: 'camera', status: 'pending', detail: 'Waiting for the first SDK reply', stream: cfg.stream },
+      { id: 'gimbal', name: 'Gimbal', kind: 'gimbal', status: 'pending', detail: 'Waiting for attitude' },
+      { id: 'media', name: 'Site media server stream', kind: 'network', status: cfg.stream ? 'pending' : 'offline', detail: cfg.stream?.rtsp ?? 'No stream configured' },
+    ]);
     this.declaration = {
       deviceId: cfg.deviceId,
       kind: 'cctv',
@@ -68,6 +75,7 @@ export class SiyiCameraAdapter implements Adapter {
       view: undefined,
       stream: cfg.stream,
       mount: cfg.mount,
+      components: this.comps.list(),
     } as AdapterDeclaration;
   }
 
@@ -128,6 +136,7 @@ export class SiyiCameraAdapter implements Adapter {
       speed: 0,
       quality: 'good',
       gimbal: { ...this.gimbal },
+      components: this.comps.flush(),
     } as Parameters<AdapterContext['telemetry']>[0]);
   }
 
@@ -136,7 +145,10 @@ export class SiyiCameraAdapter implements Adapter {
     switch (f.cmd) {
       case CMD.GIMBAL_ATTITUDE: {
         const a = parseAttitude(f.data);
-        if (a) Object.assign(this.gimbal, { yaw: a.yaw * this.yawSign, pitch: a.pitch, roll: a.roll });
+        if (a) {
+          Object.assign(this.gimbal, { yaw: a.yaw * this.yawSign, pitch: a.pitch, roll: a.roll });
+          this.comps.set('gimbal', { status: 'ok', detail: 'Attitude streaming' });
+        }
         break;
       }
       case CMD.CURRENT_ZOOM:
@@ -155,6 +167,8 @@ export class SiyiCameraAdapter implements Adapter {
         if (fw) {
           this.firmware = `camera ${fw.camera} · gimbal ${fw.gimbal}${fw.zoom ? ` · zoom ${fw.zoom}` : ''}`;
           this.ctx.log.info(`${this.cfg.deviceId}: firmware ${this.firmware}`);
+          this.comps.set('cam', { status: 'ok', version: this.firmware, detail: 'SDK answering' });
+          if (this.cfg.stream) this.comps.set('media', { status: 'ok', detail: 'Stream path registered on the media server' });
         }
         break;
       }
@@ -163,7 +177,11 @@ export class SiyiCameraAdapter implements Adapter {
         const p = this.pending.get(CMD.PHOTO_VIDEO);
         if (p && code !== null) {
           const ok = code === 0 || code === 2 || code === 3;
-          p.done({ ok, confirmed: true, detail: ['Photo taken.', 'Photo failed on the camera.', 'HDR on.', 'HDR off.', 'Recording failed on the camera.'][code] ?? `Camera code ${code}` });
+          p.done({
+            ok,
+            confirmed: true,
+            detail: ['Photo taken.', 'Photo failed on the camera.', 'HDR on.', 'HDR off.', 'Recording failed on the camera.'][code] ?? `Camera code ${code}`,
+          });
         }
         break;
       }

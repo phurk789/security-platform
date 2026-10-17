@@ -1154,10 +1154,11 @@ export class TwinWorld {
   // ---------------------------------------------------------------------------
 
   /** A camera positioned where the real device's camera is. Updated every call. */
-  feedCamera(deviceId: string, aspect: number): THREE.PerspectiveCamera | null {
+  feedCamera(deviceId: string, aspect: number, facing: 'front' | 'rear' | 'left' | 'right' | 'down' = 'front'): THREE.PerspectiveCamera | null {
     const d = this.state?.devices[deviceId];
     if (!d) return null;
-    let cam = this.feedCams.get(deviceId);
+    const key = facing === 'front' ? deviceId : `${deviceId}:${facing}`;
+    let cam = this.feedCams.get(key);
     if (d.kind === 'cctv') {
       const view = CAMERA_VIEWS[deviceId];
       if (!view) return null;
@@ -1186,7 +1187,15 @@ export class TwinWorld {
       if (!v) return null;
       cam ??= new THREE.PerspectiveCamera(d.kind === 'uav' ? 70 : 62, aspect, 0.2, 600);
       const fwd = new THREE.Vector3(Math.sin(v.heading), 0, -Math.cos(v.heading));
-      if (d.kind === 'ugv') {
+      if (d.kind === 'ugv' && facing !== 'front') {
+        // Secondary fixed cameras: rear / side views from the hull, no gimbal.
+        const turn = facing === 'rear' ? Math.PI : facing === 'left' ? -Math.PI / 2 : facing === 'right' ? Math.PI / 2 : 0;
+        const dir = facing === 'down' ? new THREE.Vector3(fwd.x * 0.3, -1, fwd.z * 0.3).normalize() : new THREE.Vector3(Math.sin(v.heading + turn), 0, -Math.cos(v.heading + turn));
+        const back = 0.75 * SYMBOL_SCALE.ugv;
+        cam.position.set(v.pos.x + dir.x * back, facing === 'down' ? 1.6 : 1.1, v.pos.z + dir.z * back);
+        cam.lookAt(cam.position.clone().addScaledVector(dir, 30));
+        cam.fov = facing === 'down' ? 90 : 84;
+      } else if (d.kind === 'ugv') {
         // Real camera: ~1.3 m up on the mast. The model is drawn enlarged, so put the
         // camera just ahead of the drawn bumper to keep the view clear.
         const ahead = 0.75 * SYMBOL_SCALE.ugv;
@@ -1205,7 +1214,7 @@ export class TwinWorld {
     }
     cam.aspect = aspect;
     cam.updateProjectionMatrix();
-    this.feedCams.set(deviceId, cam);
+    this.feedCams.set(key, cam);
     return cam;
   }
 

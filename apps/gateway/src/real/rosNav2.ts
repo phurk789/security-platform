@@ -5,6 +5,7 @@
 //
 // rosbridge protocol (rosbridge_suite ≥ 1.3): subscribe / publish / send_action_goal /
 // cancel_action_goal / action_feedback / action_result.
+import { ComponentTracker } from '../adapters/components';
 import WebSocket from 'ws';
 import type { AdapterDeclaration, IndoorState, Point, SrvCommand } from '@13store/shared';
 import { VEHICLE_CATALOG, catalogCapabilities } from '@13store/shared';
@@ -34,6 +35,7 @@ type Msg = Record<string, unknown>;
 
 export class RosNav2Adapter implements Adapter {
   readonly declaration: AdapterDeclaration;
+  private comps: ComponentTracker;
   private ctx!: AdapterContext;
   private ws?: WebSocket;
   private ledger = new CommandLedger();
@@ -53,6 +55,11 @@ export class RosNav2Adapter implements Adapter {
   private active?: { commandId: string; type: 'start' | 'resume' | 'pause' | 'stop'; since: number };
 
   constructor(private cfg: RosNav2Config) {
+    this.comps = new ComponentTracker([
+      { id: 'nav', name: 'ROS 2 Nav2 (rosbridge)', kind: 'computer', status: 'pending', detail: 'Connecting' },
+      { id: 'slam', name: 'SLAM localisation', kind: 'lidar', status: 'pending', detail: 'Waiting for a pose' },
+      { id: 'battery', name: 'Battery', kind: 'battery', status: 'pending', detail: 'Waiting for battery_state' },
+    ]);
     this.declaration = {
       deviceId: cfg.deviceId,
       kind: 'ugv',
@@ -69,6 +76,7 @@ export class RosNav2Adapter implements Adapter {
       linkLossBehavior: 'Nav2 keeps the current goal; the platform stops reporting and holds new commands. Configure the vehicle to stop on lost heartbeat.',
       catalogId: cfg.catalogId && VEHICLE_CATALOG[cfg.catalogId] ? cfg.catalogId : undefined,
       indoor: cfg.indoor ?? { buildingId: 'unknown', level: 1, positioning: 'slam' },
+      components: this.comps.list(),
     } as AdapterDeclaration;
   }
 
@@ -156,13 +164,18 @@ export class RosNav2Adapter implements Adapter {
           const cov = (msg.pose as Msg)?.covariance as number[] | undefined;
           if (cov && typeof cov[0] === 'number') this.accuracyM = Math.round(Math.sqrt(Math.max(cov[0], cov[7] ?? 0)) * 100) / 100 || 0.3;
           this.lastPose = this.ctx.now();
+          this.comps.set('nav', { status: 'ok', detail: 'Connected' });
+          this.comps.set('slam', { status: this.accuracyM <= 1 ? 'ok' : 'warn', detail: `±${this.accuracyM.toFixed(2)} m` });
         }
       } else if (m.topic === (t.odom ?? '/odom')) {
         const lin = ((msg.twist as Msg)?.twist as Msg)?.linear as Msg | undefined;
         if (lin) this.speed = Math.hypot(Number(lin.x) || 0, Number(lin.y) || 0);
       } else if (m.topic === (t.battery ?? '/battery_state')) {
         const pct = Number(msg.percentage);
-        if (Number.isFinite(pct)) this.battery = Math.round(pct <= 1 ? pct * 100 : pct);
+        if (Number.isFinite(pct)) {
+          this.battery = Math.round(pct <= 1 ? pct * 100 : pct);
+          this.comps.set('battery', { status: this.battery < 15 ? 'fault' : this.battery < 30 ? 'warn' : 'ok', detail: `${this.battery}%` });
+        }
       }
     } else if (m.op === 'action_feedback' && m.id === this.goalId) {
       const fb = m.values as Msg;
@@ -208,6 +221,7 @@ export class RosNav2Adapter implements Adapter {
         nextCp: this.route.length ? this.nextCp : undefined,
         heading: Math.round(this.headingDeg),
         level: this.cfg.indoor?.level,
+        components: this.comps.flush(),
       } as Parameters<AdapterContext['telemetry']>[0]);
     }
     const a = this.active;

@@ -39,12 +39,20 @@ export function CommandCenter() {
       <aside className="panel cc-rail">
         <div className="panel-head">
           <h2>{t('Units')}</h2>
-          <span className="hud-count">{units.filter((u) => freshness(s, u) === 'live').length}/{units.length} LIVE</span>
+          <span className="hud-count">
+            {units.filter((u) => freshness(s, u) === 'live').length}/{units.length} LIVE
+          </span>
         </div>
         <div className="cc-filter seg" role="tablist">
-          <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>{t('All')} {units.length}</button>
-          <button className={filter === 'ugv' ? 'on' : ''} onClick={() => setFilter('ugv')}><Truck size={14} /> {count('ugv')}</button>
-          <button className={filter === 'uav' ? 'on' : ''} onClick={() => setFilter('uav')}><Drone size={14} /> {count('uav')}</button>
+          <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>
+            {t('All')} {units.length}
+          </button>
+          <button className={filter === 'ugv' ? 'on' : ''} onClick={() => setFilter('ugv')}>
+            <Truck size={14} /> {count('ugv')}
+          </button>
+          <button className={filter === 'uav' ? 'on' : ''} onClick={() => setFilter('uav')}>
+            <Drone size={14} /> {count('uav')}
+          </button>
         </div>
         <div className="cc-units">
           {shown.map((u) => (
@@ -61,7 +69,14 @@ export function CommandCenter() {
             <div className="cc-video">
               {can(currentUser(s).role, 'media.view') ? (
                 <>
-                  <CameraFeed scene="ugv" label={t('{id} onboard', { id: d.id })} deviceId={d.id} time={freshness(s, d) === 'live' ? s.now : d.lastSeen} freshness={freshness(s, d)} replay={s.replay.active} />
+                  <CameraFeed
+                    scene="ugv"
+                    label={t('{id} onboard', { id: d.id })}
+                    deviceId={d.id}
+                    time={freshness(s, d) === 'live' ? s.now : d.lastSeen}
+                    freshness={freshness(s, d)}
+                    replay={s.replay.active}
+                  />
                   <Instruments d={d} m={m} />
                 </>
               ) : (
@@ -70,7 +85,9 @@ export function CommandCenter() {
             </div>
             <div className="cc-lower">
               <div className="panel cc-twin">
-                <div className="cc-twin-head"><MapPinned size={14} /> {t('Digital twin · following {id}', { id: d.id })}</div>
+                <div className="cc-twin-head">
+                  <MapPinned size={14} /> {t('Digital twin · following {id}', { id: d.id })}
+                </div>
                 {webglAvailable() ? <Twin3D follow={d.id} /> : <p className="empty">{t('3D view needs WebGL.')}</p>}
               </div>
               <div className="cc-tlm">
@@ -81,14 +98,18 @@ export function CommandCenter() {
 
           <aside className="cc-side">
             <section className="panel cc-box">
-              <div className="panel-head"><h2>{t('Mission control')}</h2></div>
+              <div className="panel-head">
+                <h2>{t('Mission control')}</h2>
+              </div>
               <div className="cc-box-body">
                 <MissionControl d={d} m={m} />
               </div>
             </section>
             {['gimbal', 'spotlight', 'beacon', 'speaker'].some((c) => d.capabilities.includes(c)) && (
               <section className="panel cc-box">
-                <div className="panel-head"><h2>{d.payloads?.length ? t('Camera & 4-in-1 module') : t('Camera')}</h2></div>
+                <div className="panel-head">
+                  <h2>{d.payloads?.length ? t('Camera & 4-in-1 module') : t('Camera')}</h2>
+                </div>
                 <div className="cc-box-body">
                   <CameraControls device={d} aimAt={m ? { incidentId: m.incidentId } : undefined} />
                 </div>
@@ -96,14 +117,18 @@ export function CommandCenter() {
             )}
             {d.catalogId && VEHICLE_CATALOG[d.catalogId] && (
               <section className="panel cc-box">
-                <div className="panel-head"><h2>{t('Vehicle')}</h2></div>
+                <div className="panel-head">
+                  <h2>{t('Vehicle')}</h2>
+                </div>
                 <div className="cc-box-body">
                   <VehicleSpecs d={d} />
                 </div>
               </section>
             )}
             <section className="panel cc-box cc-log-box">
-              <div className="panel-head"><h2>{t('Activity')}</h2></div>
+              <div className="panel-head">
+                <h2>{t('Activity')}</h2>
+              </div>
               <ActivityLog d={d} />
             </section>
           </aside>
@@ -111,7 +136,9 @@ export function CommandCenter() {
       ) : (
         <section className="cc-main cc-empty">
           <p className="empty">{t('No ground or air units registered.')}</p>
-          <button className="btn-secondary" onClick={() => dispatch({ type: 'setView', view: 'devices' })}>{t('Open devices')}</button>
+          <button className="btn-secondary" onClick={() => dispatch({ type: 'setView', view: 'devices' })}>
+            {t('Open devices')}
+          </button>
         </section>
       )}
     </div>
@@ -142,7 +169,9 @@ function MissionStrip({ d, m }: { d: Device; m?: Mission }) {
   const eta = moving ? left / Math.max(d.speed > 0.5 ? d.speed : UGV_SPEED * 0.6, 0.5) : null;
   return (
     <div className="panel cc-strip">
-      <span className={`fc-ico k-${d.kind}`}><Icon size={18} /></span>
+      <span className={`fc-ico k-${d.kind}`}>
+        <Icon size={18} />
+      </span>
       <div className="cc-strip-id">
         <b>{d.id}</b>
         <small>{d.model}</small>
@@ -152,7 +181,13 @@ function MissionStrip({ d, m }: { d: Device; m?: Mission }) {
           <div className="cc-strip-m">
             <span className="mono">{m.id}</span> <MissionBadge status={m.status} />
             {inc && (
-              <button className="link" onClick={() => { dispatch({ type: 'selectIncident', id: inc.id }); dispatch({ type: 'setView', view: 'overview' }); }}>
+              <button
+                className="link"
+                onClick={() => {
+                  dispatch({ type: 'selectIncident', id: inc.id });
+                  dispatch({ type: 'setView', view: 'overview' });
+                }}
+              >
                 {inc.id} · {inc.title} <ArrowRight size={12} />
               </button>
             )}
@@ -174,7 +209,11 @@ function MissionStrip({ d, m }: { d: Device; m?: Mission }) {
           </div>
         </>
       ) : (
-        <div className="cc-strip-m muted">{d.commands.length ? t('No active mission. Missions start from an incident and need a supervisor’s approval.') : t('Display and video only. This unit takes no commands.')}</div>
+        <div className="cc-strip-m muted">
+          {d.commands.length
+            ? t('No active mission. Missions start from an incident and need a supervisor’s approval.')
+            : t('Display and video only. This unit takes no commands.')}
+        </div>
       )}
     </div>
   );
@@ -194,7 +233,7 @@ function Instruments({ d, m }: { d: Device; m?: Mission }) {
   const { s } = useStore();
   const f = freshness(s, d);
   if (f === 'offline') return null;
-  const hdg = ((d.heading ?? 0) % 360 + 360) % 360;
+  const hdg = (((d.heading ?? 0) % 360) + 360) % 360;
   const mode = m?.status === 'executing' ? 'AUTO' : m?.status === 'paused' ? 'HOLD' : d.commands.length ? 'STANDBY' : 'MONITOR';
   // Heading tape: ±60° across 360 px, centred at x = 320.
   const ticks = [];
@@ -203,7 +242,12 @@ function Instruments({ d, m }: { d: Device; m?: Mission }) {
     const n = ((a % 360) + 360) % 360;
     const major = n % 30 === 0;
     ticks.push(<line key={`h${a}`} x1={x} x2={x} y1={major ? 40 : 45} y2={52} className="ins-tick" />);
-    if (major) ticks.push(<text key={`l${a}`} x={x} y={36} className="ins-lbl" textAnchor="middle">{({ 0: 'N', 90: 'E', 180: 'S', 270: 'W' } as Record<number, string>)[n] ?? String(n).padStart(3, '0')}</text>);
+    if (major)
+      ticks.push(
+        <text key={`l${a}`} x={x} y={36} className="ins-lbl" textAnchor="middle">
+          {({ 0: 'N', 90: 'E', 180: 'S', 270: 'W' } as Record<number, string>)[n] ?? String(n).padStart(3, '0')}
+        </text>,
+      );
   }
   return (
     <svg className={`instruments${f === 'stale' ? ' stale' : ''}`} viewBox="0 0 640 360" preserveAspectRatio="none" aria-hidden="true">
@@ -213,17 +257,27 @@ function Instruments({ d, m }: { d: Device; m?: Mission }) {
         {ticks}
         <path d="M314 58 L320 52 L326 58" className="ins-caret" />
         <rect x={296} y={58} width={48} height={18} rx={2} className="ins-box" />
-        <text x={320} y={71} className="ins-val" textAnchor="middle">{String(Math.round(hdg)).padStart(3, '0')}°</text>
+        <text x={320} y={71} className="ins-val" textAnchor="middle">
+          {String(Math.round(hdg)).padStart(3, '0')}°
+        </text>
       </g>
       {/* speed tape */}
       <Tape x={46} value={d.speed} step={1} label="SPD" unit="m/s" side="left" />
       {/* altitude tape (air units) */}
       {d.kind === 'uav' && <Tape x={594} value={d.alt ?? 0} step={5} label="ALT" unit="m" side="right" />}
       {/* corners */}
-      <text x={18} y={292} className="ins-mode">{mode}</text>
-      <text x={18} y={310} className="ins-sm">GNSS {d.satellites ?? '—'} · ±{d.accuracyM.toFixed(1)} m</text>
-      <text x={622} y={292} className="ins-mode" textAnchor="end">BAT {d.battery !== undefined ? Math.round(d.battery) : '—'}%</text>
-      <text x={622} y={310} className="ins-sm" textAnchor="end">LINK {d.signal !== undefined ? Math.round(d.signal) : '—'}% · {d.latencyMs !== undefined ? Math.round(d.latencyMs) : '—'} ms</text>
+      <text x={18} y={292} className="ins-mode">
+        {mode}
+      </text>
+      <text x={18} y={310} className="ins-sm">
+        GNSS {d.satellites ?? '—'} · ±{d.accuracyM.toFixed(1)} m
+      </text>
+      <text x={622} y={292} className="ins-mode" textAnchor="end">
+        BAT {d.battery !== undefined ? Math.round(d.battery) : '—'}%
+      </text>
+      <text x={622} y={310} className="ins-sm" textAnchor="end">
+        LINK {d.signal !== undefined ? Math.round(d.signal) : '—'}% · {d.latencyMs !== undefined ? Math.round(d.latencyMs) : '—'} ms
+      </text>
     </svg>
   );
 }
@@ -238,7 +292,12 @@ function Tape({ x, value, step, label, unit, side }: { x: number; value: number;
     const major = Math.round(v / step) % 2 === 0;
     const dir = side === 'left' ? 1 : -1;
     lines.push(<line key={`t${v}`} x1={x} x2={x + dir * (major ? 12 : 7)} y1={y} y2={y} className="ins-tick" />);
-    if (major) lines.push(<text key={`v${v}`} x={x + dir * 16} y={y + 4} className="ins-lbl" textAnchor={side === 'left' ? 'start' : 'end'}>{Number(v.toFixed(1))}</text>);
+    if (major)
+      lines.push(
+        <text key={`v${v}`} x={x + dir * 16} y={y + 4} className="ins-lbl" textAnchor={side === 'left' ? 'start' : 'end'}>
+          {Number(v.toFixed(1))}
+        </text>,
+      );
   }
   const bx = side === 'left' ? x - 34 : x - 6;
   return (
@@ -246,8 +305,12 @@ function Tape({ x, value, step, label, unit, side }: { x: number; value: number;
       <line x1={x} x2={x} y1={100} y2={280} className="ins-tick" />
       {lines}
       <rect x={bx} y={180} width={40} height={20} rx={2} className="ins-box" />
-      <text x={bx + 20} y={194} className="ins-val" textAnchor="middle">{value.toFixed(1)}</text>
-      <text x={x} y={94} className="ins-sm" textAnchor="middle">{label} {unit}</text>
+      <text x={bx + 20} y={194} className="ins-val" textAnchor="middle">
+        {value.toFixed(1)}
+      </text>
+      <text x={x} y={94} className="ins-sm" textAnchor="middle">
+        {label} {unit}
+      </text>
     </g>
   );
 }
@@ -264,15 +327,28 @@ function MissionControl({ d, m }: { d: Device; m?: Mission }) {
     return (
       <div className="cc-next">
         <p className="muted">{t('No active mission. Missions start from an incident and need a supervisor’s approval.')}</p>
-        <button className="btn-secondary wide" onClick={() => dispatch({ type: 'setView', view: 'missions' })}><ListChecks size={16} /> {t('Open missions')}</button>
+        <button className="btn-secondary wide" onClick={() => dispatch({ type: 'setView', view: 'missions' })}>
+          <ListChecks size={16} /> {t('Open missions')}
+        </button>
       </div>
     );
   }
-  if (['assigned', 'executing', 'paused'].includes(m.status)) return <div className="cc-live"><LiveMission m={m} /></div>;
+  if (['assigned', 'executing', 'paused'].includes(m.status))
+    return (
+      <div className="cc-live">
+        <LiveMission m={m} />
+      </div>
+    );
   return (
     <div className="cc-next">
       <p>{nextStep(m, t)}</p>
-      <button className="btn-secondary wide" onClick={() => { dispatch({ type: 'selectIncident', id: m.incidentId }); dispatch({ type: 'setView', view: 'overview' }); }}>
+      <button
+        className="btn-secondary wide"
+        onClick={() => {
+          dispatch({ type: 'selectIncident', id: m.incidentId });
+          dispatch({ type: 'setView', view: 'overview' });
+        }}
+      >
         <Crosshair size={16} /> {t('Open {id}', { id: m.incidentId })}
       </button>
     </div>
@@ -311,7 +387,9 @@ function ActivityLog({ d }: { d: Device }) {
         r.kind === 'cmd' ? (
           <li key={r.key}>
             <span className="cc-log-t">{fmtTime(r.at, true)}</span>
-            <span className="cc-log-i"><Navigation size={13} /></span>
+            <span className="cc-log-i">
+              <Navigation size={13} />
+            </span>
             <span className="cc-log-x">
               <b>{t(r.c.type)}</b> · {s.users.some((u) => u.id === r.c.issuer) ? userName(s, r.c.issuer) : r.c.issuer}
               {!isTerminal(r.c) && <Activity size={12} className="spin-soft" />}
@@ -321,7 +399,9 @@ function ActivityLog({ d }: { d: Device }) {
         ) : (
           <li key={r.key} className={r.e.tone ? `tone-${r.e.tone}` : ''}>
             <span className="cc-log-t">{fmtTime(r.at, true)}</span>
-            <span className="cc-log-i"><Gauge size={13} /></span>
+            <span className="cc-log-i">
+              <Gauge size={13} />
+            </span>
             <span className="cc-log-x">{r.e.title}</span>
           </li>
         ),
@@ -334,7 +414,7 @@ function ActivityLog({ d }: { d: Device }) {
 // Vehicle specs from the catalogue (manufacturer ratings) and rated runtime left
 // ---------------------------------------------------------------------------
 
-function VehicleSpecs({ d }: { d: Device }) {
+export function VehicleSpecs({ d }: { d: Device }) {
   const t = useT();
   const m = VEHICLE_CATALOG[d.catalogId!];
   const left = runtimeLeftMin(d.catalogId, d.battery);
@@ -346,17 +426,45 @@ function VehicleSpecs({ d }: { d: Device }) {
         <span className="cc-role">{role}</span>
       </div>
       <dl>
-        <div><dt>{t('Rated runtime left')}</dt><dd>{left === null ? '—' : `≈ ${left} min`} <small>/ {m.enduranceMin} min</small></dd></div>
-        <div><dt>{t('Max speed')}</dt><dd>{m.maxSpeedKmh} km/h</dd></div>
-        <div><dt>{t('Payload')}</dt><dd>{m.payloadKg} kg</dd></div>
-        <div><dt>{t('Control range')}</dt><dd>{m.controlRangeM >= 1000 ? `${m.controlRangeM / 1000} km` : `${m.controlRangeM} m`}</dd></div>
-        <div><dt>{t('Climb / step / trench')}</dt><dd>{m.climbDeg}° · {m.obstacleMm} mm · {m.trenchMm} mm</dd></div>
-        <div><dt>{t('Size · mass')}</dt><dd>{m.dimsMm.join('×')} mm · {m.massKg} kg</dd></div>
+        <div>
+          <dt>{t('Rated runtime left')}</dt>
+          <dd>
+            {left === null ? '—' : `≈ ${left} min`} <small>/ {m.enduranceMin} min</small>
+          </dd>
+        </div>
+        <div>
+          <dt>{t('Max speed')}</dt>
+          <dd>{m.maxSpeedKmh} km/h</dd>
+        </div>
+        <div>
+          <dt>{t('Payload')}</dt>
+          <dd>{m.payloadKg} kg</dd>
+        </div>
+        <div>
+          <dt>{t('Control range')}</dt>
+          <dd>{m.controlRangeM >= 1000 ? `${m.controlRangeM / 1000} km` : `${m.controlRangeM} m`}</dd>
+        </div>
+        <div>
+          <dt>{t('Climb / step / trench')}</dt>
+          <dd>
+            {m.climbDeg}° · {m.obstacleMm} mm · {m.trenchMm} mm
+          </dd>
+        </div>
+        <div>
+          <dt>{t('Size · mass')}</dt>
+          <dd>
+            {m.dimsMm.join('×')} mm · {m.massKg} kg
+          </dd>
+        </div>
       </dl>
       {d.payloads?.map((p) => (
-        <p key={p} className="cc-payload">+ {PAYLOAD_CATALOG[p]?.name ?? p}</p>
+        <p key={p} className="cc-payload">
+          + {PAYLOAD_CATALOG[p]?.name ?? p}
+        </p>
       ))}
-      <p className="fine">{t('Manufacturer ratings, not measured on site.')} {m.notes}</p>
+      <p className="fine">
+        {t('Manufacturer ratings, not measured on site.')} {m.notes}
+      </p>
     </div>
   );
 }

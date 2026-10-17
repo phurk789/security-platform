@@ -54,6 +54,9 @@ import {
   isPayloadAction,
   VEHICLE_CATALOG,
   PAYLOAD_CATALOG,
+  COMPONENT_KINDS,
+  COMPONENT_STATUSES,
+  applyComponentUpdates,
   aimAt,
   lineOfSight,
   mountOf,
@@ -61,6 +64,10 @@ import {
   type Aim,
   type Building,
   type CameraAction,
+  type ComponentKind,
+  type ComponentStatus,
+  type ComponentUpdate,
+  type DeviceComponent,
   type TimelineEvent,
   type User,
 } from '@13store/shared';
@@ -227,7 +234,9 @@ export class Platform {
       detail: opts.detail,
       tone: opts.tone,
     };
-    this.db.prepare('INSERT INTO timeline (id, org_id, incident_id, at, received_at, data) VALUES (?,?,?,?,?,?)').run(`${orgId}:${ev.id}`, orgId, incidentId, ev.at, ev.receivedAt, JSON.stringify(ev));
+    this.db
+      .prepare('INSERT INTO timeline (id, org_id, incident_id, at, received_at, data) VALUES (?,?,?,?,?,?)')
+      .run(`${orgId}:${ev.id}`, orgId, incidentId, ev.at, ev.receivedAt, JSON.stringify(ev));
     this.publish({ orgId, siteId, incidentId, event: { type: 'timeline', event: ev } });
     return ev;
   }
@@ -260,7 +269,9 @@ export class Platform {
   private saveIncident(orgId: string, siteId: string, inc: Incident) {
     const { siteId: _s, ...clean } = inc as Incident & { siteId?: string };
     this.db
-      .prepare('INSERT INTO incidents (id, org_id, site_id, status, created_at, data) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data')
+      .prepare(
+        'INSERT INTO incidents (id, org_id, site_id, status, created_at, data) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data',
+      )
       .run(clean.id, orgId, siteId, clean.status, clean.createdAt, JSON.stringify(clean));
     this.publish({ orgId, siteId, incidentId: clean.id, event: { type: 'incident', incident: clean } });
   }
@@ -270,10 +281,7 @@ export class Platform {
     inc.status = to;
   }
 
-  listIncidents(
-    a: Actor,
-    f: { siteId?: string; status?: string; zone?: string; from?: number; to?: number; q?: string; deviceId?: string; limit?: number } = {},
-  ): Incident[] {
+  listIncidents(a: Actor, f: { siteId?: string; status?: string; zone?: string; from?: number; to?: number; q?: string; deviceId?: string; limit?: number } = {}): Incident[] {
     if (a.role === 'admin') fail(403, 'forbidden', 'Administrators manage the system but do not see incident data.');
     const rows = this.db
       .prepare('SELECT site_id, data FROM incidents WHERE org_id = ? AND created_at BETWEEN ? AND ? ORDER BY created_at DESC LIMIT ?')
@@ -291,7 +299,18 @@ export class Platform {
 
   createIncident(
     a: Actor,
-    input: { siteId?: string; title: string; type?: string; severity?: Incident['severity']; zone?: string; place?: string; pos?: Point; source?: string; cameraId?: string; at?: number },
+    input: {
+      siteId?: string;
+      title: string;
+      type?: string;
+      severity?: Incident['severity'];
+      zone?: string;
+      place?: string;
+      pos?: Point;
+      source?: string;
+      cameraId?: string;
+      at?: number;
+    },
   ) {
     this.require(a, 'incident.create', 'incident');
     const siteId = input.siteId ?? this.defaultSite(a);
@@ -460,7 +479,9 @@ export class Platform {
 
   private saveAssignment(orgId: string, siteId: string, x: Assignment) {
     this.db
-      .prepare('INSERT INTO assignments (id, org_id, incident_id, responder_id, status, data) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data')
+      .prepare(
+        'INSERT INTO assignments (id, org_id, incident_id, responder_id, status, data) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data',
+      )
       .run(x.id, orgId, x.incidentId, x.responderId, x.status, JSON.stringify(x));
     this.publish({ orgId, siteId, incidentId: x.incidentId, event: { type: 'assignment', assignment: x } });
   }
@@ -468,7 +489,9 @@ export class Platform {
   assign(a: Actor, incidentId: string, responderId: string) {
     this.require(a, 'incident.assign', incidentId);
     const inc = this.getIncident(a, incidentId);
-    const r = this.db.prepare("SELECT id, name, role FROM users WHERE id = ? AND org_id = ? AND active = 1").get(responderId, a.orgId) as { id: string; name: string; role: Role } | undefined;
+    const r = this.db.prepare('SELECT id, name, role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(responderId, a.orgId) as
+      | { id: string; name: string; role: Role }
+      | undefined;
     if (!r || r.role !== 'responder') fail(400, 'invalid', 'Choose an active field responder.');
     const x: Assignment = {
       id: `${this.prefix(a.orgId)}ASG-${nextNumber(this.db, a.orgId, 'asg')}`,
@@ -524,7 +547,8 @@ export class Platform {
       this.saveAssignment(a.orgId, inc.siteId, x);
       this.event(a, a.orgId, inc.siteId, inc.id, title, { detail: body.note, tone: action === 'report' ? 'ok' : undefined });
       this.audit(a, `field.${action}`, id);
-      if (body.idempotencyKey) this.db.prepare('INSERT INTO idempotency (org_id, key, result, created_at) VALUES (?,?,?,?)').run(a.orgId, `asg:${body.idempotencyKey}`, JSON.stringify(x), this.now());
+      if (body.idempotencyKey)
+        this.db.prepare('INSERT INTO idempotency (org_id, key, result, created_at) VALUES (?,?,?,?)').run(a.orgId, `asg:${body.idempotencyKey}`, JSON.stringify(x), this.now());
     });
     return x;
   }
@@ -588,8 +612,10 @@ export class Platform {
   handover(a: Actor, deviceId: string, toUserId: string) {
     this.require(a, 'control.handover', deviceId);
     const d = this.getDevice(a, deviceId);
-    const to = this.db.prepare('SELECT id, name, role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(toUserId, a.orgId) as { id: string; name: string; role: Role } | undefined;
-    if (!to || !can(to.role, 'device.command') && to.role !== 'supervisor') fail(400, 'invalid', 'Control can only go to an operator or supervisor.');
+    const to = this.db.prepare('SELECT id, name, role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(toUserId, a.orgId) as
+      | { id: string; name: string; role: Role }
+      | undefined;
+    if (!to || (!can(to.role, 'device.command') && to.role !== 'supervisor')) fail(400, 'invalid', 'Control can only go to an operator or supervisor.');
     const from = d.controlOwner;
     tx(this.db, () => {
       d.controlOwner = toUserId;
@@ -634,9 +660,9 @@ export class Platform {
   }
 
   private activeMission(deviceId: string): Mission | undefined {
-    const r = this.db.prepare("SELECT data FROM missions WHERE device_id = ? AND status IN ('approved','assigned','executing','paused','pending_approval') ORDER BY rowid DESC LIMIT 1").get(deviceId) as
-      | { data: string }
-      | undefined;
+    const r = this.db
+      .prepare("SELECT data FROM missions WHERE device_id = ? AND status IN ('approved','assigned','executing','paused','pending_approval') ORDER BY rowid DESC LIMIT 1")
+      .get(deviceId) as { data: string } | undefined;
     return r ? JSON.parse(r.data) : undefined;
   }
 
@@ -652,7 +678,9 @@ export class Platform {
 
   private saveMission(orgId: string, siteId: string, m: Mission) {
     this.db
-      .prepare('INSERT INTO missions (id, org_id, site_id, incident_id, device_id, status, data) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data')
+      .prepare(
+        'INSERT INTO missions (id, org_id, site_id, incident_id, device_id, status, data) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data',
+      )
       .run(m.id, orgId, siteId, m.incidentId, m.deviceId, m.status, JSON.stringify(m));
     this.publish({ orgId, siteId, event: { type: 'mission', mission: m } });
   }
@@ -664,7 +692,8 @@ export class Platform {
 
   private validRoute(pts: Point[]) {
     if (!Array.isArray(pts) || pts.length < 1 || pts.length > 50) fail(400, 'invalid', 'Route needs 1–50 checkpoints.');
-    for (const p of pts) if (typeof p?.x !== 'number' || typeof p?.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y)) fail(400, 'invalid', 'Checkpoints must be {x, y} numbers.');
+    for (const p of pts)
+      if (typeof p?.x !== 'number' || typeof p?.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y)) fail(400, 'invalid', 'Checkpoints must be {x, y} numbers.');
     return pts.map((p) => ({ x: p.x, y: p.y }));
   }
 
@@ -689,7 +718,9 @@ export class Platform {
     };
     tx(this.db, () => {
       this.saveMission(a.orgId, inc.siteId, m);
-      this.event(a, a.orgId, inc.siteId, inc.id, `Mission ${m.id} drafted`, { detail: `${d.id}, ${m.checkpoints.length} checkpoints, operator ${this.userName(a.orgId, m.operatorId)}.` });
+      this.event(a, a.orgId, inc.siteId, inc.id, `Mission ${m.id} drafted`, {
+        detail: `${d.id}, ${m.checkpoints.length} checkpoints, operator ${this.userName(a.orgId, m.operatorId)}.`,
+      });
       this.audit(a, 'mission.create', m.id);
     });
     return m;
@@ -704,7 +735,10 @@ export class Platform {
     tx(this.db, () => {
       if (m.status === 'approved' || m.status === 'assigned') {
         m.status = 'pending_approval';
-        this.event(a, a.orgId, siteId, m.incidentId, 'Route changed after approval — re-approval required', { tone: 'warn', detail: `Plan v${m.planVersion}; approved plan was v${m.approvedVersion}.` });
+        this.event(a, a.orgId, siteId, m.incidentId, 'Route changed after approval — re-approval required', {
+          tone: 'warn',
+          detail: `Plan v${m.planVersion}; approved plan was v${m.approvedVersion}.`,
+        });
         this.publish({ orgId: a.orgId, siteId, event: { type: 'notice', tone: 'warn', text: `Route of ${m.id} changed. Re-approval required.` } });
       } else {
         this.event(a, a.orgId, siteId, m.incidentId, `Route updated (plan v${m.planVersion})`);
@@ -791,7 +825,8 @@ export class Platform {
     if (m.operatorId !== a.userId) fail(403, 'forbidden', 'This mission is assigned to another operator.');
     if (m.status !== 'approved' || m.approvedVersion !== m.planVersion) fail(409, 'conflict', 'Mission needs an approved plan first.');
     const d = this.getDevice(a, m.deviceId);
-    if (d.controlOwner && d.controlOwner !== a.userId) fail(409, 'control_held', `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`);
+    if (d.controlOwner && d.controlOwner !== a.userId)
+      fail(409, 'control_held', `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`);
     tx(this.db, () => {
       d.controlOwner = a.userId;
       this.saveDevice(d);
@@ -808,7 +843,9 @@ export class Platform {
 
   private saveCommand(orgId: string, siteId: string, c: Command) {
     this.db
-      .prepare('INSERT INTO commands (id, org_id, site_id, mission_id, device_id, idempotency_key, status, data) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data')
+      .prepare(
+        'INSERT INTO commands (id, org_id, site_id, mission_id, device_id, idempotency_key, status, data) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, data = excluded.data',
+      )
       .run(c.id, orgId, siteId, c.missionId, c.deviceId, c.idempotencyKey, c.status, JSON.stringify(c));
     this.publish({ orgId, siteId, event: { type: 'command', command: c } });
   }
@@ -824,7 +861,10 @@ export class Platform {
   listCommands(a: Actor, missionId?: string): Command[] {
     if (a.role === 'responder') return [];
     const rows = this.db.prepare('SELECT site_id, data FROM commands WHERE org_id = ? ORDER BY rowid').all(a.orgId) as { site_id: string; data: string }[];
-    return rows.filter((r) => this.inScope(a, a.orgId, r.site_id)).map((r) => JSON.parse(r.data) as Command).filter((c) => !missionId || c.missionId === missionId);
+    return rows
+      .filter((r) => this.inScope(a, a.orgId, r.site_id))
+      .map((r) => JSON.parse(r.data) as Command)
+      .filter((c) => !missionId || c.missionId === missionId);
   }
 
   issueCommand(a: Actor, missionId: string, type: CommandType, idempotencyKey: string): Command {
@@ -861,7 +901,13 @@ export class Platform {
       throw new ApiError(409, code, why);
     };
     if (!d.commands.includes(type)) deny('invalid', `${d.id} adapter does not support ${type}.`);
-    if (d.controlOwner !== a.userId) deny('control_held', d.controlOwner ? `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.` : `You do not hold control of ${d.id}. Accept the mission first.`);
+    if (d.controlOwner !== a.userId)
+      deny(
+        'control_held',
+        d.controlOwner
+          ? `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`
+          : `You do not hold control of ${d.id}. Accept the mission first.`,
+      );
     const valid: Record<CommandType, MissionStatus[]> = { start: ['assigned'], pause: ['executing'], resume: ['paused'], stop: ['executing', 'paused'] };
     if (!valid[type].includes(m.status)) deny('conflict', `Cannot ${type} while mission is ${m.status.replace('_', ' ')}.`);
     if (type === 'start' && m.approvedVersion !== m.planVersion) deny('conflict', 'Plan changed since approval. Re-approval required.');
@@ -871,14 +917,26 @@ export class Platform {
     if (pending && type !== 'stop') deny('conflict', `Waiting for ${pending.type} (${pending.id}) to finish.`);
 
     this.setCmd(c, 'authorized');
-    const sent = this.gateways.send(d.orgId, d.id, { t: 'command', commandId: c.id, idempotencyKey, deviceId: d.id, type, expiresAt: c.expiresAt, route: type === 'start' ? m.checkpoints : undefined, missionId });
+    const sent = this.gateways.send(d.orgId, d.id, {
+      t: 'command',
+      commandId: c.id,
+      idempotencyKey,
+      deviceId: d.id,
+      type,
+      expiresAt: c.expiresAt,
+      route: type === 'start' ? m.checkpoints : undefined,
+      missionId,
+    });
     if (sent) this.setCmd(c, 'sent');
     tx(this.db, () => {
       this.saveCommand(a.orgId, siteId, c);
-      this.event(a, a.orgId, siteId, m.incidentId, `${type.toUpperCase()} requested`, { detail: `${c.id} ${sent ? 'sent to' : 'queued for'} ${d.id}. Waiting for device response.` });
+      this.event(a, a.orgId, siteId, m.incidentId, `${type.toUpperCase()} requested`, {
+        detail: `${c.id} ${sent ? 'sent to' : 'queued for'} ${d.id}. Waiting for device response.`,
+      });
       this.audit(a, 'device.command', `${missionId}:${type}`, 'ok', c.id);
     });
-    if (fresh !== 'live') this.publish({ orgId: a.orgId, siteId, event: { type: 'notice', tone: 'warn', text: `Telemetry is ${fresh}. The ${type} request was sent but the result may be unknown.` } });
+    if (fresh !== 'live')
+      this.publish({ orgId: a.orgId, siteId, event: { type: 'notice', tone: 'warn', text: `Telemetry is ${fresh}. The ${type} request was sent but the result may be unknown.` } });
     return c;
   }
 
@@ -971,6 +1029,7 @@ export class Platform {
         catalogId: decl.catalogId && VEHICLE_CATALOG[decl.catalogId] ? decl.catalogId : d.catalogId,
         indoor: sanitizeIndoor(decl.indoor) ?? d.indoor,
         payloads: Array.isArray(decl.payloads) ? decl.payloads.filter((p) => typeof p === 'string' && PAYLOAD_CATALOG[p]) : d.payloads,
+        components: sanitizeComponents(decl.components) ?? d.components,
       });
       this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
       this.lastSeq.delete(d.id); // a new connection may restart sequence numbers
@@ -979,7 +1038,13 @@ export class Platform {
     }
     // Anything never delivered before this (re)connect is dropped, never replayed (F09).
     for (const id of accepted) this.expireUndelivered(id, 'Not delivered before the gateway reconnected. Not replayed.');
-    this.audit(sys, 'gateway.connect', gatewayId, 'ok', `accepted ${accepted.join(', ') || 'none'}${rejected.length ? `; rejected ${rejected.map((r) => r.deviceId).join(', ')}` : ''}`);
+    this.audit(
+      sys,
+      'gateway.connect',
+      gatewayId,
+      'ok',
+      `accepted ${accepted.join(', ') || 'none'}${rejected.length ? `; rejected ${rejected.map((r) => r.deviceId).join(', ')}` : ''}`,
+    );
     return { accepted, rejected };
   }
 
@@ -988,7 +1053,11 @@ export class Platform {
   }
 
   private expireUndelivered(deviceId: string, why: string) {
-    const rows = this.db.prepare("SELECT org_id, site_id, data FROM commands WHERE device_id = ? AND status IN ('requested','authorized','sent')").all(deviceId) as { org_id: string; site_id: string; data: string }[];
+    const rows = this.db.prepare("SELECT org_id, site_id, data FROM commands WHERE device_id = ? AND status IN ('requested','authorized','sent')").all(deviceId) as {
+      org_id: string;
+      site_id: string;
+      data: string;
+    }[];
     for (const r of rows) {
       const c = JSON.parse(r.data) as Command;
       if (this.setCmd(c, 'timed_out', why)) this.saveCommand(r.org_id, r.site_id, c);
@@ -1012,6 +1081,7 @@ export class Platform {
     if (t.satellites !== undefined) d.satellites = t.satellites;
     if (t.temperatureC !== undefined) d.temperatureC = t.temperatureC;
     if (d.indoor && Number.isFinite(t.level)) d.indoor = { ...d.indoor, level: Math.round(t.level as number) };
+    if (Array.isArray(t.components)) d.components = applyComponentUpdates(d.components, sanitizeComponentUpdates(t.components));
     if (t.gimbal && Number.isFinite(t.gimbal.yaw) && Number.isFinite(t.gimbal.pitch)) {
       const g = t.gimbal;
       const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
@@ -1099,7 +1169,13 @@ export class Platform {
     if (a.kind === 'user') this.manualCamera.set(d.id, this.now());
     const result = await this.sendCamera(d, action);
     // Speed commands come in pairs (press, release); audit both so the record shows the full move.
-    this.audit(a, isPayloadAction(action) ? 'payload.control' : 'camera.control', d.id, result.ok ? 'ok' : 'error', `${describeCameraAction(action)} — ${result.detail}${result.ok && !result.confirmed ? ' (not confirmed)' : ''}`);
+    this.audit(
+      a,
+      isPayloadAction(action) ? 'payload.control' : 'camera.control',
+      d.id,
+      result.ok ? 'ok' : 'error',
+      `${describeCameraAction(action)} — ${result.detail}${result.ok && !result.confirmed ? ' (not confirmed)' : ''}`,
+    );
     return result;
   }
 
@@ -1109,7 +1185,15 @@ export class Platform {
     const d = this.getDevice(a, deviceId);
     const need = action ? actionCapability(action) : 'gimbal';
     if (!d.capabilities.includes(need)) {
-      const what: Record<string, string> = { gimbal: 'gimbal camera', spotlight: 'searchlight', beacon: 'warning light', speaker: 'loudspeaker', zoom: 'zoom', photo: 'photo function', record: 'recording' };
+      const what: Record<string, string> = {
+        gimbal: 'gimbal camera',
+        spotlight: 'searchlight',
+        beacon: 'warning light',
+        speaker: 'loudspeaker',
+        zoom: 'zoom',
+        photo: 'photo function',
+        record: 'recording',
+      };
       return fail(400, 'invalid', `${d.id} has no ${what[need] ?? need}.`);
     }
     if (d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== a.userId && a.role !== 'system') {
@@ -1204,7 +1288,9 @@ export class Platform {
     this.event(null, orgId, siteId, inc.id, r.ok ? `${d.id} turned to the alert automatically` : `${d.id} could not be turned to the alert`, {
       actor: 'Auto camera',
       tone: r.ok ? undefined : 'warn',
-      detail: r.ok ? `${pick.aim.distanceM} m away, ${pick.aim.zoom}× zoom. ${r.confirmed ? 'Confirmed by the camera.' : 'Not confirmed by the camera.'} Operators can take over at any time.` : r.detail,
+      detail: r.ok
+        ? `${pick.aim.distanceM} m away, ${pick.aim.zoom}× zoom. ${r.confirmed ? 'Confirmed by the camera.' : 'Not confirmed by the camera.'} Operators can take over at any time.`
+        : r.detail,
     });
   }
 
@@ -1246,7 +1332,11 @@ export class Platform {
           // Events can overtake the start confirmation (e.g. vehicle already at the target):
           // a finished route proves the start command ran.
           if (m && m.status === 'assigned') {
-            for (const r of this.db.prepare("SELECT org_id, site_id, data FROM commands WHERE mission_id = ? AND status IN ('sent','acknowledged','executing')").all(m.id) as { org_id: string; site_id: string; data: string }[]) {
+            for (const r of this.db.prepare("SELECT org_id, site_id, data FROM commands WHERE mission_id = ? AND status IN ('sent','acknowledged','executing')").all(m.id) as {
+              org_id: string;
+              site_id: string;
+              data: string;
+            }[]) {
               const c = JSON.parse(r.data) as Command;
               if (c.type !== 'start') continue;
               c.delivered = true;
@@ -1260,7 +1350,12 @@ export class Platform {
             m.status = 'completed';
             m.nextCp = m.checkpoints.length;
             this.saveMission(orgId, d.siteId, m);
-            this.event(null, orgId, d.siteId, m.incidentId, `${d.id} reached final checkpoint`, { actor: d.id, tone: 'ok', at: e.at, detail: 'Arrival confirmed by vehicle telemetry.' });
+            this.event(null, orgId, d.siteId, m.incidentId, `${d.id} reached final checkpoint`, {
+              actor: d.id,
+              tone: 'ok',
+              at: e.at,
+              detail: 'Arrival confirmed by vehicle telemetry.',
+            });
           }
           break;
         case 'checkpoint':
@@ -1284,7 +1379,17 @@ export class Platform {
           break;
         case 'snapshot': {
           const incidentId = m?.incidentId ?? this.lastMissionIncident(d.id);
-          if (incidentId && e.frame) this.storeEvidence(orgId, d.siteId, incidentId, { kind: 'snapshot', title: `${d.id} onboard camera`, source: d.id, recordedBy: d.id, capturedAt: e.at, mime: e.frame.mime, bytes: Buffer.from(e.frame.base64, 'base64'), simulated: d.integration === 'simulated' });
+          if (incidentId && e.frame)
+            this.storeEvidence(orgId, d.siteId, incidentId, {
+              kind: 'snapshot',
+              title: `${d.id} onboard camera`,
+              source: d.id,
+              recordedBy: d.id,
+              capturedAt: e.at,
+              mime: e.frame.mime,
+              bytes: Buffer.from(e.frame.base64, 'base64'),
+              simulated: d.integration === 'simulated',
+            });
           break;
         }
       }
@@ -1300,14 +1405,24 @@ export class Platform {
 
   sweep() {
     const now = this.now();
-    const rows = this.db.prepare("SELECT org_id, site_id, data FROM commands WHERE status IN ('requested','authorized','sent','acknowledged','executing')").all() as { org_id: string; site_id: string; data: string }[];
+    const rows = this.db.prepare("SELECT org_id, site_id, data FROM commands WHERE status IN ('requested','authorized','sent','acknowledged','executing')").all() as {
+      org_id: string;
+      site_id: string;
+      data: string;
+    }[];
     for (const r of rows) {
       const c = JSON.parse(r.data) as Command;
       const age = now - c.issuedAt;
       const d = this.devices.get(c.deviceId);
       let changed = false;
       if ((c.status === 'authorized' || c.status === 'sent' || c.status === 'requested') && (age >= COMMAND_ACK_TIMEOUT_MS || now > c.expiresAt)) {
-        changed = this.setCmd(c, 'timed_out', c.status === 'authorized' ? 'Edge gateway not connected. Command was not delivered.' : 'No acknowledgement from the device. Result unknown — check with the field operator.');
+        changed = this.setCmd(
+          c,
+          'timed_out',
+          c.status === 'authorized'
+            ? 'Edge gateway not connected. Command was not delivered.'
+            : 'No acknowledgement from the device. Result unknown — check with the field operator.',
+        );
       } else if ((c.status === 'acknowledged' || c.status === 'executing') && ((d && freshnessAt(now, d) !== 'live' && age >= COMMAND_ACK_TIMEOUT_MS + 1000) || age > 60_000)) {
         changed = this.setCmd(c, 'unknown', 'Device stopped reporting before confirming. Outcome unknown.');
       }
@@ -1315,7 +1430,12 @@ export class Platform {
         tx(this.db, () => {
           this.saveCommand(r.org_id, r.site_id, c);
           const mm = this.missionById(c.missionId);
-          if (mm) this.event(null, r.org_id, r.site_id, mm.m.incidentId, `${c.type.toUpperCase()} request ${c.status === 'unknown' ? 'outcome unknown' : 'timed out'}`, { actor: 'Platform', tone: 'warn', detail: c.detail });
+          if (mm)
+            this.event(null, r.org_id, r.site_id, mm.m.incidentId, `${c.type.toUpperCase()} request ${c.status === 'unknown' ? 'outcome unknown' : 'timed out'}`, {
+              actor: 'Platform',
+              tone: 'warn',
+              detail: c.detail,
+            });
         });
       }
     }
@@ -1348,14 +1468,30 @@ export class Platform {
     orgId: string,
     siteId: string,
     incidentId: string,
-    x: { kind: Evidence['kind']; title: string; source: string; recordedBy: string; capturedAt: number; mime?: string; bytes?: Buffer; text?: string; simulated: boolean; idempotencyKey?: string; retentionClass?: string },
+    x: {
+      kind: Evidence['kind'];
+      title: string;
+      source: string;
+      recordedBy: string;
+      capturedAt: number;
+      mime?: string;
+      bytes?: Buffer;
+      text?: string;
+      simulated: boolean;
+      idempotencyKey?: string;
+      retentionClass?: string;
+    },
   ) {
     const id = `${this.prefix(orgId)}EV-${String(nextNumber(this.db, orgId, 'evidence', 102)).padStart(4, '0')}`;
     const body = x.bytes ?? Buffer.from(x.text ?? x.title, 'utf8');
     const checksum = sha256(body);
     let path: string | null = null;
     if (x.bytes) {
-      const ext = (x.mime ?? 'application/octet-stream').split('/')[1]?.replace('svg+xml', 'svg').replace(/[^a-z0-9]/g, '') || 'bin';
+      const ext =
+        (x.mime ?? 'application/octet-stream')
+          .split('/')[1]
+          ?.replace('svg+xml', 'svg')
+          .replace(/[^a-z0-9]/g, '') || 'bin';
       path = join('evidence', orgId, `${id}.${ext}`);
       this.evidenceDir(orgId);
       writeFileSync(join(this.cfg.dataDir, path), x.bytes);
@@ -1375,14 +1511,20 @@ export class Platform {
       size: body.length,
       retentionClass: x.retentionClass ?? 'standard',
     };
-    this.db.prepare('INSERT INTO evidence (id, org_id, incident_id, sha256, path, idempotency_key, data) VALUES (?,?,?,?,?,?,?)').run(id, orgId, incidentId, checksum, path, x.idempotencyKey ?? null, JSON.stringify(ev));
+    this.db
+      .prepare('INSERT INTO evidence (id, org_id, incident_id, sha256, path, idempotency_key, data) VALUES (?,?,?,?,?,?,?)')
+      .run(id, orgId, incidentId, checksum, path, x.idempotencyKey ?? null, JSON.stringify(ev));
     const what = { note: 'Note', snapshot: 'Snapshot', photo: 'Photo', clip: 'Video clip', file: 'File' }[x.kind];
     this.event(null, orgId, siteId, incidentId, `${what} attached`, { actor: x.recordedBy, detail: x.kind === 'note' ? x.text : ev.title });
     this.publish({ orgId, siteId, incidentId, event: { type: 'evidence', evidence: ev } });
     return ev;
   }
 
-  addEvidence(a: Actor, incidentId: string, input: { kind?: 'note' | 'photo' | 'file'; title?: string; text?: string; mime?: string; contentBase64?: string; capturedAt?: number; idempotencyKey?: string }) {
+  addEvidence(
+    a: Actor,
+    incidentId: string,
+    input: { kind?: 'note' | 'photo' | 'file'; title?: string; text?: string; mime?: string; contentBase64?: string; capturedAt?: number; idempotencyKey?: string },
+  ) {
     this.require(a, 'evidence.add', incidentId);
     const inc = this.getIncident(a, incidentId);
     if (input.idempotencyKey) {
@@ -1423,14 +1565,18 @@ export class Platform {
   listEvidence(a: Actor, incidentId: string): Evidence[] {
     this.require(a, 'evidence.view', incidentId, { mutating: false });
     this.getIncident(a, incidentId);
-    const merged = this.listIncidents({ ...a, role: a.role === 'responder' ? 'dispatcher' : a.role }, {}).filter((i) => i.duplicateOf === incidentId).map((i) => i.id);
+    const merged = this.listIncidents({ ...a, role: a.role === 'responder' ? 'dispatcher' : a.role }, {})
+      .filter((i) => i.duplicateOf === incidentId)
+      .map((i) => i.id);
     return this.evidenceFor(a, new Set([incidentId, ...merged]));
   }
 
   /** Returns file bytes for viewing or exporting. Both are permission-checked and audited. */
   evidenceContent(a: Actor, id: string, exportFile: boolean) {
     this.require(a, exportFile ? 'evidence.export' : 'evidence.view', id, { mutating: false });
-    const r = this.db.prepare('SELECT org_id, incident_id, path, data FROM evidence WHERE id = ?').get(id) as { org_id: string; incident_id: string; path: string | null; data: string } | undefined;
+    const r = this.db.prepare('SELECT org_id, incident_id, path, data FROM evidence WHERE id = ?').get(id) as
+      | { org_id: string; incident_id: string; path: string | null; data: string }
+      | undefined;
     if (!r || r.org_id !== a.orgId) return fail(404, 'not_found', 'Evidence not found.');
     this.getIncident(a, r.incident_id);
     const ev = JSON.parse(r.data) as Evidence;
@@ -1447,14 +1593,18 @@ export class Platform {
     const inc = this.getIncident(a, incidentId);
     const missions = this.missionsFor(incidentId);
     const cmds = missions.flatMap((m) => this.listCommands(a, m.id));
-    const events = (this.db.prepare('SELECT data FROM timeline WHERE incident_id = ? AND org_id = ? ORDER BY at').all(incidentId, a.orgId) as { data: string }[]).map((r) => JSON.parse(r.data) as TimelineEvent);
+    const events = (this.db.prepare('SELECT data FROM timeline WHERE incident_id = ? AND org_id = ? ORDER BY at').all(incidentId, a.orgId) as { data: string }[]).map(
+      (r) => JSON.parse(r.data) as TimelineEvent,
+    );
     const files = this.listEvidence({ ...a, role: a.role === 'auditor' || a.role === 'supervisor' ? a.role : 'dispatcher' }, incidentId);
     const name = (id?: string) => this.userName(a.orgId, id);
     const meta = this.meta(a.orgId);
     const lines = [
       `# Incident report ${inc.id} — ${inc.title}`,
       '',
-      meta.dataLabel !== 'LIVE' ? `> ${meta.dataLabel} DATA — generated by the 13STORE Public Security Twin (${this.cfg.env} environment). Not an operational record.` : `> Generated by the 13STORE Public Security Twin.`,
+      meta.dataLabel !== 'LIVE'
+        ? `> ${meta.dataLabel} DATA — generated by the 13STORE Public Security Twin (${this.cfg.env} environment). Not an operational record.`
+        : `> Generated by the 13STORE Public Security Twin.`,
       '',
       `- Report generated: ${fmtDate(this.now())} ${fmtTime(this.now(), true)} (Asia/Bangkok) by ${a.name}`,
       `- Zone / place: ${inc.zone} · ${inc.place}`,
@@ -1467,7 +1617,10 @@ export class Platform {
       '',
       '## Missions',
       ...(missions.length
-        ? missions.map((m) => `- ${m.id} · ${m.deviceId} · operator ${name(m.operatorId)} · plan v${m.planVersion} · approved ${m.approvedVersion ? `v${m.approvedVersion} by ${name(m.approvedBy)}` : 'no'} · ${m.status}`)
+        ? missions.map(
+            (m) =>
+              `- ${m.id} · ${m.deviceId} · operator ${name(m.operatorId)} · plan v${m.planVersion} · approved ${m.approvedVersion ? `v${m.approvedVersion} by ${name(m.approvedBy)}` : 'no'} · ${m.status}`,
+          )
         : ['- None']),
       '',
       '## Commands',
@@ -1477,7 +1630,9 @@ export class Platform {
       ...events.map((e) => `- ${fmtTime(e.at, true)} · ${fmtTime(e.receivedAt, true)} — ${e.title} (${e.actor})${e.detail ? `: ${e.detail}` : ''}`),
       '',
       '## Evidence',
-      ...(files.length ? files.map((f) => `- ${f.id} ${f.title} · ${f.source} · ${fmtTime(f.capturedAt, true)} · sha-256 ${f.checksum}${f.simulated ? ' · SIMULATED' : ''}`) : ['- None']),
+      ...(files.length
+        ? files.map((f) => `- ${f.id} ${f.title} · ${f.source} · ${fmtTime(f.capturedAt, true)} · sha-256 ${f.checksum}${f.simulated ? ' · SIMULATED' : ''}`)
+        : ['- None']),
       '',
       'Checksums show a file has not changed since it was stored. They are not, on their own, proof of admissibility.',
     ];
@@ -1646,6 +1801,58 @@ function sanitizeIndoor(v: unknown): Device['indoor'] {
   const level = typeof i.level === 'number' && Number.isFinite(i.level) ? Math.round(i.level) : 1;
   const positioning = ['slam', 'uwb', 'vision', 'fixed'].includes(i.positioning as string) ? (i.positioning as 'slam') : undefined;
   return { buildingId: i.buildingId, level: Math.max(-5, Math.min(200, level)), positioning };
+}
+
+const COMP_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
+const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+
+/** Equipment list from a gateway declaration: bounded strings, known kinds and statuses. */
+function sanitizeComponents(v: unknown): DeviceComponent[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: DeviceComponent[] = [];
+  const seen = new Set<string>();
+  for (const raw of v.slice(0, 32)) {
+    const c = raw as Record<string, unknown>;
+    if (!c || typeof c !== 'object' || typeof c.id !== 'string' || !COMP_ID.test(c.id) || seen.has(c.id)) continue;
+    const name = str(c.name, 80);
+    if (!name) continue;
+    seen.add(c.id);
+    const st = c.stream as Record<string, unknown> | undefined;
+    const stream =
+      st && typeof st === 'object'
+        ? Object.fromEntries(
+            Object.entries(st)
+              .filter(([k, val]) => ['rtsp', 'whep', 'hls', 'rtspSub', 'whepSub', 'hlsSub'].includes(k) && typeof val === 'string')
+              .map(([k, val]) => [k, (val as string).slice(0, 300)]),
+          )
+        : undefined;
+    out.push({
+      id: c.id,
+      name,
+      kind: COMPONENT_KINDS.includes(c.kind as ComponentKind) ? (c.kind as ComponentKind) : 'other',
+      version: str(c.version, 60),
+      status: COMPONENT_STATUSES.includes(c.status as ComponentStatus) ? (c.status as ComponentStatus) : 'pending',
+      detail: str(c.detail, 160),
+      facing: ['front', 'rear', 'left', 'right', 'down'].includes(c.facing as string) ? (c.facing as DeviceComponent['facing']) : undefined,
+      stream: stream && Object.keys(stream).length ? (stream as DeviceComponent['stream']) : undefined,
+    });
+  }
+  return out;
+}
+
+function sanitizeComponentUpdates(v: unknown[]): ComponentUpdate[] {
+  const out: ComponentUpdate[] = [];
+  for (const raw of v.slice(0, 32)) {
+    const u = raw as Record<string, unknown>;
+    if (!u || typeof u !== 'object' || typeof u.id !== 'string' || !COMP_ID.test(u.id)) continue;
+    out.push({
+      id: u.id,
+      status: COMPONENT_STATUSES.includes(u.status as ComponentStatus) ? (u.status as ComponentStatus) : undefined,
+      version: str(u.version, 60),
+      detail: str(u.detail, 160),
+    });
+  }
+  return out;
 }
 
 /** Mount data from a gateway declaration: numbers only, sane ranges. */

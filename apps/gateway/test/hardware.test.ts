@@ -89,6 +89,8 @@ describe('SIYI camera adapter', () => {
     cleanup.push(() => a.stop(), cam.close);
     await until(() => got.telemetry.length > 1);
     const t = got.telemetry.at(-1) as { gimbal?: { yaw: number; pitch: number; zoom?: number; recording?: boolean } };
+    const ups = got.telemetry.flatMap((x) => (x as { components?: { id: string; status?: string }[] }).components ?? []);
+    expect(ups.find((u) => u.id === 'gimbal')).toMatchObject({ status: 'ok' });
     expect(t.gimbal).toMatchObject({ yaw: 12.3, pitch: -15, zoom: 4.5, recording: true });
 
     a.onCamera('r1', { action: 'gimbal_angle', yaw: -45, pitch: -20 });
@@ -123,50 +125,63 @@ function fakeRover(opts: { armed?: boolean } = {}) {
   const input = new PassThrough();
   let seq = 0;
   let gcs: { port: number; address: string } | null = null;
-  const st = { armed: opts.armed ?? true, mode: 4 /* HOLD */, pos: { x: 214, y: 218 }, speed: 0, mission: [] as { lat: number; lon: number }[], expected: 0, received: [] as number[], silent: false, relays: {} as Record<number, number> };
+  const st = {
+    armed: opts.armed ?? true,
+    mode: 4 /* HOLD */,
+    pos: { x: 214, y: 218 },
+    speed: 0,
+    mission: [] as { lat: number; lon: number }[],
+    expected: 0,
+    received: [] as number[],
+    silent: false,
+    relays: {} as Record<number, number>,
+  };
   const send = (m: unknown) => gcs && !st.silent && sock.send(proto.serialize(m as never, seq++ & 0xff), gcs.port, gcs.address);
-  input.pipe(new MavLinkPacketSplitter()).pipe(new MavLinkPacketParser()).on('data', (p: MavLinkPacket) => {
-    st.received.push(p.header.msgid);
-    const reg = { ...minimal.REGISTRY, ...common.REGISTRY } as Record<number, never>;
-    const clazz = reg[p.header.msgid];
-    if (!clazz) return;
-    const d = p.protocol.data(p.payload, clazz) as unknown as Record<string, number>;
-    if (p.header.msgid === 44) {
-      st.expected = d.count;
-      st.mission = [];
-      const r = new common.MissionRequestInt();
-      r.targetSystem = 255;
-      r.targetComponent = 190;
-      r.seq = 0;
-      send(r);
-    } else if (p.header.msgid === 73) {
-      st.mission.push({ lat: d.x / 1e7, lon: d.y / 1e7 });
-      if (st.mission.length < st.expected) {
+  input
+    .pipe(new MavLinkPacketSplitter())
+    .pipe(new MavLinkPacketParser())
+    .on('data', (p: MavLinkPacket) => {
+      st.received.push(p.header.msgid);
+      const reg = { ...minimal.REGISTRY, ...common.REGISTRY } as Record<number, never>;
+      const clazz = reg[p.header.msgid];
+      if (!clazz) return;
+      const d = p.protocol.data(p.payload, clazz) as unknown as Record<string, number>;
+      if (p.header.msgid === 44) {
+        st.expected = d.count;
+        st.mission = [];
         const r = new common.MissionRequestInt();
         r.targetSystem = 255;
         r.targetComponent = 190;
-        r.seq = st.mission.length;
+        r.seq = 0;
         send(r);
-      } else {
-        const ack = new common.MissionAck();
-        ack.targetSystem = 255;
-        ack.targetComponent = 190;
-        ack.type = 0 as never;
+      } else if (p.header.msgid === 73) {
+        st.mission.push({ lat: d.x / 1e7, lon: d.y / 1e7 });
+        if (st.mission.length < st.expected) {
+          const r = new common.MissionRequestInt();
+          r.targetSystem = 255;
+          r.targetComponent = 190;
+          r.seq = st.mission.length;
+          send(r);
+        } else {
+          const ack = new common.MissionAck();
+          ack.targetSystem = 255;
+          ack.targetComponent = 190;
+          ack.type = 0 as never;
+          send(ack);
+        }
+      } else if (p.header.msgid === 76) {
+        const ack = new common.CommandAck();
+        ack.command = d.command as never;
+        ack.result = 0 as never;
+        if (d.command === 176) {
+          st.mode = d._param2;
+          st.speed = st.mode === 10 ? 2 : 0;
+        }
+        if (d.command === 193) st.speed = d._param1 ? 2 : 0;
+        if (d.command === 181) st.relays[d._param1] = d._param2; // DO_SET_RELAY
         send(ack);
       }
-    } else if (p.header.msgid === 76) {
-      const ack = new common.CommandAck();
-      ack.command = d.command as never;
-      ack.result = 0 as never;
-      if (d.command === 176) {
-        st.mode = d._param2;
-        st.speed = st.mode === 10 ? 2 : 0;
-      }
-      if (d.command === 193) st.speed = d._param1 ? 2 : 0;
-      if (d.command === 181) st.relays[d._param1] = d._param2; // DO_SET_RELAY
-      send(ack);
-    }
-  });
+    });
   sock.on('message', (msg, r) => {
     gcs = { port: r.port, address: r.address };
     input.write(msg);
@@ -232,8 +247,22 @@ describe('MAVLink vehicle adapter (UniFC 6 Pico class, via UniRC datalink)', () 
     const t0 = got.telemetry.at(-1)!;
     expect(Math.hypot(t0.pos.x - 214, t0.pos.y - 218)).toBeLessThan(0.05);
     expect(t0.battery).toBe(76);
+    // Equipment: declared pending, verified from the first messages (heartbeat, SYS_STATUS, GPS)
+    expect(a.declaration.components?.map((c) => [c.id, c.status])).toEqual(
+      expect.arrayContaining([
+        ['fc', 'pending'],
+        ['gnss', 'pending'],
+        ['battery', 'pending'],
+      ]),
+    );
+    const ups = got.telemetry.flatMap((t) => (t as { components?: { id: string; status?: string; version?: string }[] }).components ?? []);
+    expect(ups.find((u) => u.id === 'fc')).toMatchObject({ status: 'ok', version: 'ArduPilot' });
+    expect(ups.find((u) => u.id === 'battery')).toMatchObject({ status: 'ok' });
 
-    const route = [{ x: 262, y: 218 }, { x: 312, y: 222 }];
+    const route = [
+      { x: 262, y: 218 },
+      { x: 312, y: 222 },
+    ];
     a.onCommand(cmd('start', { deviceId: 'UGV-02', route }));
     await until(() => got.updates.some((u) => u.status === 'succeeded'), 8000);
     const statuses = got.updates.map((u) => u.status);
