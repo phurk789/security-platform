@@ -3631,3 +3631,171 @@ html:lang(th) .meta dt {
   display: inline-block;
   min-width: 160px;
 }
+
+/* SLA chips and playbook checklist */
+.sla-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 2px;
+  color: var(--text-2);
+}
+.sla-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  background: rgba(127, 150, 180, 0.08);
+}
+.sla-chip b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.sla-chip.met {
+  border-color: rgba(74, 222, 128, 0.5);
+  color: #4ade80;
+}
+.sla-chip.at_risk {
+  border-color: var(--amber);
+  color: var(--amber);
+  background: rgba(251, 191, 36, 0.1);
+}
+.sla-chip.breached {
+  border-color: var(--red);
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.12);
+}
+.sla-badge {
+  font-size: 0.66rem;
+}
+.checklist ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.checklist li label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+.checklist li input {
+  margin-top: 3px;
+}
+.checklist li.done > label > span {
+  text-decoration: line-through;
+  color: var(--text-2);
+}
+.checklist small.sub {
+  display: block;
+  text-decoration: none;
+}
+/* KPI dashboard */
+.kpi-dash .kpi-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+.kpi-dash .tile {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(127, 150, 180, 0.06);
+}
+.kpi-dash .tile small {
+  color: var(--text-2);
+  font-size: 0.74rem;
+}
+.kpi-dash .tile b {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-dash .tile span {
+  font-size: 0.74rem;
+}
+.kpi-dash .tile.ok b {
+  color: #4ade80;
+}
+.kpi-dash .tile.warn b {
+  color: var(--amber);
+}
+.kpi-dash .tile.bad b {
+  color: var(--red);
+}
+.kpi-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+.kpi-charts .chart h4 {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  color: var(--text-2);
+}
+.kpi-charts .bars {
+  width: 100%;
+  height: 90px;
+  display: block;
+}
+.kpi-charts .bar {
+  fill: var(--cyan);
+  opacity: 0.85;
+}
+.kpi-charts .bar.alt {
+  fill: #a78bfa;
+}
+.kpi-charts .axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-2);
+  font-size: 0.7rem;
+}
+.hbars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+.hbars li {
+  display: grid;
+  grid-template-columns: 1fr 120px 32px;
+  gap: 8px;
+  align-items: center;
+}
+.hbars .lbl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hbars i {
+  display: block;
+  height: 8px;
+  background: rgba(127, 150, 180, 0.18);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.hbars i b {
+  display: block;
+  height: 100%;
+  background: var(--cyan);
+}
+.hbars small {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

@@ -151,6 +151,19 @@ autoStart, enabled }`. Each run raises an incident of type `Scheduled patrol` an
 - `POST /devices/{id}/service {note}` (admin) and `PATCH /devices/{id}/stats {serviceIntervalM, serviceIntervalH, dock}`.
   `Device.stats` carries odometer, runtime, missions, service counters and `docked`. See VEHICLES.md.
 
+## Command centre: playbooks, SLA, notifications, KPIs
+
+- Playbooks (SOP steps + SLA minutes per stage) live in organisation settings: `playbooks` in `GET|PATCH /admin/settings`.
+  A new incident gets `playbookId` and a `checklist`; `POST /incidents/{id}/steps/{stepId} {done}` ticks a step
+  (`evidence.add`; audited `incident.step`). SLA stages are computed from the timeline (see COMMAND_CENTRE.md); a
+  breached stage is raised once (timeline entry, audit `sla.breach`, `incident.slaBreached`).
+- Notification channels: `notifications.channels` in `GET|PATCH /admin/settings` (kinds `webhook`, `line`, `sms`;
+  secrets come back masked as `••••••••` and may be sent back unchanged). `POST /admin/notifications/test {channelId}`
+  sends one message and returns the delivery record; `GET /admin/notifications/log?limit` lists recent deliveries.
+  Webhook receivers verify `X-PST-Signature: sha256=<hex HMAC-SHA256 of the raw body>` with the shared secret.
+- `GET /kpi?from&to` → the period's KPIs (`computeKpi` in `packages/shared/src/ops.ts`);
+  `GET /kpi/report?from&to&download=1` → the Markdown period report (`evidence.export`, audited).
+
 ## Replay
 
 Clients showing past data send `X-Console-Mode: replay`. The server then refuses every change

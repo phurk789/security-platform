@@ -65,6 +65,8 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   });
   p.bus.on('detection', (m: { detection: { type: string; outcome: string } }) => metrics.inc('ps_detections_total', { type: m.detection.type, outcome: m.detection.outcome }));
   p.bus.on('geofence', (m: { fence: { kind: string }; breach: boolean }) => metrics.inc('ps_geofence_events_total', { kind: m.fence.kind, breach: String(m.breach) }));
+  p.bus.on('sla', (m: { stage: string }) => metrics.inc('ps_sla_breaches_total', { stage: m.stage }));
+  p.bus.on('notification', (m: { delivery: { kind: string; status: string } }) => metrics.inc('ps_notifications_total', { kind: m.delivery.kind, status: m.delivery.status }));
 
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 12 * 1024 * 1024, trustProxy: true });
   await app.register(fastifyWebsocket, { options: { maxPayload: 1024 * 1024 } });
@@ -229,6 +231,20 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.get('/api/v1/detections/stats', async (req: Req) => p.detectionStats(A(req), num(req.query.from, p.now() - 30 * 86_400_000)!, num(req.query.to, p.now())!));
   app.get('/api/v1/incidents/:id', async (req: Req) => p.getIncident(A(req), req.params.id));
   app.get('/api/v1/incidents/:id/suggest', async (req: Req) => p.suggestUnits(A(req), req.params.id));
+  app.post('/api/v1/incidents/:id/steps/:stepId', async (req: Req) => p.setStep(A(req), req.params.id, req.params.stepId, body(req).done !== false));
+  // KPIs and the period report.
+  app.get('/api/v1/kpi', async (req: Req) => p.kpi(A(req), num(req.query.from, p.now() - 30 * 86_400_000)!, num(req.query.to, p.now())!));
+  app.get('/api/v1/kpi/report', async (req: Req, reply: FastifyReply) => {
+    const download = req.query.download === '1';
+    const from = num(req.query.from, p.now() - 30 * 86_400_000)!;
+    const to = num(req.query.to, p.now())!;
+    const r = p.kpiReport(A(req), from, to, download);
+    if (!download) return r;
+    reply
+      .header('Content-Type', 'text/markdown; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="operations-report-${new Date(from).toISOString().slice(0, 10)}.md"`);
+    return r.markdown;
+  });
   // Route planning and site geofences.
   app.post('/api/v1/routes/plan', async (req: Req) => p.planRouteFor(A(req), body(req) as any));
   app.get('/api/v1/geofences', async (req: Req) => p.listGeofences(A(req), req.query.siteId || undefined));
@@ -362,6 +378,8 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   });
   app.get('/api/v1/admin/settings', async (req) => p.orgSettings(A(req)));
   app.patch('/api/v1/admin/settings', async (req: Req) => p.updateOrgSettings(A(req), body(req) as any));
+  app.post('/api/v1/admin/notifications/test', async (req: Req) => p.testChannel(A(req), String(body(req).channelId ?? '')));
+  app.get('/api/v1/admin/notifications/log', async (req: Req) => p.notificationLog(A(req), num(req.query.limit, 50)!));
   app.post('/api/v1/admin/retention/run', async (req) => {
     p.require(A(req), 'admin.settings', 'retention');
     const r = p.runPurge()[A(req).orgId];

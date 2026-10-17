@@ -35,6 +35,7 @@ import { TelemetryPanel } from './TelemetryPanel';
 import { BuildingPanel } from './BuildingPanel';
 import { SiteOverview } from './SiteOverview';
 import { DevicePanel } from './DevicePanel';
+import { Checklist, SlaChips } from './Sla';
 import { BUILDINGS, floorPlan } from '@13store/shared';
 import { ago, useT } from '../i18n';
 
@@ -111,6 +112,7 @@ function IncidentPanel({ inc }: { inc: Incident }) {
         <div className="muted row gap-s">
           <MapPin size={14} /> {inc.place} <span className="sep">|</span> {inc.zone}
         </div>
+        <SlaChips inc={inc} />
         <dl className="meta">
           <div>
             <dt>{t('Source')}</dt>
@@ -202,6 +204,7 @@ function IncidentPanel({ inc }: { inc: Incident }) {
 
       <div className="panel-body">
         <Stage inc={inc} m={m} />
+        <Checklist inc={inc} />
         <FieldTasks inc={inc} />
       </div>
 

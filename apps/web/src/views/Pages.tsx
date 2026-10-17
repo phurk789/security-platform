@@ -11,6 +11,7 @@ import { CameraFeed } from '../components/CameraFeed';
 import { TwinMap } from '../components/TwinMap';
 import { RecordingsCard } from '../components/Recordings';
 import { PatrolsCard } from '../components/Patrols';
+import { KpiDashboard } from '../components/KpiDashboard';
 
 function Page({ title, sub, children, actions }: { title: string; sub?: string; children: React.ReactNode; actions?: React.ReactNode }) {
   return (
@@ -555,6 +556,8 @@ export function ReportsPage() {
         </div>
       }
     >
+      <KpiDashboard />
+      <h3 style={{ margin: '18px 0 8px' }}>{t('Incident report')}</h3>
       <div className="kpi-row">
         <div className="card stat">
           <small>{t('Alert → verified')}</small>

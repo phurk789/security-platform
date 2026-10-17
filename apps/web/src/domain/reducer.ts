@@ -41,6 +41,7 @@ import {
 } from './policy';
 import { initialState } from './scenario';
 import type { AppState, Command, CommandStatus, CommandType, Incident, Layers, Device, Mission, Point, TimelineEvent, VehicleSim, View } from '@13store/shared';
+import { pickPlaybook } from '@13store/shared';
 
 export type Msg =
   | { type: 'tick'; dt: number }
@@ -74,6 +75,7 @@ export type Msg =
   | { type: 'exportReport'; incidentId: string }
   | { type: 'demoInjectAlert' }
   | { type: 'demoInjectDetection'; kind?: 'person' | 'thermal_hotspot' }
+  | { type: 'setStep'; incidentId: string; stepId: string; done: boolean }
   | { type: 'demoCutLink'; deviceId: string }
   | { type: 'demoRestoreLink'; deviceId: string }
   | { type: 'demoReset' }
@@ -112,6 +114,14 @@ function toast(s: AppState, tone: 'info' | 'warn' | 'error' | 'ok', text: string
 function audit(s: AppState, action: string, object: string, result: 'ok' | 'denied' | 'error', detail?: string) {
   const u = currentUser(s);
   s.audit.push({ id: nextId(s, 'AUD'), at: s.now, actor: u.name, role: u.role, action, object, result, detail });
+}
+
+/** Offline demo: give a new incident its playbook checklist, as the server does. */
+export function attachPlaybook(s: Pick<AppState, 'playbooks'>, inc: Incident) {
+  const book = pickPlaybook(s.playbooks, inc);
+  if (!book) return;
+  inc.playbookId = book.id;
+  inc.checklist = book.steps.map((st) => ({ id: st.id, title: st.title, detail: st.detail, role: st.role }));
 }
 
 function event(s: AppState, incidentId: string, title: string, opts: Partial<TimelineEvent> = {}) {
@@ -825,10 +835,23 @@ export function reducer(prev: AppState, msg: Msg): AppState {
         cameraId: 'CCTV-02',
         thumb: 'gate',
       };
+      attachPlaybook(s, inc);
       s.incidents.unshift(inc);
       event(s, inc.id, 'Alert received', { actor: 'Gate sensor SG-2', tone: 'alert', receivedAt: s.now + 600, detail: 'Same sensor as INC-024. Possible duplicate.' });
       autoAim(s, inc);
       toast(s, 'info', `New simulated alert ${inc.id}: ${inc.title}.`);
+      return s;
+    }
+    case 'setStep': {
+      const inc = incident(s, msg.incidentId);
+      const step = inc?.checklist?.find((x) => x.id === msg.stepId);
+      if (!inc || !step) return s;
+      if (!guard(s, 'evidence.add', msg.incidentId)) return s;
+      const me = s.users.find((u) => u.id === s.userId);
+      step.doneAt = msg.done ? s.now : undefined;
+      step.by = msg.done ? me?.name : undefined;
+      event(s, inc.id, msg.done ? `Step done: ${step.title}` : `Step reopened: ${step.title}`, { tone: msg.done ? 'ok' : undefined });
+      audit(s, 'incident.step', `${inc.id}:${step.id}`, 'ok', msg.done ? 'done' : 'reopened');
       return s;
     }
     case 'demoInjectDetection': {
@@ -851,6 +874,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
         cameraId: 'CCTV-02',
         thumb: 'gate',
       };
+      attachPlaybook(s, inc);
       s.incidents.unshift(inc);
       event(s, inc.id, 'Alert received', { actor: source, tone: 'alert', detail: `${inc.type.replace('Detection: ', '')} reported.` });
       event(s, inc.id, 'Detection details', { actor: source, detail: thermal ? `${source} · confidence 93% · 78.5 °C` : `${source} · confidence 87% · box 47/49/10/39%` });

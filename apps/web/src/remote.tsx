@@ -76,6 +76,7 @@ function fromSnapshot(prev: AppState, snap: Snapshot, user: SessionUser, offset:
     assignments: snap.assignments,
     geofences: snap.geofences ?? [],
     patrols: snap.patrols ?? [],
+    playbooks: snap.playbooks ?? prev.playbooks,
     dataLabel: snap.meta.dataLabel,
     selectedIncidentId: selected,
   };
@@ -113,6 +114,7 @@ export function RemoteProvider({
       assignments: [],
       geofences: [],
       patrols: [],
+      playbooks: base.playbooks,
       telemetry: [],
       toasts: [],
       linkCut: {},
@@ -394,6 +396,9 @@ export function RemoteProvider({
           return;
         case 'demoInjectDetection':
           void call(P('/demo/inject-detection', { type: msg.kind ?? 'person' }), retry);
+          return;
+        case 'setStep':
+          void call(P(`/incidents/${encodeURIComponent(msg.incidentId)}/steps/${encodeURIComponent(msg.stepId)}`, { done: msg.done }), retry);
           return;
         case 'demoCutLink':
           void call(P('/demo/link', { deviceId: msg.deviceId, cut: true }), retry);

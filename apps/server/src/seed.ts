@@ -1,6 +1,6 @@
 // First-run data. Demo env gets the booth scenario with fixed, documented demo credentials.
 // Pilot env gets an empty org, one admin, and random keys printed once.
-import { SEED_USERS, SITE, SITE_GEOMETRY, seedDevices, seedEvidence, seedIncidents, seedTimeline, type Device } from '@13store/shared';
+import { DEFAULT_PLAYBOOKS, SEED_USERS, SITE, SITE_GEOMETRY, pickPlaybook, seedDevices, seedEvidence, seedIncidents, seedTimeline, type Device } from '@13store/shared';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Config } from './config';
@@ -153,6 +153,12 @@ export function seedOperational(db: DB, cfg: Config, now: number) {
     );
   }
   for (const inc of seedIncidents(now)) {
+    // Seeded alerts follow the default playbooks like live ones do.
+    const book = inc.checklist ? undefined : pickPlaybook(DEFAULT_PLAYBOOKS, inc);
+    if (book) {
+      inc.playbookId = book.id;
+      inc.checklist = book.steps.map((st) => ({ id: st.id, title: st.title, detail: st.detail, role: st.role }));
+    }
     db.prepare('INSERT INTO incidents (id, org_id, site_id, status, created_at, data) VALUES (?,?,?,?,?,?)').run(inc.id, DEMO_ORG, DEMO_SITE, inc.status, inc.createdAt, JSON.stringify(inc));
   }
   db.prepare("INSERT INTO counters (org_id, name, value) VALUES (?, 'incident', 24) ON CONFLICT(org_id, name) DO UPDATE SET value = 24").run(DEMO_ORG);

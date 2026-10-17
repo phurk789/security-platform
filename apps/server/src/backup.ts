@@ -16,7 +16,22 @@ export interface Manifest {
   auditHeads: Record<string, string | undefined>;
 }
 
-const TABLES = ['incidents', 'missions', 'commands', 'timeline', 'evidence', 'assignments', 'audit', 'users', 'devices'];
+const TABLES = [
+  'incidents',
+  'missions',
+  'commands',
+  'timeline',
+  'evidence',
+  'assignments',
+  'audit',
+  'users',
+  'devices',
+  'detections',
+  'geofences',
+  'patrols',
+  'device_stats',
+  'notifications',
+];
 
 function walk(dir: string): string[] {
   if (!existsSync(dir)) return [];

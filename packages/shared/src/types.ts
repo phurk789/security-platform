@@ -1,6 +1,7 @@
 // Domain model for the prototype. Names follow PRD R1 §4 and §6.
 import type { GimbalState, SimGimbal, StreamInfo } from './camera';
 import type { Geofence } from './routing';
+import type { ChecklistItem, Playbook, SlaStage } from './ops';
 import type { Patrol } from './protocol';
 import type { CameraMount } from './aim';
 
@@ -160,6 +161,11 @@ export interface Incident {
   thumb: 'gate' | 'path' | 'equipment' | 'lot';
   /** Set when the incident is a scheduled patrol run rather than an alert. */
   patrolId?: string;
+  /** Playbook (SOP) chosen for this incident and its checklist state. */
+  playbookId?: string;
+  checklist?: ChecklistItem[];
+  /** SLA stages already reported as breached (so each is raised once). */
+  slaBreached?: SlaStage[];
 }
 
 /** Odometer, runtime and service counters kept by the platform from telemetry. */
@@ -387,6 +393,8 @@ export interface AppState {
   geofences: Geofence[];
   /** Scheduled patrols (server only; empty in the offline demo). */
   patrols: Patrol[];
+  /** SOP playbooks with SLA limits (organisation settings; defaults offline). */
+  playbooks: Playbook[];
   /** Page-level data label from the server (SIMULATION / MIXED DEMO / LIVE). */
   dataLabel: 'SIMULATION' | 'MIXED DEMO' | 'LIVE' | 'OFFLINE DEMO';
   toasts: Toast[];

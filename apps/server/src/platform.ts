@@ -79,6 +79,14 @@ import {
   rankUnits,
   routeViolations,
   insideDemoArea,
+  type Playbook,
+  type SlaStage,
+  type NotificationChannel,
+  SLA_STAGE_LABEL,
+  computeKpi,
+  kpiMarkdown,
+  pickPlaybook,
+  slaStages,
   type ComponentKind,
   type ComponentStatus,
   type ComponentUpdate,
@@ -89,8 +97,9 @@ import {
 import { appendAudit } from './audit';
 import { createBackup, pruneBackups } from './backup';
 import { License } from './license';
-import { getOrgSettings, privacyErase, privacyExport, purgeExpired, setOrgSettings } from './retention';
+import { getOrgSettings, maskChannels, privacyErase, privacyExport, purgeExpired, setOrgSettings } from './retention';
 import { detectionDetail, detectionTitle, matchRule, sanitizeDetection } from './detections';
+import { Notifier, type Outbound } from './notify';
 import type { Config } from './config';
 import { nextNumber, tx, type DB } from './db';
 import { hmac, safeEqual, sha256 } from './security';
@@ -175,6 +184,8 @@ export class Platform {
   private lastFix = new Map<string, { pos: Point; at: number }>();
   private lastStatsSave = new Map<string, number>();
   private patrolTimer?: NodeJS.Timeout;
+  /** Outbound notifications (webhook / LINE / SMS). Tests may replace it with one that has fast retries. */
+  notifier: Notifier;
   /** When an operator last moved each camera; auto-aim leaves it alone for a while after. */
   private manualCamera = new Map<string, number>();
   private cameraWaits = new Map<string, { orgId: string; deviceId: string; done: (r: CameraResult) => void }>();
@@ -189,6 +200,8 @@ export class Platform {
     readonly cfg: Config,
   ) {
     this.bus.setMaxListeners(500);
+    this.notifier = new Notifier(db, { now: () => this.now() });
+    this.notifier.onDelivery = (d, orgId) => this.bus.emit('notification', { orgId, delivery: d });
     this.license = new License({ file: cfg.licenseFile, publicKeyPem: cfg.licensePublicKey, env: cfg.env });
     this.loadDevices();
   }
@@ -204,7 +217,10 @@ export class Platform {
       this.backupTimer = setInterval(() => this.runScheduledBackup(), this.cfg.backupIntervalH * 3600_000);
       this.backupTimer.unref?.();
     }
-    this.patrolTimer = setInterval(() => this.runPatrols(), 10_000);
+    this.patrolTimer = setInterval(() => {
+      this.runPatrols();
+      this.checkSla();
+    }, 10_000);
     this.patrolTimer.unref?.();
   }
 
@@ -219,7 +235,8 @@ export class Platform {
 
   orgSettings(a: Actor): OrgSettings {
     this.require(a, 'admin.settings', 'settings', { mutating: false });
-    return getOrgSettings(this.db, a.orgId);
+    const st = getOrgSettings(this.db, a.orgId);
+    return { ...st, notifications: { channels: maskChannels(st.notifications.channels) } };
   }
 
   updateOrgSettings(a: Actor, patch: Partial<OrgSettings>): OrgSettings {
@@ -230,8 +247,15 @@ export class Platform {
     } catch (e) {
       return fail(400, 'invalid', (e as Error).message);
     }
-    this.audit(a, 'admin.settings_update', 'retention', 'ok', JSON.stringify(next.retention));
-    return next;
+    this.audit(
+      a,
+      'admin.settings_update',
+      'settings',
+      'ok',
+      [patch.retention && 'retention', patch.detection && 'detection', patch.playbooks && 'playbooks', patch.notifications && 'notifications'].filter(Boolean).join(', ') ||
+        'no change',
+    );
+    return { ...next, notifications: { channels: maskChannels(next.notifications.channels) } };
   }
 
   /** Applies every organisation's retention policy. Audited when something was removed. */
@@ -494,6 +518,11 @@ export class Platform {
       cameraId: input.cameraId,
       thumb: input.cameraId === 'CCTV-02' ? 'gate' : 'lot',
     };
+    const book = pickPlaybook(getOrgSettings(this.db, a.orgId).playbooks, inc);
+    if (book) {
+      inc.playbookId = book.id;
+      inc.checklist = book.steps.map((st) => ({ id: st.id, title: st.title, detail: st.detail, role: st.role }));
+    }
     tx(this.db, () => {
       this.saveIncident(a.orgId, siteId, inc);
       this.event(a, a.orgId, siteId, inc.id, 'Alert received', { actor: inc.source, tone: 'alert', at: inc.createdAt, detail: input.type ? `${input.type} reported.` : undefined });
@@ -505,6 +534,14 @@ export class Platform {
     );
     if (dupe) this.event(null, a.orgId, siteId, inc.id, `Possible duplicate of ${dupe.id}`, { tone: 'warn', detail: 'Same place within 10 minutes. Review before acting.' });
     if (input.pos && !input.noAutoAim) void this.autoAim(a.orgId, siteId, inc).catch((e) => console.error('[auto-aim]', e));
+    this.notify(a.orgId, {
+      event: 'incident.new',
+      title: `${inc.id} ${inc.title}`,
+      text: `${inc.type} · ${inc.severity} · ${inc.zone} · ${inc.place} · source ${inc.source}${book ? ` · playbook ${book.name}` : ''}`,
+      severity: inc.severity,
+      incidentId: inc.id,
+      data: { type: inc.type, zone: inc.zone, place: inc.place, pos: inc.pos, cameraId: inc.cameraId },
+    });
     return inc;
   }
 
@@ -539,6 +576,13 @@ export class Platform {
       this.saveIncident(a.orgId, inc.siteId, inc);
       this.event(a, a.orgId, inc.siteId, id, 'Verified — action required', { tone: 'ok', detail: 'Verified by operator from camera review.' });
       this.audit(a, 'incident.confirm', id);
+    });
+    this.notify(a.orgId, {
+      event: 'incident.confirmed',
+      title: `${inc.id} confirmed: ${inc.title}`,
+      text: `${inc.severity} · ${inc.zone} · ${inc.place} · verified by ${a.name}`,
+      severity: inc.severity,
+      incidentId: inc.id,
     });
     return inc;
   }
@@ -603,6 +647,13 @@ export class Platform {
       this.saveIncident(a.orgId, inc.siteId, inc);
       this.event(a, a.orgId, inc.siteId, id, 'Resolved', { tone: 'ok', detail: outcome.trim() });
       this.audit(a, 'incident.resolve', id, 'ok', outcome.trim());
+      this.notify(a.orgId, {
+        event: 'incident.resolved',
+        title: `${inc.id} resolved: ${inc.title}`,
+        text: `${outcome.trim()} · by ${a.name}`,
+        severity: inc.severity,
+        incidentId: inc.id,
+      });
     });
     return inc;
   }
@@ -1685,6 +1736,14 @@ export class Platform {
         det.outcome = 'incident';
         det.incidentId = inc.id;
         this.event(null, a.orgId, siteId, inc.id, 'Detection details', { actor: source, at: det.at, detail });
+        this.notify(a.orgId, {
+          event: 'detection.incident',
+          title: `${inc.id} ${title}`,
+          text: detail,
+          severity: rule.severity,
+          incidentId: inc.id,
+          data: { type: det.type, confidence: det.confidence, deviceId: det.deviceId },
+        });
       }
       if (input.snapshot && det.incidentId) {
         const ev = this.storeEvidence(a.orgId, siteId, det.incidentId, {
@@ -1818,6 +1877,13 @@ export class Platform {
       this.lastFresh.set(d.id, f);
       if (before === undefined || before === f) continue;
       this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'device', device: this.publicDevice(d) } });
+      if (f === 'offline')
+        this.notify(d.orgId, {
+          event: 'device.offline',
+          title: `${d.id} offline`,
+          text: `${d.model} · last seen ${fmtTime(d.lastSeen, true)} · ${d.zone}`,
+          data: { deviceId: d.id, kind: d.kind },
+        });
       const m = this.activeMission(d.id);
       if (m && ['executing', 'paused', 'assigned'].includes(m.status)) {
         this.event(null, d.orgId, d.siteId, m.incidentId, f === 'live' ? `${d.id} telemetry restored` : `${d.id} telemetry ${f}`, {
@@ -2335,6 +2401,15 @@ export class Platform {
       this.audit(this.systemActor(d.orgId, 'system', 'Geofence'), 'geofence.breach', d.id, breach ? 'error' : 'ok', `${f.id} ${f.name}${m ? ` during ${m.id}` : ''}`);
       this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: breach ? 'error' : 'warn', text: `${text}.${f.reason ? ` ${f.reason}` : ''}` } });
       this.bus.emit('geofence', { orgId: d.orgId, deviceId: d.id, fence: f, breach });
+      if (breach)
+        this.notify(d.orgId, {
+          event: 'geofence.breach',
+          title: text,
+          text: f.reason ?? `${GEOFENCE_KIND_LABEL[f.kind]} zone`,
+          severity: 'high',
+          incidentId: m?.incidentId,
+          data: { deviceId: d.id, fenceId: f.id, pos: d.pos },
+        });
     }
     for (const id of was) {
       if (nowIn.has(id)) continue;
@@ -2620,6 +2695,7 @@ export class Platform {
       this.savePatrol(orgId, siteId, p);
       this.audit(a, 'patrol.skip', p.id, 'error', reason);
       this.publish({ orgId, siteId, event: { type: 'notice', tone: 'warn', text: `Patrol "${p.name}" skipped: ${reason}` } });
+      this.notify(orgId, { event: 'patrol.skipped', title: `Patrol "${p.name}" skipped`, text: reason, data: { patrolId: p.id, deviceId: p.deviceId } });
       return { ok: false as const, reason };
     };
     if (!d || d.orgId !== orgId) return skip(`${p.deviceId} is not registered.`);
@@ -2722,6 +2798,162 @@ export class Platform {
     this.audit(this.systemActor(orgId, 'system', 'Patrol scheduler'), 'patrol.complete', m.patrolId ?? m.id, 'ok', `${m.id} ${inc.id}`);
   }
 
+  // ---- playbooks, SLA, notifications, KPIs -----------------------------------------------
+
+  /** Sends to the organisation's channels that want this event. Fire and forget; failures are logged. */
+  notify(orgId: string, msg: Outbound) {
+    const channels = getOrgSettings(this.db, orgId).notifications.channels;
+    if (!Notifier.matching(channels, msg).length) return;
+    void this.notifier.dispatch(orgId, channels, msg).catch((e) => console.error('[notify]', e));
+  }
+
+  /** Administrator: send a test message through one channel and return the delivery record. */
+  async testChannel(a: Actor, channelId: string) {
+    this.require(a, 'admin.settings', channelId);
+    const c = getOrgSettings(this.db, a.orgId).notifications.channels.find((x) => x.id === channelId);
+    if (!c) return fail(404, 'not_found', 'Channel not found.');
+    const d = await this.notifier.deliver(a.orgId, c, {
+      event: 'incident.new',
+      title: `Test from ${a.name}`,
+      text: `Notification channel "${c.name}" works. ${fmtDate(this.now())} ${fmtTime(this.now(), true)}`,
+      severity: 'low',
+    });
+    this.audit(a, 'admin.notification_test', c.id, d.status === 'sent' ? 'ok' : 'error', d.detail);
+    return d;
+  }
+
+  notificationLog(a: Actor, limit = 50) {
+    this.require(a, 'admin.settings', 'notifications', { mutating: false });
+    return (this.db.prepare('SELECT data FROM notifications WHERE org_id = ? ORDER BY at DESC LIMIT ?').all(a.orgId, Math.min(500, Math.max(1, limit))) as { data: string }[]).map(
+      (r) => JSON.parse(r.data),
+    );
+  }
+
+  /** Ticks or clears a playbook step on an incident. */
+  setStep(a: Actor, incidentId: string, stepId: string, done: boolean) {
+    this.require(a, 'evidence.add', incidentId);
+    const inc = this.getIncident(a, incidentId);
+    const step = inc.checklist?.find((x) => x.id === stepId);
+    if (!step) return fail(404, 'not_found', 'Step not found.');
+    if (done) {
+      step.doneAt = this.now();
+      step.by = a.name;
+    } else {
+      step.doneAt = undefined;
+      step.by = undefined;
+    }
+    tx(this.db, () => {
+      this.saveIncident(a.orgId, inc.siteId, inc);
+      this.event(a, a.orgId, inc.siteId, inc.id, done ? `Step done: ${step.title}` : `Step reopened: ${step.title}`, { tone: done ? 'ok' : undefined });
+      this.audit(a, 'incident.step', `${inc.id}:${stepId}`, 'ok', done ? 'done' : 'reopened');
+    });
+    return inc;
+  }
+
+  /** Every 10 s: raise each SLA breach once, on the timeline, as a notice, in the audit log and to the channels. */
+  checkSla(now = this.now()) {
+    const rows = this.db.prepare("SELECT org_id, site_id, data FROM incidents WHERE status NOT IN ('closed', 'dismissed', 'duplicate')").all() as {
+      org_id: string;
+      site_id: string;
+      data: string;
+    }[];
+    const books = new Map<string, Playbook[]>();
+    const out: { incidentId: string; stage: SlaStage }[] = [];
+    for (const r of rows) {
+      const inc = JSON.parse(r.data) as Incident;
+      if (inc.patrolId) continue;
+      if (!books.has(r.org_id)) books.set(r.org_id, getOrgSettings(this.db, r.org_id).playbooks);
+      const book = pickPlaybook(books.get(r.org_id)!, inc);
+      if (!book) continue;
+      const events = (this.db.prepare('SELECT data FROM timeline WHERE org_id = ? AND incident_id = ?').all(r.org_id, inc.id) as { data: string }[]).map(
+        (x) => JSON.parse(x.data) as TimelineEvent,
+      );
+      const stages = slaStages(inc, events, book.sla, now);
+      const already = new Set(inc.slaBreached ?? []);
+      let changed = false;
+      for (const st of stages) {
+        if (st.status !== 'breached' || already.has(st.stage)) continue;
+        already.add(st.stage);
+        changed = true;
+        out.push({ incidentId: inc.id, stage: st.stage });
+        const title = `SLA breached: ${SLA_STAGE_LABEL[st.stage].toLowerCase()} within ${st.limitMin} min`;
+        this.event(null, r.org_id, r.site_id, inc.id, title, {
+          actor: 'Platform',
+          tone: 'alert',
+          at: now,
+          detail: `${book.name}. ${st.doneAt ? `Done after ${Math.round((st.doneAt - inc.createdAt) / 60_000)} min.` : 'Still open.'}`,
+        });
+        this.audit(this.systemActor(r.org_id, 'system', 'SLA'), 'sla.breach', inc.id, 'error', `${st.stage} > ${st.limitMin} min (${book.id})`);
+        this.bus.emit('sla', { orgId: r.org_id, incidentId: inc.id, stage: st.stage });
+        // Old breaches found at start-up (restored data, long outage) go on the record but do not page anyone.
+        if (now - st.dueAt < 5 * 60_000) {
+          this.publish({ orgId: r.org_id, siteId: r.site_id, event: { type: 'notice', tone: 'error', text: `${inc.id}: ${title}.` } });
+          this.notify(r.org_id, {
+            event: 'sla.breach',
+            title: `${inc.id} ${title}`,
+            text: `${inc.title} · ${inc.zone} · ${inc.place} · owner ${inc.owner ?? 'unassigned'}`,
+            severity: inc.severity,
+            incidentId: inc.id,
+            data: { stage: st.stage, limitMin: st.limitMin },
+          });
+        }
+      }
+      if (changed) {
+        inc.slaBreached = [...already];
+        this.saveIncident(r.org_id, r.site_id, inc);
+      }
+    }
+    return out;
+  }
+
+  /** Operational KPIs for a period (report.view). */
+  kpi(a: Actor, from: number, to: number) {
+    this.require(a, 'report.view', 'kpi', { mutating: false });
+    if (!(to > from)) fail(400, 'invalid', 'to must be after from.');
+    const settings = getOrgSettings(this.db, a.orgId);
+    const incidents = this.listIncidents(a, { from, to, limit: 5000 });
+    const ids = new Set(incidents.map((i) => i.id));
+    const timeline = (
+      this.db.prepare('SELECT data FROM timeline WHERE org_id = ? AND at BETWEEN ? AND ?').all(a.orgId, from - 86_400_000, to + 7 * 86_400_000) as { data: string }[]
+    )
+      .map((r) => JSON.parse(r.data) as TimelineEvent)
+      .filter((e) => ids.has(e.incidentId));
+    const missions = this.allMissions(a.orgId).filter((m) => ids.has(m.incidentId));
+    const detections = this.db.prepare('SELECT type, outcome, at FROM detections WHERE org_id = ? AND at BETWEEN ? AND ?').all(a.orgId, from, to) as {
+      type: string;
+      outcome: string;
+      at: number;
+    }[];
+    const patrolRuns = (
+      this.db.prepare("SELECT at, action FROM audit WHERE org_id = ? AND action IN ('patrol.run', 'patrol.skip') AND at BETWEEN ? AND ?").all(a.orgId, from, to) as {
+        at: number;
+        action: string;
+      }[]
+    ).map((r) => ({ ok: r.action === 'patrol.run', at: r.at }));
+    return computeKpi({ from, to, incidents, timeline, missions, playbooks: settings.playbooks, detections, patrolRuns, now: this.now() }, settings.detection.timezone);
+  }
+
+  /** Markdown KPI report for a period; downloads are audited like incident reports. */
+  kpiReport(a: Actor, from: number, to: number, exportFile: boolean) {
+    this.require(a, exportFile ? 'evidence.export' : 'report.view', 'kpi', { mutating: false });
+    const k = this.kpi(a, from, to);
+    const org = (this.db.prepare('SELECT name FROM orgs WHERE id = ?').get(a.orgId) as { name: string } | undefined)?.name ?? a.orgId;
+    const md = kpiMarkdown(k, {
+      title: `Operations report ${fmtDate(from)} – ${fmtDate(to)}`,
+      org,
+      generatedBy: `${a.name} · ${fmtDate(this.now())} ${fmtTime(this.now(), true)}`,
+      dataLabel: this.meta(a.orgId).dataLabel,
+      fmtDate,
+    });
+    this.audit(a, exportFile ? 'report.export' : 'report.view', `kpi:${new Date(from).toISOString().slice(0, 10)}..${new Date(to).toISOString().slice(0, 10)}`);
+    return { markdown: md, kpi: k };
+  }
+
+  /** Channels as the console may see them (secrets masked). */
+  maskedChannels(channels: NotificationChannel[]) {
+    return maskChannels(channels);
+  }
+
   // ---- snapshot -----------------------------------------------------------
 
   meta(orgId: string): Meta {
@@ -2777,6 +3009,7 @@ export class Platform {
       evidence: can(a.role as Role, 'evidence.view') ? this.evidenceFor(a, ids) : [],
       assignments: this.listAssignments(a).filter((x) => ids.has(x.incidentId)),
       geofences: this.geofencesOf(a.orgId, site.id),
+      playbooks: getOrgSettings(this.db, a.orgId).playbooks,
       patrols:
         a.role === 'admin' || a.role === 'responder'
           ? []

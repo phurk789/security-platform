@@ -1,5 +1,6 @@
-import { DEFAULT_GEOFENCES, DEFAULT_LAYERS, SEED_USERS, seedDevices, seedEvidence, seedIncidents, seedTimeline } from '@13store/shared';
+import { DEFAULT_GEOFENCES, DEFAULT_LAYERS, DEFAULT_PLAYBOOKS, SEED_USERS, seedDevices, seedEvidence, seedIncidents, seedTimeline } from '@13store/shared';
 import type { AppState } from '@13store/shared';
+import { attachPlaybook } from './reducer';
 
 export { DEFAULT_ROUTE } from '@13store/shared';
 
@@ -19,7 +20,10 @@ export function initialState(): AppState {
     selectedDeviceId: null,
     selectedBuildingId: null,
     indoorView: null,
-    incidents: seedIncidents(now),
+    incidents: seedIncidents(now).map((inc) => {
+      attachPlaybook({ playbooks: DEFAULT_PLAYBOOKS }, inc);
+      return inc;
+    }),
     devices: seedDevices(now),
     missions: [],
     commands: [],
@@ -33,6 +37,7 @@ export function initialState(): AppState {
     assignments: [],
     geofences: DEFAULT_GEOFENCES.map((g) => ({ ...g, poly: g.poly.map((p) => ({ ...p })) })),
     patrols: [],
+    playbooks: DEFAULT_PLAYBOOKS,
     dataLabel: 'OFFLINE DEMO',
     toasts: [],
     presentation: false,

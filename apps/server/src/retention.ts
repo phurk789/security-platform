@@ -4,7 +4,17 @@
 // kept for the legal retention period and exported through backups.
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_ORG_SETTINGS, type Incident, type OrgSettings } from '@13store/shared';
+import {
+  DEFAULT_ORG_SETTINGS,
+  DEFAULT_PLAYBOOKS,
+  NOTIFY_EVENTS,
+  type Incident,
+  type NotificationChannel,
+  type NotifyEvent,
+  type OrgSettings,
+  type Playbook,
+  type SlaStage,
+} from '@13store/shared';
 import type { DB } from './db';
 import { defaultRules, validateRules } from './detections';
 
@@ -24,13 +34,20 @@ export function getOrgSettings(db: DB, orgId: string): OrgSettings {
       rules: Array.isArray(stored.detection?.rules) ? stored.detection!.rules : defaultRules(),
       timezone: stored.detection?.timezone || DEFAULT_ORG_SETTINGS.detection.timezone,
     },
+    playbooks: Array.isArray(stored.playbooks) ? stored.playbooks : DEFAULT_PLAYBOOKS.map((b) => ({ ...b, steps: b.steps.map((x) => ({ ...x })), sla: { ...b.sla } })),
+    notifications: { channels: Array.isArray(stored.notifications?.channels) ? stored.notifications!.channels : [] },
   };
 }
 
 /** Validates and stores a settings patch. Days: integers 0–3650 (0 = keep forever). */
 export function setOrgSettings(db: DB, orgId: string, patch: Partial<OrgSettings>): OrgSettings {
   const cur = getOrgSettings(db, orgId);
-  const next: OrgSettings = { retention: { ...cur.retention }, detection: { rules: cur.detection.rules, timezone: cur.detection.timezone } };
+  const next: OrgSettings = {
+    retention: { ...cur.retention },
+    detection: { rules: cur.detection.rules, timezone: cur.detection.timezone },
+    playbooks: cur.playbooks,
+    notifications: { channels: cur.notifications.channels },
+  };
   for (const k of Object.keys(DEFAULT_ORG_SETTINGS.retention) as (keyof OrgSettings['retention'])[]) {
     const v = patch.retention?.[k];
     if (v === undefined) continue;
@@ -47,8 +64,131 @@ export function setOrgSettings(db: DB, orgId: string, patch: Partial<OrgSettings
     }
     next.detection.timezone = tz;
   }
+  if (patch.playbooks !== undefined) next.playbooks = validatePlaybooks(patch.playbooks);
+  if (patch.notifications?.channels !== undefined) next.notifications.channels = validateChannels(patch.notifications.channels, cur.notifications.channels);
   db.prepare('UPDATE orgs SET settings = ? WHERE id = ?').run(JSON.stringify(next), orgId);
   return next;
+}
+
+/** Secrets never leave the server in clear: the console sees a mask and sends it back unchanged. */
+export const SECRET_MASK = '••••••••';
+
+export function maskChannels(channels: NotificationChannel[]): NotificationChannel[] {
+  return channels.map((c) => ({
+    ...c,
+    webhook: c.webhook ? { ...c.webhook, secret: c.webhook.secret ? SECRET_MASK : undefined } : undefined,
+    line: c.line ? { ...c.line, token: c.line.token ? SECRET_MASK : '' } : undefined,
+    sms: c.sms ? { ...c.sms, headers: c.sms.headers ? Object.fromEntries(Object.keys(c.sms.headers).map((k) => [k, SECRET_MASK])) : undefined } : undefined,
+  }));
+}
+
+const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
+const HTTP_URL = /^https?:\/\//i;
+
+function validateChannels(input: unknown, current: NotificationChannel[]): NotificationChannel[] {
+  if (!Array.isArray(input)) throw new Error('notifications.channels must be a list.');
+  if (input.length > 20) throw new Error('At most 20 notification channels.');
+  const ids = new Set<string>();
+  return input.map((raw, i) => {
+    const c = raw as Record<string, any>;
+    const where = `Channel ${i + 1}`;
+    if (!c || typeof c !== 'object') throw new Error(`${where} must be an object.`);
+    if (typeof c.id !== 'string' || !ID.test(c.id)) throw new Error(`${where}: id must be 1–32 letters, digits, - or _.`);
+    if (ids.has(c.id)) throw new Error(`${where}: duplicate id ${c.id}.`);
+    ids.add(c.id);
+    const prev = current.find((x) => x.id === c.id);
+    if (typeof c.name !== 'string' || !c.name.trim() || c.name.length > 80) throw new Error(`${where}: name is required (max 80 characters).`);
+    if (!['webhook', 'line', 'sms'].includes(c.kind)) throw new Error(`${where}: kind must be webhook, line or sms.`);
+    const events = Array.isArray(c.events) ? [...new Set(c.events.filter((e: unknown) => NOTIFY_EVENTS.includes(e as NotifyEvent)))] : [];
+    if (!events.length) throw new Error(`${where}: pick at least one event.`);
+    const unmask = (v: unknown, prevV: string | undefined) => (v === SECRET_MASK ? (prevV ?? '') : typeof v === 'string' ? v : '');
+    const out: NotificationChannel = {
+      id: c.id,
+      name: c.name.trim(),
+      kind: c.kind,
+      enabled: c.enabled !== false,
+      events: events as NotifyEvent[],
+      minSeverity: ['low', 'medium', 'high'].includes(c.minSeverity) ? c.minSeverity : undefined,
+    };
+    if (c.kind === 'webhook') {
+      const url = String(c.webhook?.url ?? '');
+      if (!HTTP_URL.test(url) || url.length > 500) throw new Error(`${where}: webhook.url must be an http(s) URL.`);
+      const secret = unmask(c.webhook?.secret, prev?.webhook?.secret);
+      out.webhook = { url, secret: secret || undefined };
+    } else if (c.kind === 'line') {
+      const token = unmask(c.line?.token, prev?.line?.token);
+      const to = String(c.line?.to ?? '').trim();
+      if (!token || !to) throw new Error(`${where}: line.token and line.to are required.`);
+      out.line = { token, to };
+    } else {
+      const url = String(c.sms?.url ?? '');
+      if (!HTTP_URL.test(url) || url.length > 500) throw new Error(`${where}: sms.url must be an http(s) URL.`);
+      const to = Array.isArray(c.sms?.to)
+        ? c.sms.to
+            .map(String)
+            .map((x: string) => x.trim())
+            .filter(Boolean)
+        : [];
+      if (!to.length || to.length > 50) throw new Error(`${where}: sms.to needs 1–50 numbers.`);
+      const headers: Record<string, string> | undefined =
+        c.sms?.headers && typeof c.sms.headers === 'object'
+          ? Object.fromEntries(Object.entries(c.sms.headers as Record<string, unknown>).map(([k, v]) => [k, unmask(v, prev?.sms?.headers?.[k])]))
+          : undefined;
+      out.sms = { url, method: c.sms?.method === 'GET' ? 'GET' : 'POST', headers, body: typeof c.sms?.body === 'string' ? c.sms.body.slice(0, 2000) : undefined, to };
+    }
+    return out;
+  });
+}
+
+function validatePlaybooks(input: unknown): Playbook[] {
+  if (!Array.isArray(input)) throw new Error('playbooks must be a list.');
+  if (input.length > 30) throw new Error('At most 30 playbooks.');
+  const ids = new Set<string>();
+  return input.map((raw, i) => {
+    const b = raw as Record<string, any>;
+    const where = `Playbook ${i + 1}`;
+    if (!b || typeof b !== 'object') throw new Error(`${where} must be an object.`);
+    if (typeof b.id !== 'string' || !ID.test(b.id)) throw new Error(`${where}: id must be 1–32 letters, digits, - or _.`);
+    if (ids.has(b.id)) throw new Error(`${where}: duplicate id ${b.id}.`);
+    ids.add(b.id);
+    if (typeof b.name !== 'string' || !b.name.trim() || b.name.length > 80) throw new Error(`${where}: name is required (max 80 characters).`);
+    const m = (b.match ?? {}) as Record<string, unknown>;
+    const steps = Array.isArray(b.steps) ? b.steps : [];
+    if (steps.length > 30) throw new Error(`${where}: at most 30 steps.`);
+    const sla = (b.sla ?? {}) as Record<string, unknown>;
+    const lim = (k: SlaStage) => {
+      const v = sla[k] ?? 0;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 10_080) throw new Error(`${where}: sla.${k} must be minutes between 0 and 10080.`);
+      return v;
+    };
+    return {
+      id: b.id,
+      name: b.name.trim(),
+      match: {
+        types: Array.isArray(m.types)
+          ? (m.types as unknown[])
+              .map(String)
+              .map((x) => x.trim())
+              .filter(Boolean)
+              .slice(0, 20)
+          : undefined,
+        severities: Array.isArray(m.severities)
+          ? ((m.severities as unknown[]).filter((x) => ['low', 'medium', 'high'].includes(x as string)) as Playbook['match']['severities'])
+          : undefined,
+        sourceContains: typeof m.sourceContains === 'string' && m.sourceContains.trim() ? m.sourceContains.trim().slice(0, 60) : undefined,
+      },
+      steps: steps.map((st: Record<string, unknown>, j: number) => {
+        if (!st || typeof st.title !== 'string' || !st.title.trim()) throw new Error(`${where}: step ${j + 1} needs a title.`);
+        return {
+          id: typeof st.id === 'string' && ID.test(st.id) ? st.id : `s${j + 1}`,
+          title: st.title.trim().slice(0, 160),
+          detail: typeof st.detail === 'string' ? st.detail.trim().slice(0, 300) || undefined : undefined,
+          role: ['dispatcher', 'supervisor', 'operator', 'responder', 'auditor', 'admin'].includes(st.role as string) ? (st.role as Playbook['steps'][number]['role']) : undefined,
+        };
+      }),
+      sla: { acknowledge: lim('acknowledge'), verify: lim('verify'), respond: lim('respond'), resolve: lim('resolve') },
+    };
+  });
 }
 
 export interface PurgeReport {

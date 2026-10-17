@@ -24,6 +24,7 @@ import type {
 import type { SiteGeometry } from './site';
 import type { GimbalState, GwCameraResult, SrvCamera, StreamInfo } from './camera';
 import type { Geofence } from './routing';
+import { DEFAULT_PLAYBOOKS, type NotificationChannel, type Playbook } from './ops';
 import type { CameraMount } from './aim';
 
 export const GATEWAY_PROTOCOL = 'ps-gw/1';
@@ -320,11 +321,17 @@ export interface OrgSettings {
     /** IANA time zone the rules' hours are read in. */
     timezone: string;
   };
+  /** Standard operating procedures with SLA limits, matched to incidents by type and severity. */
+  playbooks: Playbook[];
+  /** Outbound notification channels (webhook, LINE, SMS). */
+  notifications: { channels: NotificationChannel[] };
 }
 
 export const DEFAULT_ORG_SETTINGS: OrgSettings = {
   retention: { telemetryDays: 90, closedIncidentDays: 0, evidenceDays: 0, detectionDays: 90 },
   detection: { rules: DEFAULT_DETECTION_RULES, timezone: 'Asia/Bangkok' },
+  playbooks: DEFAULT_PLAYBOOKS,
+  notifications: { channels: [] },
 };
 
 export interface SessionUser extends User {
@@ -361,6 +368,7 @@ export interface Snapshot {
   assignments: Assignment[];
   geofences: Geofence[];
   patrols: Patrol[];
+  playbooks: Playbook[];
 }
 
 // ---------------------------------------------------------------------------

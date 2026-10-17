@@ -19,6 +19,7 @@ import { ApiError } from '../api';
 import { useStore } from '../store';
 import { roleLabel, useT } from '../i18n';
 import { StepUpDialog } from '../components/StepUp';
+import { NotificationChannels } from '../components/NotificationChannels';
 
 interface Backup {
   id: string;
@@ -585,6 +586,8 @@ function Admin() {
             </>
           )}
         </section>
+        <NotificationChannels onStepUp={(retry) => setStepUp(() => retry)} />
+
         <section className="card">
           <h3>
             <Octagon size={16} /> {t('Geofences')}

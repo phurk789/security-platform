@@ -42,6 +42,7 @@ import { SceneSnapshot } from './SceneSnapshot';
 import { webglAvailable } from '../twin/world';
 import { AppearanceToggle, ThemeToggle, useTheme } from './Hud';
 import { SoundToggle } from './SoundEffects';
+import { SlaBadge } from './Sla';
 import { LICENSE_LABEL } from '../views/Admin';
 
 export function TopBar() {
@@ -280,7 +281,10 @@ export function IncidentQueue() {
                 <small className="muted">{ago(s.now - i.createdAt)}</small>
               </div>
               <div className="ic-title">{i.title}</div>
-              <IncidentBadge status={i.status} />
+              <div className="row gap-s wrap">
+                <IncidentBadge status={i.status} />
+                <SlaBadge inc={i} />
+              </div>
               <small className="muted">
                 {i.zone} · {i.owner ?? t('Unassigned')}
               </small>

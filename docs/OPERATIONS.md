@@ -142,6 +142,19 @@ is needed.
 - Scheduled backups run every `BACKUP_INTERVAL_H` hours into `DATA_DIR/backups`, keep the newest
   `BACKUP_KEEP` and are audited (`admin.backup_create` by _Backup scheduler_).
 
+## Notifications and SLA
+
+- Channels are configured in Administration → **Notification channels** (or `PATCH /admin/settings`).
+  Webhook: give the receiver the shared secret and have it verify `X-PST-Signature`. LINE: a LINE
+  Official Account channel access token and the group id (add the bot to the group). SMS: the
+  gateway's HTTP URL with `{to}` / `{text}` placeholders. Use **Test** after saving; every delivery
+  (and every retry) is in the log and in `ps_notifications_total{kind,status}`. Outbound traffic goes
+  to the channel endpoints only; allow them in the server's egress policy.
+- SLA limits per incident type are the playbooks in the same settings. The server checks open
+  incidents every 10 s and raises a breach once; suggested alert: `increase(ps_sla_breaches_total[1h]) > 3`.
+- The monthly report is Reports → Operations KPIs → **Export period report** (or
+  `GET /kpi/report?from&to&download=1`). See COMMAND_CENTRE.md.
+
 ## Video recordings
 
 Recordings live on the edge PC (`deploy/edge/mediamtx.yml`: `record: yes`, `playback: yes`,
