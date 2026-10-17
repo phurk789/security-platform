@@ -91,6 +91,7 @@ h2 { font-size: 1.2rem; font-weight: 600; }
 .sidenav button:hover { color: var(--text); }
 .sidenav button.on { color: var(--cyan); background: linear-gradient(90deg, rgba(56, 189, 248, 0.16), transparent); border-left-color: var(--cyan); }
 .sidenav .ico { position: relative; }
+.nav-short { display: none; }
 .sidenav .pip { position: absolute; top: -2px; right: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
 
 .footer { display: flex; align-items: center; justify-content: space-between; padding: 0 20px; font-size: 0.8rem; color: var(--text-2); background: var(--bg-2); border-top: 1px solid var(--line); }
@@ -431,6 +432,8 @@ table.compact td, table.compact th { padding: 6px 8px; }
   .sidenav { grid-row: 2; flex-direction: row; justify-content: space-around; padding: 0; border-right: 0; border-top: 1px solid var(--line); }
   .sidenav button { padding: 8px 2px; font-size: 0.68rem; border-left: 0; border-top: 3px solid transparent; flex: 1; }
   .sidenav button.on { border-top-color: var(--cyan); background: none; }
+  .nav-long { display: none; }
+  .nav-short { display: inline; }
   .overview { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); gap: 8px; }
   .mobile-tabs button { flex: 1; justify-content: center; min-height: 40px; }
   .ov-queue, .center, .ov-right, .timeline { display: none; grid-column: 1; grid-row: 2; }

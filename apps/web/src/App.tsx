@@ -9,6 +9,7 @@ import { TwinMap } from './components/TwinMap';
 import { FleetPanel, useTheme, useWide } from './components/Hud';
 import { DevicesPage, EvidencePage, IncidentsPage, MissionsPage, ReportsPage } from './views/Pages';
 import { AdminPage } from './views/Admin';
+import { CommandCenter } from './views/CommandCenter';
 
 export function App() {
   const { s } = useStore();
@@ -19,6 +20,7 @@ export function App() {
       <div className="main">
         <SideNav />
         {s.view === 'overview' && <Overview />}
+        {s.view === 'command' && <CommandCenter />}
         {s.view === 'incidents' && <IncidentsPage />}
         {s.view === 'missions' && <MissionsPage />}
         {s.view === 'devices' && <DevicesPage />}

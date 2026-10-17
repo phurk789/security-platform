@@ -7,6 +7,7 @@ import {
   ChevronDown,
   CircleAlert,
   FileText,
+  Gamepad2,
   Filter,
   History,
   House,
@@ -118,8 +119,9 @@ export function TopBar() {
   );
 }
 
-const NAV: { id: View; label: string; Icon: typeof House }[] = [
+const NAV: { id: View; label: string; short?: string; Icon: typeof House }[] = [
   { id: 'overview', label: 'Overview', Icon: House },
+  { id: 'command', label: 'Command center', short: 'Ops', Icon: Gamepad2 },
   { id: 'incidents', label: 'Incidents', Icon: Bell },
   { id: 'missions', label: 'Missions', Icon: Send },
   { id: 'devices', label: 'Devices', Icon: Server },
@@ -130,7 +132,8 @@ const NAV: { id: View; label: string; Icon: typeof House }[] = [
 
 function navFor(role: string): View[] {
   if (role === 'admin') return ['admin', 'devices'];
-  return ['overview', 'incidents', 'missions', 'devices', 'evidence', 'reports'];
+  if (role === 'responder') return ['overview', 'incidents', 'missions', 'devices', 'evidence', 'reports'];
+  return ['overview', 'command', 'incidents', 'missions', 'devices', 'evidence', 'reports'];
 }
 
 export function SideNav() {
@@ -140,13 +143,20 @@ export function SideNav() {
   const allowed = navFor(currentUser(s).role);
   return (
     <nav className="sidenav" aria-label={t('Main')}>
-      {NAV.filter((n) => allowed.includes(n.id)).map(({ id, label, Icon }) => (
+      {NAV.filter((n) => allowed.includes(n.id)).map(({ id, label, short, Icon }) => (
         <button key={id} className={s.view === id ? 'on' : ''} onClick={() => dispatch({ type: 'setView', view: id })} aria-current={s.view === id}>
           <span className="ico">
             <Icon size={22} />
             {id === 'incidents' && unverified && <span className="pip" aria-label={t('Unverified alerts')} />}
           </span>
-          {t(label)}
+          {short ? (
+            <>
+              <span className="nav-long">{t(label)}</span>
+              <span className="nav-short">{t(short)}</span>
+            </>
+          ) : (
+            t(label)
+          )}
         </button>
       ))}
     </nav>

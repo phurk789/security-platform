@@ -14,7 +14,7 @@ export interface Twin3DApi {
 
 const HOME = { pos: new THREE.Vector3(-175, 235, 320), target: new THREE.Vector3(22, 0, 18) };
 
-export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void }>(function Twin3D({ onHeading }, ref) {
+export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void; /** Keep this device centred (camera follows it). */ follow?: string }>(function Twin3D({ onHeading, follow }, ref) {
   const { s, dispatch } = useStore();
   const host = useRef<HTMLDivElement>(null);
   const ctl = useRef<{ camera: THREE.PerspectiveCamera; controls: OrbitControls; goal?: { target: THREE.Vector3; dist: number } } | null>(null);
@@ -27,6 +27,8 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void 
   };
   const headingRef = useRef(onHeading);
   headingRef.current = onHeading;
+  const followRef = useRef(follow);
+  followRef.current = follow;
 
   useEffect(() => {
     const el = host.current!;
@@ -106,6 +108,14 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void 
         off.setLength(THREE.MathUtils.lerp(off.length(), c.goal.dist, k));
         camera.position.copy(controls.target).add(off);
         if (controls.target.distanceTo(c.goal.target) < 0.5 && Math.abs(off.length() - c.goal.dist) < 1) c.goal = undefined;
+      } else if (followRef.current) {
+        // Follow mode: glide the orbit centre (and camera with it) after the vehicle.
+        const p = world.devicePos(followRef.current);
+        if (p) {
+          const delta = p.sub(controls.target).multiplyScalar(1 - Math.exp(-dt * 2.5));
+          controls.target.add(delta);
+          camera.position.add(delta);
+        }
       }
       controls.update();
       renderer.render(world.scene, camera);
@@ -128,6 +138,14 @@ export const Twin3D = forwardRef<Twin3DApi, { onHeading?: (deg: number) => void 
       ctl.current = null;
     };
   }, [world]);
+
+  // Starting to follow a vehicle: fly in to a close orbit around it.
+  useEffect(() => {
+    const c = ctl.current;
+    if (!c || !follow) return;
+    const p = world.devicePos(follow);
+    if (p) c.goal = { target: p, dist: 120 };
+  }, [follow, world]);
 
   useImperativeHandle(ref, () => ({
     zoom(f: number) {

@@ -795,6 +795,14 @@ export class TwinWorld {
   }
 
   /** World position of a site point (for camera focus). */
+  /** Displayed (smoothed) position of a device in world space, for camera follow. */
+  devicePos(id: string): THREE.Vector3 | null {
+    const v = this.devices.get(id);
+    if (!v) return null;
+    const d = this.state?.devices[id];
+    return new THREE.Vector3(v.pos.x, d?.kind === 'uav' ? Math.max(0, (d.alt ?? 40) * 0.5) : 0, v.pos.z);
+  }
+
   worldOf(p: Point) {
     const w = toWorld(p.x, p.y);
     return new THREE.Vector3(w.x, 0, w.z);

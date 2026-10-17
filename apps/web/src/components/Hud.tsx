@@ -102,7 +102,7 @@ export function FleetPanel() {
   );
 }
 
-function FleetCard({ d, video }: { d: Device; video: boolean }) {
+export function FleetCard({ d, video }: { d: Device; video: boolean }) {
   const { s, dispatch } = useStore();
   const t = useT();
   const me = currentUser(s);

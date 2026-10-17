@@ -272,7 +272,7 @@ export interface Toast {
   at: number;
 }
 
-export type View = 'overview' | 'incidents' | 'missions' | 'devices' | 'evidence' | 'reports' | 'admin';
+export type View = 'overview' | 'command' | 'incidents' | 'missions' | 'devices' | 'evidence' | 'reports' | 'admin';
 
 export interface Layers {
   cctv: boolean;

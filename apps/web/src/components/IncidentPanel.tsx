@@ -543,7 +543,7 @@ function Planner({ m }: { m: Mission }) {
   );
 }
 
-function LiveMission({ m }: { m: Mission }) {
+export function LiveMission({ m }: { m: Mission }) {
   const { s, dispatch } = useStore();
   const t = useT();
   const me = currentUser(s);

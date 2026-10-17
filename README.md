@@ -13,7 +13,7 @@ hardware integration is ready.
 
 | Part | What it does |
 |---|---|
-| **Command centre** (`apps/web`) | Situation map 2D/3D, incident queue and workflow, mission planner with constraint checks, live mission with command status, evidence and replay, reports, search, administration. Thai and English. |
+| **Command centre** (`apps/web`) | Twin HUD overview (full-screen 3D city with floating panels), **UGV & UAV Command Center** (unit roster, onboard video with drive/flight instruments, 3D follow view, telemetry, mission and camera control, activity log), situation map 2D/3D, incident queue and workflow, mission planner with constraint checks, live mission with command status, evidence and replay, reports, search, administration. Thai and English. |
 | **Field app** (`apps/field`) | Mobile web app for responders: accept, on scene, report with photos. Works offline and syncs without duplicates. Thai and English. |
 | **Platform server** (`apps/server`) | REST API and WebSockets on SQLite. Sign-in, roles, org and site isolation, approvals, command certainty, evidence with checksums, hash-chained audit log, backups, signed media URLs, OpenAPI. |
 | **Edge gateway** (`apps/gateway`) | Runs device adapters on site and connects them to the server. Includes simulated UGV, UAV and CCTV adapters, **SIYI hardware adapters** (gimbal cameras over the SIYI SDK; UniFC 6 Pico / any PX4 or ArduPilot vehicle over MAVLink via the UniRC 7 Pro), and an SDK for your own. |
