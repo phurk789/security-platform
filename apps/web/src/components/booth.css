@@ -1,0 +1,71 @@
+/* Booth presenter panel and visitor captions (BoothScript.tsx). */
+.booth {
+  position: fixed;
+  z-index: 58;
+  left: 100px;
+  bottom: 44px;
+  width: min(420px, calc(100vw - 32px));
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.booth-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.booth-head b { font-size: 0.9rem; white-space: nowrap; }
+.booth-progress { flex: 1; display: flex; gap: 3px; }
+.booth-progress i { flex: 1; height: 5px; border-radius: 3px; background: var(--line-2); }
+.booth-progress i.done { background: var(--cyan); }
+.booth-progress i.cur { background: var(--amber); }
+.booth-progress i.done.cur { background: var(--green); }
+.booth-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.booth-body h3 { font-size: 1.05rem; }
+.booth-body p { margin: 0; color: var(--text-2); font-size: 0.9rem; line-height: 1.45; }
+.booth-who { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; color: var(--text-3); flex-wrap: wrap; }
+.booth-n { width: 22px; height: 22px; border-radius: 50%; background: var(--cyan); color: #04121d; display: grid; place-items: center; font-weight: 700; font-size: 0.75rem; }
+.booth-state { margin-left: auto; font-weight: 600; color: var(--amber); }
+.booth-state.ok { color: var(--green); }
+.booth-foot { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.booth-next { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; font-size: 1rem; }
+.booth-foot .btn-outline.small { min-height: 40px; min-width: 40px; padding: 0 10px; display: inline-grid; place-items: center; }
+.booth-foot .btn-outline.on { color: var(--cyan); border-color: var(--cyan); background: rgba(56, 189, 248, 0.1); }
+
+/* Large caption for visitors, over the map area */
+.booth-caption {
+  position: fixed;
+  z-index: 57;
+  left: 540px; /* clear of the presenter panel */
+  right: 470px; /* clear of the details panel and map zoom buttons */
+  bottom: 215px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  padding: 14px 24px;
+  border-radius: 12px;
+  background: rgba(6, 14, 28, 0.86);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  animation: booth-in 0.35s ease-out;
+}
+.booth-caption b { font-size: 1.5rem; line-height: 1.2; color: var(--text); }
+.booth-caption span:last-child { font-size: 1.05rem; color: var(--text-2); line-height: 1.4; }
+.booth-cap-step { font-size: 0.75rem; letter-spacing: 0.1em; color: var(--cyan); font-weight: 700; }
+.app.presentation .booth-caption b { font-size: 1.9rem; }
+.app.presentation .booth-caption span:last-child { font-size: 1.25rem; }
+@keyframes booth-in { from { opacity: 0; transform: translateY(8px); } }
+:root[data-theme='light'] .booth-caption { background: rgba(255, 255, 255, 0.94); }
+
+@media (max-width: 1200px) {
+  .booth-caption { left: 16px; right: 16px; bottom: 215px; }
+}
+@media (max-width: 820px) {
+  .booth { left: 16px; right: 16px; width: auto; bottom: 120px; }
+  .booth-caption { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .booth-caption { animation: none; } }

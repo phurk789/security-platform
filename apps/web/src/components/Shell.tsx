@@ -375,6 +375,8 @@ export function Footer() {
                 <button disabled={!allowed} onClick={() => dispatch({ type: 'demoCutLink', deviceId: 'UGV-01' })}><Unplug size={14} /> {t('Cut UGV-01 network')}</button>
               )}
               <button onClick={() => { dispatch({ type: 'demoReset' }); setOpen(false); }}><RotateCcw size={14} /> {t('Reset demo dataset')}</button>
+              <hr />
+              <button onClick={() => { setOpen(false); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b' })); }}><Monitor size={14} /> {t('Booth script (B)')}</button>
               {!allowed && <small className="muted">{t('This role cannot use demo controls.')}</small>}
             </div>
           )}

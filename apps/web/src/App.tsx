@@ -10,6 +10,7 @@ import { FleetPanel, useTheme, useWide } from './components/Hud';
 import { DevicesPage, EvidencePage, IncidentsPage, MissionsPage, ReportsPage } from './views/Pages';
 import { AdminPage } from './views/Admin';
 import { CommandCenter } from './views/CommandCenter';
+import { BoothScript } from './components/BoothScript';
 
 export function App() {
   const { s } = useStore();
@@ -30,6 +31,7 @@ export function App() {
       </div>
       <Footer />
       <Toasts />
+      <BoothScript />
     </div>
   );
 }

@@ -56,8 +56,11 @@ runs the whole scenario in the browser. It's the booth fallback, labelled SIMULA
 | 2:30 | somchai | Resume → UGV reaches the gate, snapshot attached | Evidence linked to the incident with a checksum |
 | 2:45 | alex / priya | Resolve → Close → Reports → Export; Evidence → Replay | Timeline, audit log, report export, replay with control off |
 
-Reset before each run: Demo controls → Reset demo dataset. Optional: assign INC-022 to `kitti`
-and show the field app on a phone; inject a duplicate alert and merge it.
+Press **B** in the console for the **booth script**: *Next* switches the role and performs each
+step for you, with the talking point on screen; **A** runs the whole script as an attract loop.
+Full booth playbook (risks, kit, run-of-show, answers): [`docs/BOOTH.md`](docs/BOOTH.md).
+Optional: assign INC-022 to `kitti` and show the field app on a phone; inject a duplicate alert
+and merge it.
 
 ## Documentation
 
@@ -68,6 +71,7 @@ and show the field app on a phone; inject a duplicate alert and merge it.
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Configuration, deployment, pilot checklist, backup and restore, security notes |
 | [`docs/API.md`](docs/API.md) | API guide, developer sandbox, examples; full reference at `/api/v1/openapi.json` |
 | [`docs/ADAPTER_CONTRACT.md`](docs/ADAPTER_CONTRACT.md) | How to connect a real device (BUILD YOUR OWN) |
+| [`docs/BOOTH.md`](docs/BOOTH.md) | Running the live demo at a booth: risks and mitigations, kit, run-of-show, answers |
 | [`docs/HARDWARE_SIYI.md`](docs/HARDWARE_SIYI.md) | Connecting SIYI cameras, the UniFC 6 Pico flight controller and the UniRC 7 Pro remote; edge PC and video setup; hardware test checklist |
 
 ## Develop

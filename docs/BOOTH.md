@@ -1,0 +1,72 @@
+# Live demo at a booth
+
+How to run the platform live at an exhibition: what can go wrong, what the software does about
+it, what to bring, and the run-of-show. Thai talking points are built into the console.
+
+## What goes wrong at booths, and what we do about it
+
+| Risk | What happens | What the platform does |
+|---|---|---|
+| Presenter clicks through 3 roles while talking | Wrong role, missed step, dead air | **Booth script** (press **B**): one *Next* button per step switches the role and performs the action; the talking point is on screen. Space / → next, A auto-play, R reset, P big screen |
+| Nobody at the booth | Screen looks static, people walk past | **Auto-play loop**: the whole script runs by itself, with large captions, then resets and repeats. Press any booth key to take over |
+| Venue Wi-Fi / 4G fails | Cloud demo dies | The **offline build** (`npm run build:demo` → one HTML file) runs entirely in the browser. Keep it as the default; the server version is optional |
+| Someone asks "is this real?" | Credibility | Every simulated device carries a **SIM** tag, the header says **SIMULATION**, and real hardware is labelled **TESTING / VERIFIED**. Say so before they ask |
+| Real vehicle misbehaves in a crowd | Safety incident | Vehicles stay **simulated** on the big screen. Real hardware at the booth is limited to the **SIYI camera on a tripod** (pan/tilt/zoom from the console) and, if a fenced pen is available, a **D100 with the pilot holding the UniRC 7 Pro** and the physical E-stop in reach |
+| State left over from the last visitor | Demo starts mid-flow | *Reset demo dataset* (R in the booth script) returns to the opening state in one click |
+| Small text on a TV | Visitors cannot read it | **Presentation mode** (P) enlarges the UI; captions are sized for 2–3 m |
+| Laptop GPU too weak for four 3D views | Stutter | Turn the fleet video off (Fleet panel → *Video*), or use the classic layout. The 3D views stop rendering when hidden |
+
+## Kit
+
+- Laptop with a dedicated GPU (or a recent integrated one), Chrome or Edge. Battery plus mains.
+- TV or monitor ≥ 43″, HDMI. Mirror or extend: **TV shows the console in presentation mode;
+  laptop keeps the booth script panel** (extend, then drag the browser to the TV and open a
+  second window on the laptop for the script, or simply mirror).
+- Phone or tablet with the **field app** (`/field/`) for the responder part.
+- Optional real hardware: SIYI ZT30/ZR30/A8 mini on a tripod with its air unit, UniRC 7 Pro,
+  edge PC with the gateway and MediaMTX (`deploy/edge/`), registered in a **pilot** org.
+- Printed one-pager: what is simulated, what is real, what the pilot would include.
+
+## Run-of-show (≈ 3 min, built into the booth script)
+
+| # | Who | Step | Proves |
+|---|---|---|---|
+| 1 | Alex | One view of the site | Map, cameras, vehicles; readiness is real, simulation is labelled |
+| 2 | Alex | Open the camera | Alert stays unverified until a person looks; nearest camera auto-pointed |
+| 3 | Alex | Confirm the alert | Every decision audited with who / when |
+| 4 | Alex | Plan the UGV route | Draft is dashed; nothing moves yet |
+| 5 | Alex | Submit for approval | Constraint checks |
+| 6 | Nida | Supervisor approves | Role enforced by the API; route change withdraws approval |
+| 7 | Somchai | Operator takes control | One control holder; handover logged |
+| 8 | Somchai | Send start | Sent → acknowledged → confirmed by movement |
+| 9 | Somchai | Warning light and announcement | 4-in-1 module from the console, logged |
+| 10 | Alex | Cut the network | STALE, commands held, vehicle's own failsafe |
+| 11 | Alex | Restore the network | Nothing replayed; mission paused |
+| 12 | Somchai | Resume to the gate | Evidence attached with checksum |
+| 13 | Alex | Record the outcome | A false alarm is still a complete record |
+| 14 | Alex | Close and report | Report with approver, commands, evidence; exports logged |
+| 15 | Priya | Replay for the auditor | Controls off in replay; audit chain verifiable |
+
+Extras when there is time: Command center (UGV & UAV page) with the D100 searchlight; point
+CCTV-02 by hand and back at the incident; light theme for daytime scenes; the field app on a
+phone (assign INC-022 to Kittipong, accept, report with a photo, show the sync).
+
+## Before the doors open
+
+1. Open the offline build in a fresh browser profile; set TH or EN; press **P** on the TV.
+2. Press **B**, run the script once end to end (≈ 3 min). Fix anything odd, then **R**.
+3. If real hardware is present: check the camera shows **LIVE** and PTZ confirms; run checklist
+   items 11–13 from `HARDWARE_SIYI.md`.
+4. Leave **auto-play on** (A) between visitors.
+
+## Answers to keep ready
+
+- *Is this live?* The console and rules are real; vehicles and cameras on screen are simulated
+  and labelled. The camera on the tripod is real. Real vehicles are connected through the same
+  gateway (SIYI UniFC 6 Pico via UniRC 7 Pro) and are in hardware testing.
+- *Can it drive the robot by itself?* No. The flight controller drives; the platform uploads an
+  approved route and asks for start / pause / stop. The pilot's remote always wins.
+- *What happens if the link drops?* You just saw it: the vehicle stops by its own failsafe, the
+  console shows STALE, and nothing is replayed when it reconnects.
+- *Where is the data?* On this laptop. The pilot runs on a server you control, with per-org
+  isolation, signed media links and a hash-chained audit log.
