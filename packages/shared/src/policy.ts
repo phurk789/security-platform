@@ -43,6 +43,8 @@ export type Action =
   | 'admin.devices'
   | 'admin.keys'
   | 'admin.backup'
+  | 'admin.settings'
+  | 'admin.privacy'
   | 'demo.control';
 
 const DISPATCH: Action[] = [
@@ -74,11 +76,11 @@ export const MATRIX: Record<Role, Action[]> = {
   operator: ['mission.accept', 'device.command', 'media.view', 'camera.control', 'payload.control', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'],
   responder: ['incident.create', 'field.update', 'evidence.view', 'evidence.add'],
   auditor: ['evidence.view', 'evidence.export', 'report.view', 'audit.view'],
-  admin: ['admin.users', 'admin.devices', 'admin.keys', 'admin.backup', 'audit.view', 'demo.control'],
+  admin: ['admin.users', 'admin.devices', 'admin.keys', 'admin.backup', 'admin.settings', 'admin.privacy', 'audit.view', 'demo.control'],
 };
 
 /** Actions that require a recent password check. */
-export const STEP_UP_ACTIONS: Action[] = ['mission.approve', 'evidence.export', 'control.handover', 'admin.users', 'admin.keys', 'admin.backup'];
+export const STEP_UP_ACTIONS: Action[] = ['mission.approve', 'evidence.export', 'control.handover', 'admin.users', 'admin.keys', 'admin.backup', 'admin.privacy'];
 
 export function can(role: Role, action: Action): boolean {
   return MATRIX[role].includes(action);
@@ -123,7 +125,9 @@ export function constraintChecksAt(now: number, d: Device, m: Mission, nameOf: (
   const fresh = freshnessAt(now, d);
   const inside = m.checkpoints.length > 0 && m.checkpoints.every(insideDemoArea);
   const battery = d.battery ?? 0;
-  const routeChecks: Check[] = d.indoor ? indoorRouteChecks(d, m) : [{ label: 'Route inside demo area', ok: inside, hard: true, detail: `${m.checkpoints.length} checkpoints inside site boundary` }];
+  const routeChecks: Check[] = d.indoor
+    ? indoorRouteChecks(d, m)
+    : [{ label: 'Route inside demo area', ok: inside, hard: true, detail: `${m.checkpoints.length} checkpoints inside site boundary` }];
   return [
     { label: 'Telemetry fresh', ok: fresh === 'live', hard: true, detail: fresh === 'live' ? 'Last seen < 5 s' : `Telemetry ${fresh}` },
     { label: 'Battery ≥ 30%', ok: battery >= 30, hard: true, detail: `${Math.round(battery)}%` },
@@ -150,15 +154,32 @@ export function indoorRouteChecks(d: Device, m: Mission): Check[] {
   const plan = floorPlan(d.indoor?.buildingId, d.indoor?.level);
   const cps = m.checkpoints;
   const insideBuilding = !!b && cps.length > 0 && cps.every((p) => atBuilding(b, p, 0));
-  const out: Check[] = [{ label: 'Route inside building', ok: insideBuilding, hard: true, detail: b ? `${cps.length} checkpoints inside ${b.name}, level ${d.indoor?.level}` : 'Unknown building' }];
+  const out: Check[] = [
+    { label: 'Route inside building', ok: insideBuilding, hard: true, detail: b ? `${cps.length} checkpoints inside ${b.name}, level ${d.indoor?.level}` : 'Unknown building' },
+  ];
   if (!plan) {
     out.push({ label: 'Floor plan available', ok: false, hard: true, detail: 'No floor plan for this level — import one from the BIM model.' });
     return out;
   }
   const leg = routeCrossesWalls([d.pos, ...cps], plan);
-  out.push({ label: 'Route clear of walls', ok: leg < 0, hard: true, detail: leg < 0 ? 'No leg crosses a wall' : leg === 0 ? 'The leg from the vehicle to checkpoint 1 crosses a wall' : `The leg between checkpoints ${leg} and ${leg + 1} crosses a wall` });
+  out.push({
+    label: 'Route clear of walls',
+    ok: leg < 0,
+    hard: true,
+    detail:
+      leg < 0
+        ? 'No leg crosses a wall'
+        : leg === 0
+          ? 'The leg from the vehicle to checkpoint 1 crosses a wall'
+          : `The leg between checkpoints ${leg} and ${leg + 1} crosses a wall`,
+  });
   const bad = cps.findIndex((p) => inNoGo(plan, p));
-  out.push({ label: 'Avoids stairs and lifts', ok: bad < 0, hard: true, detail: bad < 0 ? 'No checkpoint on stairs or in a lift' : `Checkpoint ${bad + 1} is in ${inNoGo(plan, cps[bad])?.name}` });
+  out.push({
+    label: 'Avoids stairs and lifts',
+    ok: bad < 0,
+    hard: true,
+    detail: bad < 0 ? 'No checkpoint on stairs or in a lift' : `Checkpoint ${bad + 1} is in ${inNoGo(plan, cps[bad])?.name}`,
+  });
   return out;
 }
 
@@ -183,9 +204,7 @@ export function fmtTime(ms: number, withSeconds = false) {
 }
 
 export function fmtDate(ms: number) {
-  return new Date(ms)
-    .toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: TZ })
-    .toUpperCase();
+  return new Date(ms).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: TZ }).toUpperCase();
 }
 
 export function dist(a: { x: number; y: number }, b: { x: number; y: number }) {

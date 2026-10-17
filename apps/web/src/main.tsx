@@ -26,7 +26,13 @@ function Root() {
         setPhase({ k: 'login', meta: null });
         return;
       }
-      const token = loadToken();
+      // Single sign-on lands here with #sso=<session token> (or #sso_error=<message>).
+      const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+      const ssoToken = h.get('sso');
+      const ssoError = h.get('sso_error');
+      if (ssoToken || ssoError) history.replaceState(null, '', location.pathname + location.search);
+      if (ssoToken) saveToken(ssoToken);
+      const token = ssoToken || loadToken();
       if (token) {
         api.token = token;
         try {
@@ -38,7 +44,7 @@ function Root() {
         saveToken('');
         api.token = '';
       }
-      setPhase({ k: 'login', meta });
+      setPhase({ k: 'login', meta, error: ssoError ?? undefined });
     })();
   }, [api]);
 
@@ -61,7 +67,12 @@ function Root() {
     setPhase({ k: 'login', meta });
   }, [api, phase]);
 
-  if (phase.k === 'checking') return <div className="login"><p className="muted">{tr('Connecting…')}</p></div>;
+  if (phase.k === 'checking')
+    return (
+      <div className="login">
+        <p className="muted">{tr('Connecting…')}</p>
+      </div>
+    );
   if (phase.k === 'standalone')
     return (
       <StandaloneProvider>
@@ -76,8 +87,12 @@ function Root() {
         <div className="login-card">
           <h2>{tr('Hello {name}', { name: phase.user.name })}</h2>
           <p className="muted">{tr('Field responders use the mobile field app.')}</p>
-          <a className="btn-primary wide big" href="/field/">{tr('Open the field app')}</a>
-          <button className="btn-ghost small" onClick={logout}>{tr('Sign out')}</button>
+          <a className="btn-primary wide big" href="/field/">
+            {tr('Open the field app')}
+          </a>
+          <button className="btn-ghost small" onClick={logout}>
+            {tr('Sign out')}
+          </button>
         </div>
       </div>
     );

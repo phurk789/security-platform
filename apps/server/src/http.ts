@@ -9,6 +9,8 @@ import { createBackup, listBackups, verifyBackup } from './backup';
 import type { Config } from './config';
 import type { DB } from './db';
 import { GatewayHub } from './gatewayHub';
+import { Metrics } from './metrics';
+import { OidcClient, OidcError } from './oidc';
 import { openapi } from './openapi';
 import { ApiError, Platform, type Actor, type BusMessage } from './platform';
 import { DEMO_ORG, resetDemo } from './seed';
@@ -22,7 +24,19 @@ declare module 'fastify' {
 
 type Req = FastifyRequest<{ Params: Record<string, string>; Querystring: Record<string, string>; Body: Record<string, unknown> }>;
 
-const PUBLIC = new Set(['/api/v1/meta', '/api/v1/auth/login', '/api/v1/openapi.json', '/api/v1/health', '/api/v1/gateway', '/api/v1/ws', '/api/v1/media/auth']);
+const PUBLIC = new Set([
+  '/api/v1/meta',
+  '/api/v1/auth/login',
+  '/api/v1/auth/sso',
+  '/api/v1/auth/sso/callback',
+  '/api/v1/openapi.json',
+  '/api/v1/health',
+  '/api/v1/ready',
+  '/api/v1/metrics',
+  '/api/v1/gateway',
+  '/api/v1/ws',
+  '/api/v1/media/auth',
+]);
 
 function bearer(req: FastifyRequest) {
   const h = req.headers.authorization;
@@ -34,6 +48,21 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   const accounts = new Accounts(db, p, cfg.sessionTtlMs);
   const hub = new GatewayHub(p, accounts);
   p.gateways = hub;
+  const metrics = new Metrics();
+  const oidc = cfg.oidc ? new OidcClient(cfg.oidc, fetch, () => p.now()) : null;
+  let wsClients = 0;
+  metrics.gauge('ps_devices', () => p.deviceCounts().live, { freshness: 'live' });
+  metrics.gauge('ps_devices', () => p.deviceCounts().stale, { freshness: 'stale' });
+  metrics.gauge('ps_devices', () => p.deviceCounts().offline, { freshness: 'offline' });
+  metrics.gauge('ps_gateways_connected', () => hub.count());
+  metrics.gauge('ps_console_clients', () => wsClients);
+  metrics.gauge('ps_license_days_left', () => p.license.daysLeft(p.now()) ?? -1);
+  p.bus.on('event', (m: BusMessage) => {
+    const e = m.event as { type: string; incident?: { status: string }; command?: { status: string } };
+    if (e.type === 'incident' && e.incident) metrics.inc('ps_incident_events_total', { status: e.incident.status });
+    if (e.type === 'command' && e.command) metrics.inc('ps_command_events_total', { status: e.command.status });
+    if (e.type === 'audit') metrics.inc('ps_audit_events_total');
+  });
 
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 12 * 1024 * 1024, trustProxy: true });
   await app.register(fastifyWebsocket, { options: { maxPayload: 1024 * 1024 } });
@@ -46,6 +75,16 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     return reply.status(500).send({ error: 'Something went wrong on the server.', code: 'error' });
   });
 
+  // Request metrics (route template, not the raw URL, so ids do not explode the series).
+  app.addHook('onRequest', async (req) => {
+    (req as FastifyRequest & { t0?: number }).t0 = performance.now();
+  });
+  app.addHook('onResponse', async (req, reply) => {
+    const t0 = (req as FastifyRequest & { t0?: number }).t0;
+    if (t0 !== undefined) metrics.observe((performance.now() - t0) / 1000);
+    metrics.inc('ps_http_requests_total', { route: req.routeOptions?.url ?? 'unmatched', method: req.method, status: reply.statusCode });
+  });
+
   // Security headers for every response.
   app.addHook('onSend', async (_req, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
@@ -55,7 +94,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
 
   app.addHook('preHandler', async (req: FastifyRequest) => {
     const path = req.url.split('?')[0];
-    if (!path.startsWith('/api/v1/') || PUBLIC.has(path) || path.startsWith('/api/v1/media/') && path.endsWith('/frame.svg')) return;
+    if (!path.startsWith('/api/v1/') || PUBLIC.has(path) || (path.startsWith('/api/v1/media/') && path.endsWith('/frame.svg'))) return;
     const auth = accounts.authenticate(bearer(req));
     if (!auth) throw new ApiError(401, 'unauthenticated', 'Sign in to continue.');
     if (auth.actor.role === 'gateway') throw new ApiError(403, 'forbidden', 'Gateway keys can only open the gateway channel.');
@@ -70,6 +109,25 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
 
   // ---- public -------------------------------------------------------------
   app.get('/api/v1/health', async () => ({ ok: true, time: p.now() }));
+  app.get('/api/v1/ready', async (_req, reply) => {
+    try {
+      db.prepare('SELECT 1').get();
+    } catch (e) {
+      return reply.status(503).send({ ok: false, db: false, error: (e as Error).message });
+    }
+    return { ok: true, db: true, gateways: hub.count(), devices: p.deviceCounts(), license: p.license.state(p.now()), version: cfg.version };
+  });
+  app.get('/api/v1/metrics', async (req, reply) => {
+    const token = bearer(req);
+    const byToken = !!cfg.metricsToken && !!token && token === cfg.metricsToken;
+    if (!byToken) {
+      const auth = accounts.authenticate(token);
+      if (!auth || auth.actor.role !== 'admin') throw new ApiError(403, 'forbidden', 'Metrics need the METRICS_TOKEN or an administrator session.');
+    }
+    reply.header('content-type', 'text/plain; version=0.0.4; charset=utf-8');
+    return metrics.render();
+  });
+  app.get('/api/v1/license', async (req) => p.licenseStatus(A(req).orgId));
   app.get('/api/v1/meta', async () => p.meta(DEMO_ORG));
   app.get('/api/v1/openapi.json', async () => openapi(cfg));
 
@@ -78,6 +136,41 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     const b = body(req);
     if (typeof b.username !== 'string' || typeof b.password !== 'string') throw new ApiError(400, 'invalid', 'Username and password are required.');
     return accounts.login(b.username, b.password, req.ip);
+  });
+  // Single sign-on (OpenID Connect, Authorization Code + PKCE).
+  app.get('/api/v1/auth/sso', async (req: Req, reply) => {
+    if (!oidc) throw new ApiError(404, 'not_found', 'Single sign-on is not configured.');
+    const s = await oidc.start();
+    db.prepare('DELETE FROM sso_pending WHERE created_at < ?').run(p.now() - 10 * 60_000);
+    db.prepare('INSERT INTO sso_pending (state, nonce, verifier, return_to, created_at) VALUES (?,?,?,?,?)').run(
+      s.state,
+      s.nonce,
+      s.verifier,
+      typeof req.query.returnTo === 'string' ? req.query.returnTo.slice(0, 200) : null,
+      p.now(),
+    );
+    return reply.redirect(s.url, 302);
+  });
+  app.get('/api/v1/auth/sso/callback', async (req: Req, reply) => {
+    if (!oidc) throw new ApiError(404, 'not_found', 'Single sign-on is not configured.');
+    const fail = (msg: string) => reply.redirect(`/#sso_error=${encodeURIComponent(msg)}`, 302);
+    const { code, state, error, error_description } = req.query;
+    if (error) return fail(String(error_description || error));
+    if (!code || !state) return fail('Missing code or state.');
+    const pend = db.prepare('SELECT nonce, verifier, return_to, created_at FROM sso_pending WHERE state = ?').get(state) as
+      | { nonce: string; verifier: string; return_to: string | null; created_at: number }
+      | undefined;
+    db.prepare('DELETE FROM sso_pending WHERE state = ?').run(state);
+    if (!pend || pend.created_at < p.now() - 10 * 60_000) return fail('Sign-in request expired. Try again.');
+    try {
+      const id = await oidc.callback(String(code), pend.nonce, pend.verifier);
+      const r = accounts.loginSso(id, cfg.oidc!.orgId, cfg.oidc!.syncRole);
+      return reply.redirect(`${pend.return_to && pend.return_to.startsWith('/') ? pend.return_to : '/'}#sso=${encodeURIComponent(r.token)}`, 302);
+    } catch (e) {
+      if (e instanceof OidcError || e instanceof ApiError) return fail(e.message);
+      req.log.error(e);
+      return fail('Single sign-on failed.');
+    }
   });
   app.get('/api/v1/auth/me', async (req) => {
     const auth = accounts.authenticate(bearer(req));
@@ -184,7 +277,11 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.get('/api/v1/evidence/:id/content', async (req: Req, reply: FastifyReply) => {
     const download = req.query.download === '1';
     const { ev, bytes, intact } = p.evidenceContent(A(req), req.params.id, download);
-    reply.header('Content-Type', ev.mime ?? 'application/octet-stream').header('X-Content-SHA256', ev.checksum ?? '').header('X-Integrity', intact ? 'ok' : 'mismatch').header('Cache-Control', 'no-store');
+    reply
+      .header('Content-Type', ev.mime ?? 'application/octet-stream')
+      .header('X-Content-SHA256', ev.checksum ?? '')
+      .header('X-Integrity', intact ? 'ok' : 'mismatch')
+      .header('Cache-Control', 'no-store');
     if (download) reply.header('Content-Disposition', `attachment; filename="${ev.id}"`);
     if (ev.mime === 'image/svg+xml') reply.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
     return reply.send(bytes);
@@ -214,6 +311,16 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     p.require(A(req), 'admin.devices', 'gateways', { mutating: false });
     return hub.connected(A(req).orgId);
   });
+  app.get('/api/v1/admin/settings', async (req) => p.orgSettings(A(req)));
+  app.patch('/api/v1/admin/settings', async (req: Req) => p.updateOrgSettings(A(req), body(req) as any));
+  app.post('/api/v1/admin/retention/run', async (req) => {
+    p.require(A(req), 'admin.settings', 'retention');
+    const r = p.runPurge()[A(req).orgId];
+    p.audit(A(req), 'retention.run', 'retention', 'ok', JSON.stringify(r));
+    return r;
+  });
+  app.get('/api/v1/admin/privacy', async (req: Req) => p.privacySearch(A(req), String(req.query.q ?? '')));
+  app.post('/api/v1/admin/privacy/erase', async (req: Req) => p.privacyErase(A(req), String(body(req).q ?? ''), String(body(req).reason ?? '')));
   app.get('/api/v1/admin/backups', async (req) => {
     p.require(A(req), 'admin.backup', 'backups', { mutating: false });
     return listBackups(cfg.dataDir);
@@ -251,7 +358,16 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     const a = A(req);
     const inc = p.createIncident(
       { ...a, kind: 'system', role: 'system', name: 'Gate sensor SG-2 (simulated)' },
-      { title: 'Repeated gate sensor trigger', type: 'Sensor alert', severity: 'medium', zone: 'Zone B', place: 'Service gate', pos: { x: 341, y: 238 }, source: 'Gate sensor SG-2 (simulated)', cameraId: 'CCTV-02' },
+      {
+        title: 'Repeated gate sensor trigger',
+        type: 'Sensor alert',
+        severity: 'medium',
+        zone: 'Zone B',
+        place: 'Service gate',
+        pos: { x: 341, y: 238 },
+        source: 'Gate sensor SG-2 (simulated)',
+        cameraId: 'CCTV-02',
+      },
     );
     p.audit(a, 'demo.inject_alert', inc.id);
     return inc;
@@ -287,6 +403,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
         if (!auth?.user) return socket.close(4401, 'invalid session');
         token = msg.token!;
         actor = auth.actor;
+        wsClients++;
         clearTimeout(timer);
         p.bus.on('event', onEvent);
         socket.send(JSON.stringify({ type: 'hello', serverTime: p.now(), user: auth.user } satisfies ConsoleMessage));
@@ -295,6 +412,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
       }
     });
     socket.on('close', () => {
+      if (actor) wsClients--;
       clearTimeout(timer);
       clearInterval(recheck);
       p.bus.off('event', onEvent);
@@ -310,7 +428,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     hub.closeAll();
   });
 
-  return { app, platform: p, accounts, hub };
+  return { app, platform: p, accounts, hub, metrics };
 }
 
 function orgEnv(db: DB, orgId: string): 'demo' | 'sandbox' | 'pilot' {

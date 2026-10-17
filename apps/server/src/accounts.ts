@@ -2,6 +2,7 @@
 import { STEP_UP_WINDOW_MS, type ApiKeyView, type Role, type SessionUser, type UserAdminView } from '@13store/shared';
 import type { DB } from './db';
 import { ApiError, type Actor, type Platform } from './platform';
+import type { SsoIdentity } from './oidc';
 import { LoginThrottle, hashPassword, randomToken, sha256, verifyPassword } from './security';
 
 const ROLES: Role[] = ['dispatcher', 'supervisor', 'operator', 'responder', 'auditor', 'admin'];
@@ -51,6 +52,59 @@ export class Accounts {
     return { token, expiresAt, user };
   }
 
+  /**
+   * Single sign-on: find the user by SSO subject (or link an existing account with the same
+   * e-mail as username), create one if needed, sync the role from the mapped group, open a session.
+   */
+  loginSso(id: SsoIdentity, orgId: string, syncRole: boolean) {
+    const now = this.p.now();
+    let u = this.db.prepare('SELECT * FROM users WHERE sso_subject = ?').get(id.subject) as UserRow | undefined;
+    if (!u && id.email) {
+      const byMail = this.db.prepare('SELECT * FROM users WHERE username = ? AND org_id = ?').get(id.email, orgId) as UserRow | undefined;
+      if (byMail && !byMail.pw_hash.startsWith('!sso')) {
+        // link a local account created before SSO; the password stays usable
+        this.db.prepare('UPDATE users SET sso_subject = ? WHERE id = ?').run(id.subject, byMail.id);
+        u = { ...byMail, sso_subject: id.subject } as UserRow;
+      } else if (byMail) u = byMail;
+    }
+    if (!u) {
+      const over = this.p.license.check('users', (this.db.prepare('SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND active = 1').get(orgId) as { n: number }).n, now);
+      if (over) {
+        this.p.audit(this.p.systemActor(orgId, 'system', 'SSO'), 'auth.sso_login', id.email ?? id.subject, 'denied', over);
+        throw new ApiError(402, 'license', over);
+      }
+      const username = (id.email ?? `sso.${id.subject}`)
+        .toLowerCase()
+        .replace(/[^a-z0-9._@-]/g, '')
+        .slice(0, 64);
+      const uid = `u-${randomToken('', 6)
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, 'x')}`;
+      this.db
+        .prepare('INSERT INTO users (id, org_id, username, name, title, role, pw_hash, site_ids, active, created_at, sso_subject) VALUES (?,?,?,?,?,?,?,?,1,?,?)')
+        .run(uid, orgId, username, id.name, 'SSO user', id.role, '!sso', '[]', now, id.subject);
+      u = this.db.prepare('SELECT * FROM users WHERE id = ?').get(uid) as unknown as UserRow;
+      this.p.audit(this.p.systemActor(orgId, 'system', 'SSO'), 'auth.sso_provision', u.username, 'ok', id.role);
+    } else if (!u.active) {
+      this.p.audit(this.p.systemActor(u.org_id, 'system', 'SSO'), 'auth.sso_login', u.username, 'denied', 'account disabled');
+      throw new ApiError(403, 'forbidden', 'Your account is disabled on this platform.');
+    }
+    if (syncRole && u.role !== id.role) {
+      this.db.prepare('UPDATE users SET role = ? WHERE id = ?').run(id.role, u.id);
+      this.p.audit(this.p.systemActor(u.org_id, 'system', 'SSO'), 'auth.sso_role_sync', u.username, 'ok', `${u.role} → ${id.role}`);
+      u.role = id.role;
+    }
+    if (u.name !== id.name) this.db.prepare('UPDATE users SET name = ? WHERE id = ?').run(id.name, u.id);
+    this.db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(now, u.id);
+    const token = randomToken('ses_');
+    const expiresAt = now + this.ttlMs;
+    const stepUp = now + STEP_UP_WINDOW_MS;
+    this.db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at, step_up_until) VALUES (?,?,?,?,?)').run(sha256(token), u.id, now, expiresAt, stepUp);
+    const user = this.sessionUser({ ...u, name: id.name }, stepUp);
+    this.p.audit(this.p.userActor(user), 'auth.sso_login', u.username);
+    return { token, expiresAt, user };
+  }
+
   /** Resolves a bearer token (session or API key) into an actor. */
   authenticate(token: string | undefined): { actor: Actor; user?: SessionUser; sessionHash?: string; keyKind?: string } | null {
     if (!token) return null;
@@ -68,7 +122,10 @@ export class Accounts {
       | { id: string; org_id: string; label: string; kind: string; env: string; site_ids: string }
       | undefined;
     if (!k) return null;
-    return { actor: { kind: 'apikey', orgId: k.org_id, siteIds: JSON.parse(k.site_ids), name: `API key ${k.label}`, role: k.kind === 'gateway' ? 'gateway' : 'integration' }, keyKind: k.kind };
+    return {
+      actor: { kind: 'apikey', orgId: k.org_id, siteIds: JSON.parse(k.site_ids), name: `API key ${k.label}`, role: k.kind === 'gateway' ? 'gateway' : 'integration' },
+      keyKind: k.kind,
+    };
   }
 
   logout(sessionHash: string, a: Actor) {
@@ -102,10 +159,27 @@ export class Accounts {
     if (!ROLES.includes(input.role)) throw new ApiError(400, 'invalid', 'Unknown role.');
     if ((input.password ?? '').length < 10) throw new ApiError(400, 'invalid', 'Password must be at least 10 characters.');
     if (this.db.prepare('SELECT 1 FROM users WHERE username = ?').get(input.username)) throw new ApiError(409, 'conflict', 'Username already taken.');
-    const id = `u-${randomToken('', 6).toLowerCase().replace(/[^a-z0-9]/g, 'x')}`;
+    const over = this.p.license.check('users', (this.db.prepare('SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND active = 1').get(a.orgId) as { n: number }).n, this.p.now());
+    if (over) {
+      this.p.audit(a, 'admin.user_create', input.username, 'denied', over);
+      throw new ApiError(402, 'license', over);
+    }
+    const id = `u-${randomToken('', 6)
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, 'x')}`;
     this.db
       .prepare('INSERT INTO users (id, org_id, username, name, title, role, pw_hash, site_ids, active, created_at) VALUES (?,?,?,?,?,?,?,?,1,?)')
-      .run(id, a.orgId, input.username, input.name.slice(0, 80), (input.title ?? '').slice(0, 80), input.role, hashPassword(input.password), JSON.stringify(input.siteIds ?? []), this.p.now());
+      .run(
+        id,
+        a.orgId,
+        input.username,
+        input.name.slice(0, 80),
+        (input.title ?? '').slice(0, 80),
+        input.role,
+        hashPassword(input.password),
+        JSON.stringify(input.siteIds ?? []),
+        this.p.now(),
+      );
     this.p.audit(a, 'admin.user_create', input.username, 'ok', input.role);
     return this.listUsers(a).find((u) => u.id === id)!;
   }

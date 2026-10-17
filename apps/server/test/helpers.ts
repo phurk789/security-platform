@@ -18,9 +18,20 @@ export interface TestServer {
   close(): Promise<void>;
 }
 
-export async function startServer(opts: { gateway?: boolean; env?: 'demo' | 'pilot' } = {}): Promise<TestServer> {
+export async function startServer(opts: { gateway?: boolean; env?: 'demo' | 'pilot'; cfg?: Partial<Config> } = {}): Promise<TestServer> {
   const dataDir = mkdtempSync(join(tmpdir(), 'ps-test-'));
-  const cfg = loadConfig({ dataDir, dbFile: join(dataDir, 'platform.sqlite'), env: opts.env ?? 'demo', mediaSecret: 'test-secret', seedPassword: 'demo1234', embedGateway: false, port: 0 });
+  const cfg = loadConfig({
+    dataDir,
+    dbFile: join(dataDir, 'platform.sqlite'),
+    env: opts.env ?? 'demo',
+    mediaSecret: 'test-secret',
+    seedPassword: 'demo1234',
+    embedGateway: false,
+    port: 0,
+    backupIntervalH: 0,
+    purgeIntervalMs: 0,
+    ...opts.cfg,
+  });
   const db = openDb(cfg.dbFile);
   seed(db, cfg);
   const built = await buildApp(db, cfg);
@@ -31,7 +42,13 @@ export async function startServer(opts: { gateway?: boolean; env?: 'demo' | 'pil
   const wsUrl = `ws://127.0.0.1:${addr.port}`;
   let gateway: GatewayHandle | undefined;
   if (opts.gateway !== false) {
-    gateway = startGateway({ serverUrl: wsUrl, key: DEMO_GATEWAY_KEY, gatewayId: 'edge-test', adapters: defaultAdapters({ rateMs: 200 }), log: { info() {}, warn() {}, error() {} } as never });
+    gateway = startGateway({
+      serverUrl: wsUrl,
+      key: DEMO_GATEWAY_KEY,
+      gatewayId: 'edge-test',
+      adapters: defaultAdapters({ rateMs: 200 }),
+      log: { info() {}, warn() {}, error() {} } as never,
+    });
     await waitFor(() => gateway!.connected && built.platform.listDevices(built.platform.systemActor('org-demo')).some((d) => d.id === 'UGV-01' && Date.now() - d.lastSeen < 1000));
   }
   return {

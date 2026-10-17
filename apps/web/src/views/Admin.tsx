@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { DatabaseBackup, KeyRound, Plus, RefreshCw, Router, ShieldCheck, UserPlus } from 'lucide-react';
-import { fmtDate, fmtTime, type ApiKeyView, type Role, type UserAdminView } from '@13store/shared';
+import { BadgeCheck, DatabaseBackup, Eraser, KeyRound, Plus, RefreshCw, Router, Search, ShieldCheck, Timer, UserPlus } from 'lucide-react';
+import { DEFAULT_ORG_SETTINGS, fmtDate, fmtTime, type ApiKeyView, type LicenseStatus, type OrgSettings, type Role, type UserAdminView } from '@13store/shared';
 import { ApiError } from '../api';
 import { useStore } from '../store';
 import { roleLabel, useT } from '../i18n';
@@ -16,10 +16,39 @@ interface Backup {
 
 const ROLES: Role[] = ['dispatcher', 'supervisor', 'operator', 'responder', 'auditor', 'admin'];
 
+interface PrivacyMatch {
+  table: 'incidents' | 'timeline' | 'evidence' | 'assignments';
+  id: string;
+  incidentId: string;
+  field: string;
+  excerpt: string;
+}
+
+const LICENSE_TONE: Record<LicenseStatus['state'], string> = {
+  valid: 'badge-green',
+  expiring: 'badge-amber',
+  grace: 'badge-amber',
+  expired: 'badge-red solid',
+  evaluation: 'badge-grey',
+};
+export const LICENSE_LABEL: Record<LicenseStatus['state'], string> = {
+  valid: 'Licensed',
+  expiring: 'Expiring soon',
+  grace: 'Grace period',
+  expired: 'License expired',
+  evaluation: 'Evaluation',
+};
+const LIMIT_LABEL = { sites: 'Sites', devices: 'Devices', users: 'Users' } as const;
+
 export function AdminPage() {
   const { session } = useStore();
   const t = useT();
-  if (!session) return <div className="page"><p className="empty">{t('Administration needs a connection to the platform server.')}</p></div>;
+  if (!session)
+    return (
+      <div className="page">
+        <p className="empty">{t('Administration needs a connection to the platform server.')}</p>
+      </div>
+    );
   return <Admin />;
 }
 
@@ -32,6 +61,12 @@ function Admin() {
   const [gws, setGws] = useState<{ gatewayId: string; devices: string[] }[]>([]);
   const [backups, setBackups] = useState<Backup[]>([]);
   const [audit, setAudit] = useState<{ ok: boolean; count: number; brokenAt?: number } | null>(null);
+  const [lic, setLic] = useState<LicenseStatus | null>(null);
+  const [settings, setSettings] = useState<OrgSettings>(DEFAULT_ORG_SETTINGS);
+  const [ret, setRet] = useState<Record<keyof OrgSettings['retention'], string>>({ telemetryDays: '90', closedIncidentDays: '0', evidenceDays: '0' });
+  const [pq, setPq] = useState('');
+  const [hits, setHits] = useState<PrivacyMatch[] | null>(null);
+  const [reason, setReason] = useState('');
   const [msg, setMsg] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [stepUp, setStepUp] = useState<null | (() => void)>(null);
@@ -40,18 +75,23 @@ function Admin() {
   const [nd, setNd] = useState({ id: '', kind: 'ugv' as 'ugv' | 'uav' | 'cctv', model: '' });
 
   const load = useCallback(async () => {
-    const [u, k, g, b, a] = await Promise.all([
+    const [u, k, g, b, a, l, st] = await Promise.all([
       api.get<UserAdminView[]>('/admin/users'),
       api.get<ApiKeyView[]>('/admin/keys'),
       api.get<{ gatewayId: string; devices: string[] }[]>('/admin/gateways'),
       api.get<Backup[]>('/admin/backups'),
       api.get<{ ok: boolean; count: number; brokenAt?: number }>('/audit/verify'),
+      api.get<LicenseStatus>('/license'),
+      api.get<OrgSettings>('/admin/settings'),
     ]);
     setUsers(u);
     setKeys(k);
     setGws(g);
     setBackups(b);
     setAudit(a);
+    setLic(l);
+    setSettings(st);
+    setRet({ telemetryDays: String(st.retention.telemetryDays), closedIncidentDays: String(st.retention.closedIncidentDays), evidenceDays: String(st.retention.evidenceDays) });
   }, [api]);
 
   useEffect(() => {
@@ -77,29 +117,67 @@ function Admin() {
           <h1>{t('Administration')}</h1>
           <p className="muted">{t('Users, access, connections and backups. Being an administrator does not give device control or access to incident data.')}</p>
         </div>
-        <button className="btn-secondary" onClick={() => act(load)}><RefreshCw size={16} /> {t('Refresh')}</button>
+        <button className="btn-secondary" onClick={() => act(load)}>
+          <RefreshCw size={16} /> {t('Refresh')}
+        </button>
       </div>
-      {msg && <p className={`banner ${msg.tone === 'ok' ? 'info' : 'warn'}`} style={{ margin: '0 0 12px' }}>{msg.text}</p>}
+      {msg && (
+        <p className={`banner ${msg.tone === 'ok' ? 'info' : 'warn'}`} style={{ margin: '0 0 12px' }}>
+          {msg.text}
+        </p>
+      )}
 
       <div className="admin-grid">
         <section className="card">
-          <h3><UserPlus size={16} /> {t('Users ({n})', { n: users.length })}</h3>
+          <h3>
+            <UserPlus size={16} /> {t('Users ({n})', { n: users.length })}
+          </h3>
           <div className="table-wrap">
             <table className="compact">
-              <thead><tr><th>{t('Name')}</th><th>{t('Username')}</th><th>{t('Role')}</th><th>{t('Status')}</th><th /></tr></thead>
+              <thead>
+                <tr>
+                  <th>{t('Name')}</th>
+                  <th>{t('Username')}</th>
+                  <th>{t('Role')}</th>
+                  <th>{t('Status')}</th>
+                  <th />
+                </tr>
+              </thead>
               <tbody>
                 {users.map((u) => (
                   <tr key={u.id}>
-                    <td>{u.name}<br /><small className="muted">{u.title}</small></td>
+                    <td>
+                      {u.name}
+                      <br />
+                      <small className="muted">{u.title}</small>
+                    </td>
                     <td className="mono">{u.username}</td>
                     <td>
-                      <select id={`role-${u.id}`} value={u.role} onChange={(e) => act(() => api.patch(`/admin/users/${u.id}`, { role: e.target.value }), t('Role changed for {name}. Their sessions were ended.', { name: u.name }))}>
-                        {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                      <select
+                        id={`role-${u.id}`}
+                        value={u.role}
+                        onChange={(e) =>
+                          act(() => api.patch(`/admin/users/${u.id}`, { role: e.target.value }), t('Role changed for {name}. Their sessions were ended.', { name: u.name }))
+                        }
+                      >
+                        {ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {roleLabel(r)}
+                          </option>
+                        ))}
                       </select>
                     </td>
                     <td>{u.active ? <span className="badge badge-green">{t('Active')}</span> : <span className="badge badge-grey">{t('Disabled')}</span>}</td>
                     <td>
-                      <button className="btn-ghost small" onClick={() => act(() => api.patch(`/admin/users/${u.id}`, { active: !u.active }), u.active ? t('{name} disabled.', { name: u.name }) : t('{name} enabled.', { name: u.name }))}>
+                      <button
+                        className="btn-ghost small"
+                        onClick={() =>
+                          act(
+                            () => api.patch(`/admin/users/${u.id}`, { active: !u.active }),
+                            u.active ? t('{name} disabled.', { name: u.name }) : t('{name} enabled.', { name: u.name }),
+                          )
+                        }
+                      >
                         {u.active ? t('Disable') : t('Enable')}
                       </button>
                     </td>
@@ -112,35 +190,62 @@ function Admin() {
             className="inline-form"
             onSubmit={(e) => {
               e.preventDefault();
-              act(() => api.post('/admin/users', nu), t('User {name} created.', { name: nu.username })).then(() => setNu({ username: '', name: '', role: 'dispatcher', password: '' }));
+              act(() => api.post('/admin/users', nu), t('User {name} created.', { name: nu.username })).then(() =>
+                setNu({ username: '', name: '', role: 'dispatcher', password: '' }),
+              );
             }}
           >
             <input id="nu-name" placeholder={t('Full name')} value={nu.name} onChange={(e) => setNu({ ...nu, name: e.target.value })} />
             <input id="nu-user" placeholder={t('username')} value={nu.username} onChange={(e) => setNu({ ...nu, username: e.target.value.toLowerCase() })} />
             <select id="nu-role" value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value as Role })}>
-              {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {roleLabel(r)}
+                </option>
+              ))}
             </select>
             <input id="nu-pw" type="password" placeholder={t('Temporary password (10+ chars)')} value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
-            <button className="btn-primary" disabled={!nu.name || !nu.username || nu.password.length < 10}><Plus size={16} /> {t('Add user')}</button>
+            <button className="btn-primary" disabled={!nu.name || !nu.username || nu.password.length < 10}>
+              <Plus size={16} /> {t('Add user')}
+            </button>
           </form>
         </section>
 
         <section className="card">
-          <h3><KeyRound size={16} /> {t('API keys')}</h3>
-          <p className="fine" style={{ marginTop: 0 }}>{t('Integration keys push alerts. Gateway keys connect edge gateways. Keys are tied to this environment.')}</p>
+          <h3>
+            <KeyRound size={16} /> {t('API keys')}
+          </h3>
+          <p className="fine" style={{ marginTop: 0 }}>
+            {t('Integration keys push alerts. Gateway keys connect edge gateways. Keys are tied to this environment.')}
+          </p>
           {secret && (
             <div className="banner warn">
               <span>{t('New key — copy it now, it will not be shown again:')}</span>
               <code className="secret">{secret}</code>
-              <button className="btn-ghost small" onClick={() => navigator.clipboard?.writeText(secret).catch(() => {})}>{t('Copy')}</button>
-              <button className="btn-ghost small" onClick={() => setSecret(null)}>{t('Done')}</button>
+              <button className="btn-ghost small" onClick={() => navigator.clipboard?.writeText(secret).catch(() => {})}>
+                {t('Copy')}
+              </button>
+              <button className="btn-ghost small" onClick={() => setSecret(null)}>
+                {t('Done')}
+              </button>
             </div>
           )}
           <ul className="list">
             {keys.map((k) => (
               <li key={k.id} className={k.revoked ? 'dim' : ''}>
-                <span><b>{k.label}</b> <small className="muted">{k.kind} · {k.env} · {k.prefix}… · {fmtDate(k.createdAt)}</small></span>
-                {k.revoked ? <span className="badge badge-grey">{t('Revoked')}</span> : <button className="btn-ghost small" onClick={() => act(() => api.del(`/admin/keys/${k.id}`), t('{name} revoked.', { name: k.label }))}>{t('Revoke')}</button>}
+                <span>
+                  <b>{k.label}</b>{' '}
+                  <small className="muted">
+                    {k.kind} · {k.env} · {k.prefix}… · {fmtDate(k.createdAt)}
+                  </small>
+                </span>
+                {k.revoked ? (
+                  <span className="badge badge-grey">{t('Revoked')}</span>
+                ) : (
+                  <button className="btn-ghost small" onClick={() => act(() => api.del(`/admin/keys/${k.id}`), t('{name} revoked.', { name: k.label }))}>
+                    {t('Revoke')}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -160,17 +265,23 @@ function Admin() {
               <option value="integration">{t('Integration (alerts)')}</option>
               <option value="gateway">{t('Edge gateway')}</option>
             </select>
-            <button className="btn-primary" disabled={!nk.label}><Plus size={16} /> {t('Create key')}</button>
+            <button className="btn-primary" disabled={!nk.label}>
+              <Plus size={16} /> {t('Create key')}
+            </button>
           </form>
         </section>
 
         <section className="card">
-          <h3><Router size={16} /> {t('Edge gateways and devices')}</h3>
+          <h3>
+            <Router size={16} /> {t('Edge gateways and devices')}
+          </h3>
           {gws.length === 0 && <p className="muted">{t('No edge gateway connected.')}</p>}
           <ul className="list">
             {gws.map((g) => (
               <li key={g.gatewayId}>
-                <span><span className="dot" /> <b>{g.gatewayId}</b></span>
+                <span>
+                  <span className="dot" /> <b>{g.gatewayId}</b>
+                </span>
                 <small className="muted">{g.devices.join(', ') || t('no devices accepted')}</small>
               </li>
             ))}
@@ -190,26 +301,41 @@ function Admin() {
               <option value="cctv">CCTV</option>
             </select>
             <input id="nd-model" placeholder={t('Model')} value={nd.model} onChange={(e) => setNd({ ...nd, model: e.target.value })} />
-            <button className="btn-primary" disabled={!nd.id}><Plus size={16} /> {t('Register')}</button>
+            <button className="btn-primary" disabled={!nd.id}>
+              <Plus size={16} /> {t('Register')}
+            </button>
           </form>
         </section>
 
         <section className="card">
-          <h3><DatabaseBackup size={16} /> {t('Backups')}</h3>
-          <p className="fine" style={{ marginTop: 0 }}>{t('A backup is a consistent database copy plus evidence files, with checksums. Restore with the server stopped:')} <code>npm run restore -w @13store/server -- &lt;id&gt;</code>.</p>
+          <h3>
+            <DatabaseBackup size={16} /> {t('Backups')}
+          </h3>
+          <p className="fine" style={{ marginTop: 0 }}>
+            {t('A backup is a consistent database copy plus evidence files, with checksums. Restore with the server stopped:')}{' '}
+            <code>npm run restore -w @13store/server -- &lt;id&gt;</code>.
+          </p>
           <ul className="list">
             {backups.map((b) => (
               <li key={b.id}>
                 <span>
                   <b className="mono">{b.id}</b>
-                  <small className="muted"> · {fmtDate(b.createdAt)} {fmtTime(b.createdAt)} · {b.createdBy} · {t('{i} incidents · {e} evidence · {f} files', { i: b.counts.incidents, e: b.counts.evidence, f: b.files.length })}</small>
+                  <small className="muted">
+                    {' '}
+                    · {fmtDate(b.createdAt)} {fmtTime(b.createdAt)} · {b.createdBy} ·{' '}
+                    {t('{i} incidents · {e} evidence · {f} files', { i: b.counts.incidents, e: b.counts.evidence, f: b.files.length })}
+                  </small>
                 </span>
                 <button
                   className="btn-ghost small"
                   onClick={() =>
                     act(async () => {
                       const r = await api.post<{ ok: boolean; problems: string[] }>(`/admin/backups/${b.id}/verify`);
-                      setMsg(r.ok ? { tone: 'ok', text: t('Backup {id} verified: all files and the audit chain match.', { id: b.id }) } : { tone: 'warn', text: t('Backup {id} failed: {problems}', { id: b.id, problems: r.problems.join('; ') }) });
+                      setMsg(
+                        r.ok
+                          ? { tone: 'ok', text: t('Backup {id} verified: all files and the audit chain match.', { id: b.id }) }
+                          : { tone: 'warn', text: t('Backup {id} failed: {problems}', { id: b.id, problems: r.problems.join('; ') }) },
+                      );
                     })
                   }
                 >
@@ -218,16 +344,225 @@ function Admin() {
               </li>
             ))}
           </ul>
-          <button className="btn-primary" onClick={() => act(() => api.post('/admin/backups'), t('Backup created.'))}><DatabaseBackup size={16} /> {t('Back up now')}</button>
+          <button className="btn-primary" onClick={() => act(() => api.post('/admin/backups'), t('Backup created.'))}>
+            <DatabaseBackup size={16} /> {t('Back up now')}
+          </button>
         </section>
 
         <section className="card">
-          <h3><ShieldCheck size={16} /> {t('Audit log integrity')}</h3>
-          {audit && (audit.ok ? <p><span className="badge badge-green">{t('Intact')}</span> {t('{n} entries. Each entry is chained to the previous one, so edits or deletions are detected.', { n: audit.count })}</p> : <p><span className="badge badge-red solid">{t('Broken')}</span> {t('Chain fails at entry {n}. Investigate before relying on the log.', { n: audit.brokenAt })}</p>)}
-          <button className="btn-secondary" onClick={() => act(async () => setAudit(await api.get('/audit/verify')))}>{t('Verify again')}</button>
+          <h3>
+            <ShieldCheck size={16} /> {t('Audit log integrity')}
+          </h3>
+          {audit &&
+            (audit.ok ? (
+              <p>
+                <span className="badge badge-green">{t('Intact')}</span>{' '}
+                {t('{n} entries. Each entry is chained to the previous one, so edits or deletions are detected.', { n: audit.count })}
+              </p>
+            ) : (
+              <p>
+                <span className="badge badge-red solid">{t('Broken')}</span> {t('Chain fails at entry {n}. Investigate before relying on the log.', { n: audit.brokenAt })}
+              </p>
+            ))}
+          <button className="btn-secondary" onClick={() => act(async () => setAudit(await api.get('/audit/verify')))}>
+            {t('Verify again')}
+          </button>
+        </section>
+
+        <section className="card">
+          <h3>
+            <BadgeCheck size={16} /> {t('License')}
+          </h3>
+          {lic && (
+            <>
+              <p style={{ marginTop: 0 }}>
+                <span className={`badge ${LICENSE_TONE[lic.state]}`}>{t(LICENSE_LABEL[lic.state])}</span> <b>{lic.customer}</b>
+                {lic.expiresAt && (
+                  <small className="muted">
+                    {' '}
+                    · {t('until {date}', { date: fmtDate(lic.expiresAt) })}
+                    {lic.daysLeft !== undefined && ` (${t('{n} days', { n: lic.daysLeft })})`}
+                  </small>
+                )}
+              </p>
+              {lic.problem && (
+                <p className="banner warn" style={{ margin: '0 0 10px' }}>
+                  {lic.problem}
+                </p>
+              )}
+              {lic.state === 'grace' && (
+                <p className="fine">{t('The license has expired. Everything keeps working for 14 days; after that new devices and users cannot be added.')}</p>
+              )}
+              {lic.state === 'expired' && (
+                <p className="fine">{t('The license has expired. Existing operations continue; adding devices or users is blocked until a new license file is installed.')}</p>
+              )}
+              <div className="lic-bars">
+                {(['sites', 'devices', 'users'] as const).map((k) => {
+                  const used = lic.usage[k];
+                  const max = lic.limits[k];
+                  const unlimited = !Number.isFinite(max) || max >= 1000;
+                  const pct = unlimited ? Math.min(100, used) : Math.min(100, Math.round((used / Math.max(1, max)) * 100));
+                  return (
+                    <div key={k} className={`lic-bar ${!unlimited && used >= max ? 'over' : ''}`}>
+                      <span>{t(LIMIT_LABEL[k])}</span>
+                      <i>
+                        <b style={{ width: `${pct}%` }} />
+                      </i>
+                      <small>
+                        {used} / {unlimited ? '∞' : max}
+                      </small>
+                    </div>
+                  );
+                })}
+              </div>
+              {lic.features.length > 0 && (
+                <p className="fine">
+                  {t('Features')}: {lic.features.includes('*') ? t('all') : lic.features.join(', ')}
+                </p>
+              )}
+              <p className="fine">
+                {t('Install a license by setting LICENSE_FILE on the server and restarting. Licenses are signed; the server only accepts files issued for this organisation.')}
+              </p>
+            </>
+          )}
+        </section>
+
+        <section className="card">
+          <h3>
+            <Timer size={16} /> {t('Data retention')}
+          </h3>
+          <p className="fine" style={{ marginTop: 0 }}>
+            {t('How long personal and operational data is kept, per PDPA. 0 keeps the data. Deletions run every hour and are written to the audit log.')}
+          </p>
+          <form
+            className="retention-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const retention = { telemetryDays: Number(ret.telemetryDays), closedIncidentDays: Number(ret.closedIncidentDays), evidenceDays: Number(ret.evidenceDays) };
+              act(() => api.patch('/admin/settings', { retention }), t('Retention policy saved.'));
+            }}
+          >
+            <label htmlFor="ret-tel">{t('Telemetry samples (days)')}</label>
+            <input id="ret-tel" type="number" min={0} max={3650} value={ret.telemetryDays} onChange={(e) => setRet({ ...ret, telemetryDays: e.target.value })} />
+            <label htmlFor="ret-inc">{t('Closed incidents with missions and evidence (days after closing)')}</label>
+            <input id="ret-inc" type="number" min={0} max={3650} value={ret.closedIncidentDays} onChange={(e) => setRet({ ...ret, closedIncidentDays: e.target.value })} />
+            <label htmlFor="ret-ev">{t('Evidence files regardless of incident (days)')}</label>
+            <input id="ret-ev" type="number" min={0} max={3650} value={ret.evidenceDays} onChange={(e) => setRet({ ...ret, evidenceDays: e.target.value })} />
+            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                className="btn-primary"
+                disabled={
+                  ret.telemetryDays === String(settings.retention.telemetryDays) &&
+                  ret.closedIncidentDays === String(settings.retention.closedIncidentDays) &&
+                  ret.evidenceDays === String(settings.retention.evidenceDays)
+                }
+              >
+                {t('Save policy')}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() =>
+                  act(async () => {
+                    const r = await api.post<{ telemetry: number; incidents: number; evidence: number }>('/admin/retention/run');
+                    setMsg({
+                      tone: 'ok',
+                      text: t('Retention run: {t} telemetry rows, {i} incidents, {e} evidence files removed.', { t: r.telemetry, i: r.incidents, e: r.evidence }),
+                    });
+                  })
+                }
+              >
+                {t('Run now')}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="card">
+          <h3>
+            <Eraser size={16} /> {t('Privacy requests')}
+          </h3>
+          <p className="fine" style={{ marginTop: 0 }}>
+            {t(
+              'Find where a name appears in incident titles, timelines, evidence notes and field reports (PDPA access request), then redact it. Erasure keeps the audit trail and needs a request reference.',
+            )}
+          </p>
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              act(async () => setHits(await api.get<PrivacyMatch[]>(`/admin/privacy?q=${encodeURIComponent(pq.trim())}`)));
+            }}
+          >
+            <input
+              id="pq"
+              placeholder={t('Name or text (3+ characters)')}
+              value={pq}
+              onChange={(e) => {
+                setPq(e.target.value);
+                setHits(null);
+              }}
+            />
+            <button className="btn-secondary" disabled={pq.trim().length < 3}>
+              <Search size={16} /> {t('Search')}
+            </button>
+          </form>
+          {hits && (
+            <>
+              <p className="muted" style={{ margin: '8px 0 4px' }}>
+                {hits.length === 0 ? t('No matches.') : t('{n} matches', { n: hits.length })}
+              </p>
+              {hits.length > 0 && (
+                <>
+                  <ul className="list privacy-hits">
+                    {hits.map((h, i) => (
+                      <li key={i}>
+                        <span>
+                          <b className="mono">{h.incidentId}</b>{' '}
+                          <small className="muted">
+                            {h.table}.{h.field}
+                            {h.table !== 'incidents' && ` · ${h.id}`}
+                          </small>
+                          <br />
+                          <small>…{h.excerpt}…</small>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <form
+                    className="inline-form"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      act(async () => {
+                        const r = await api.post<{ changed: number; ids: string[] }>('/admin/privacy/erase', { q: pq.trim(), reason: reason.trim() });
+                        setHits(null);
+                        setReason('');
+                        setMsg({ tone: 'ok', text: t('Redacted {n} fields in {ids}.', { n: r.changed, ids: r.ids.join(', ') }) });
+                      });
+                    }}
+                  >
+                    <input id="p-reason" placeholder={t('Request reference / legal basis')} value={reason} onChange={(e) => setReason(e.target.value)} />
+                    <button className="btn-danger" disabled={!reason.trim()}>
+                      <Eraser size={16} /> {t('Redact everywhere')}
+                    </button>
+                  </form>
+                </>
+              )}
+            </>
+          )}
         </section>
       </div>
-      {stepUp && <StepUpDialog api={api} onClose={() => setStepUp(null)} onDone={() => { const r = stepUp; setStepUp(null); r(); }} />}
+      {stepUp && (
+        <StepUpDialog
+          api={api}
+          onClose={() => setStepUp(null)}
+          onDone={() => {
+            const r = stepUp;
+            setStepUp(null);
+            r();
+          }}
+        />
+      )}
     </div>
   );
 }

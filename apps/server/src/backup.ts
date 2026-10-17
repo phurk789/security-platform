@@ -95,3 +95,11 @@ export function restoreBackup(dataDir: string, id: string, targetDir = dataDir) 
   if (existsSync(join(dir, 'evidence'))) cpSync(join(dir, 'evidence'), join(targetDir, 'evidence'), { recursive: true });
   return v.manifest!;
 }
+
+/** Keeps the newest `keep` backups and removes the rest. Returns the ids removed. */
+export function pruneBackups(dataDir: string, keep: number) {
+  const all = listBackups(dataDir);
+  const drop = all.slice(Math.max(0, keep));
+  for (const m of drop) rmSync(join(dataDir, 'backups', m.id), { recursive: true, force: true });
+  return drop.map((m) => m.id);
+}

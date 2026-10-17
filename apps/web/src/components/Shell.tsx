@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  BadgeAlert,
   Bell,
   Calendar,
   ChartNoAxesColumn,
@@ -39,6 +40,7 @@ import { SceneSnapshot } from './SceneSnapshot';
 import { webglAvailable } from '../twin/world';
 import { AppearanceToggle, ThemeToggle, useTheme } from './Hud';
 import { SoundToggle } from './SoundEffects';
+import { LICENSE_LABEL } from '../views/Admin';
 
 export function TopBar() {
   const { s, dispatch, session, mode } = useStore();
@@ -89,6 +91,16 @@ export function TopBar() {
         <span className={`health ${allLive ? 'ok' : 'warn'}`} title={t('Simulated services health')}>
           <span className="dot" /> {allLive ? t('Systems OK') : t('Telemetry degraded')}
         </span>
+        {session?.meta.license && session.meta.license.state !== 'valid' && (
+          <button
+            className={`lic-chip ${session.meta.license.state}`}
+            title={t('License: {customer}. Administrators can see usage and limits on the Admin page.', { customer: session.meta.license.customer })}
+            onClick={() => me.role === 'admin' && dispatch({ type: 'setView', view: 'admin' })}
+          >
+            <BadgeAlert size={14} /> {t(LICENSE_LABEL[session.meta.license.state])}
+            {session.meta.license.daysLeft !== undefined && session.meta.license.state !== 'evaluation' && <small>{t('{n} d', { n: session.meta.license.daysLeft })}</small>}
+          </button>
+        )}
         <span className="clock">
           <Calendar size={16} /> {fmtDate(s.now)} &nbsp; {fmtTime(s.now)}
         </span>

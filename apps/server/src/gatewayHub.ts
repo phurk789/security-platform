@@ -99,6 +99,11 @@ export class GatewayHub implements GatewayLink {
     for (const c of this.conns) if (c.orgId === orgId && c.ws.readyState === c.ws.OPEN) c.ws.send(JSON.stringify(msg));
   }
 
+  /** Connected gateways across every organisation (monitoring). */
+  count() {
+    return this.conns.size;
+  }
+
   connected(orgId: string) {
     return [...this.conns].filter((c) => c.orgId === orgId).map((c) => ({ gatewayId: c.gatewayId, devices: [...c.devices] }));
   }

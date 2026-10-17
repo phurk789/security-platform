@@ -64,6 +64,8 @@ import {
   type Aim,
   type Building,
   type CameraAction,
+  type LicenseStatus,
+  type OrgSettings,
   type ComponentKind,
   type ComponentStatus,
   type ComponentUpdate,
@@ -72,6 +74,9 @@ import {
   type User,
 } from '@13store/shared';
 import { appendAudit } from './audit';
+import { createBackup, pruneBackups } from './backup';
+import { License } from './license';
+import { getOrgSettings, privacyErase, privacyExport, purgeExpired, setOrgSettings } from './retention';
 import type { Config } from './config';
 import { nextNumber, tx, type DB } from './db';
 import { hmac, safeEqual, sha256 } from './security';
@@ -152,6 +157,9 @@ export class Platform {
   private manualCamera = new Map<string, number>();
   private cameraWaits = new Map<string, { orgId: string; deviceId: string; done: (r: CameraResult) => void }>();
   private sweepTimer?: NodeJS.Timeout;
+  private purgeTimer?: NodeJS.Timeout;
+  private backupTimer?: NodeJS.Timeout;
+  readonly license: License;
   now: () => number = () => Date.now();
 
   constructor(
@@ -159,16 +167,122 @@ export class Platform {
     readonly cfg: Config,
   ) {
     this.bus.setMaxListeners(500);
+    this.license = new License({ file: cfg.licenseFile, publicKeyPem: cfg.licensePublicKey, env: cfg.env });
     this.loadDevices();
   }
 
   start() {
     this.sweepTimer = setInterval(() => this.sweep(), 250);
     this.sweepTimer.unref?.();
+    if (this.cfg.purgeIntervalMs > 0) {
+      this.purgeTimer = setInterval(() => this.runPurge(), this.cfg.purgeIntervalMs);
+      this.purgeTimer.unref?.();
+    }
+    if (this.cfg.backupIntervalH > 0) {
+      this.backupTimer = setInterval(() => this.runScheduledBackup(), this.cfg.backupIntervalH * 3600_000);
+      this.backupTimer.unref?.();
+    }
   }
 
   stop() {
     if (this.sweepTimer) clearInterval(this.sweepTimer);
+    if (this.purgeTimer) clearInterval(this.purgeTimer);
+    if (this.backupTimer) clearInterval(this.backupTimer);
+  }
+
+  // ---- organisation settings, retention, privacy, license -------------------
+
+  orgSettings(a: Actor): OrgSettings {
+    this.require(a, 'admin.settings', 'settings', { mutating: false });
+    return getOrgSettings(this.db, a.orgId);
+  }
+
+  updateOrgSettings(a: Actor, patch: Partial<OrgSettings>): OrgSettings {
+    this.require(a, 'admin.settings', 'settings');
+    let next: OrgSettings;
+    try {
+      next = setOrgSettings(this.db, a.orgId, patch);
+    } catch (e) {
+      return fail(400, 'invalid', (e as Error).message);
+    }
+    this.audit(a, 'admin.settings_update', 'retention', 'ok', JSON.stringify(next.retention));
+    return next;
+  }
+
+  /** Applies every organisation's retention policy. Audited when something was removed. */
+  runPurge(now = this.now()) {
+    const orgs = this.db.prepare('SELECT id FROM orgs').all() as { id: string }[];
+    const out: Record<string, { telemetry: number; incidents: number; evidence: number }> = {};
+    for (const o of orgs) {
+      const r = purgeExpired(this.db, o.id, this.cfg.dataDir, now);
+      out[o.id] = r;
+      if (r.telemetry + r.incidents + r.evidence > 0)
+        this.audit(this.systemActor(o.id, 'system', 'Retention'), 'retention.purge', o.id, 'ok', `telemetry ${r.telemetry}, incidents ${r.incidents}, evidence ${r.evidence}`);
+    }
+    return out;
+  }
+
+  runScheduledBackup() {
+    try {
+      const m = createBackup(this.db, this.cfg.dataDir, 'scheduler', this.now());
+      const dropped = pruneBackups(this.cfg.dataDir, this.cfg.backupKeep);
+      for (const o of this.db.prepare('SELECT id FROM orgs').all() as { id: string }[])
+        this.audit(this.systemActor(o.id, 'system', 'Backup scheduler'), 'admin.backup_create', m.id, 'ok', dropped.length ? `pruned ${dropped.join(', ')}` : undefined);
+      return m;
+    } catch (e) {
+      console.error('[server] scheduled backup failed', e);
+      return null;
+    }
+  }
+
+  privacySearch(a: Actor, q: string) {
+    this.require(a, 'admin.privacy', 'privacy', { mutating: false });
+    try {
+      const matches = privacyExport(this.db, a.orgId, q);
+      this.audit(a, 'privacy.search', q, 'ok', `${matches.length} matches`);
+      return matches;
+    } catch (e) {
+      return fail(400, 'invalid', (e as Error).message);
+    }
+  }
+
+  privacyErase(a: Actor, q: string, reason: string) {
+    this.require(a, 'admin.privacy', 'privacy');
+    if (!reason?.trim()) fail(400, 'invalid', 'A reason is required (request reference, legal basis).');
+    try {
+      const r = privacyErase(this.db, a.orgId, q);
+      this.audit(a, 'privacy.erase', q, 'ok', `${r.changed} fields in ${r.ids.join(', ') || 'nothing'} — ${reason.trim()}`);
+      for (const id of r.ids) if (id.startsWith('INC-')) this.publishIncident(a.orgId, id);
+      return r;
+    } catch (e) {
+      return fail(400, 'invalid', (e as Error).message);
+    }
+  }
+
+  private publishIncident(orgId: string, id: string) {
+    const row = this.db.prepare('SELECT site_id, data FROM incidents WHERE id = ? AND org_id = ?').get(id, orgId) as { site_id: string; data: string } | undefined;
+    if (row) this.publish({ orgId, siteId: row.site_id, incidentId: id, event: { type: 'incident', incident: JSON.parse(row.data) as Incident } });
+  }
+
+  licenseUsage(orgId: string): LicenseStatus['usage'] {
+    const n = (sql: string) => (this.db.prepare(sql).get(orgId) as { n: number }).n;
+    return {
+      sites: n('SELECT COUNT(*) AS n FROM sites WHERE org_id = ?'),
+      devices: [...this.devices.values()].filter((d) => d.orgId === orgId).length,
+      users: n('SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND active = 1'),
+    };
+  }
+
+  licenseStatus(orgId: string): LicenseStatus {
+    return this.license.status(this.now(), this.licenseUsage(orgId), orgId);
+  }
+
+  /** Devices by freshness for monitoring. */
+  deviceCounts(): Record<Freshness, number> {
+    const out: Record<Freshness, number> = { live: 0, stale: 0, offline: 0 };
+    const now = this.now();
+    for (const d of this.devices.values()) out[freshnessAt(now, d)]++;
+    return out;
   }
 
   loadDevices() {
@@ -603,6 +717,11 @@ export class Platform {
     this.require(a, 'admin.devices', input.id);
     if (!/^[A-Z0-9-]{3,32}$/.test(input.id)) fail(400, 'invalid', 'Device id must be 3–32 characters: A–Z, 0–9, dash.');
     if (this.devices.has(input.id)) fail(409, 'conflict', 'Device id already registered.');
+    const over = this.license.check('devices', this.licenseUsage(a.orgId).devices, this.now());
+    if (over) {
+      this.audit(a, 'admin.device_register', input.id, 'denied', over);
+      fail(402, 'license', over);
+    }
     const siteId = input.siteId ?? this.defaultSite(a);
     if (!this.inScope(a, a.orgId, siteId)) fail(404, 'not_found', 'Site not found.');
     const d: Device = {
@@ -1742,6 +1861,11 @@ export class Platform {
       version: this.cfg.version,
       serverTime: this.now(),
       dataLabel: this.cfg.env === 'demo' ? 'SIMULATION' : anySim ? 'MIXED DEMO' : 'LIVE',
+      sso: this.cfg.oidc ? { name: this.cfg.oidc.name, startUrl: '/api/v1/auth/sso' } : undefined,
+      license: (() => {
+        const st = this.licenseStatus(orgId);
+        return { state: st.state, customer: st.customer, daysLeft: st.daysLeft };
+      })(),
     };
   }
 

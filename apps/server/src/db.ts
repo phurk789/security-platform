@@ -85,15 +85,24 @@ export function openDb(file: string): DB {
 
 /** Additive migrations for databases created by older versions. */
 function migrate(db: DB) {
-  const cols = new Set((db.prepare('PRAGMA table_info(telemetry)').all() as { name: string }[]).map((c) => c.name));
-  for (const [name, type] of [
+  const addColumns = (table: string, cols: [string, string][]) => {
+    const have = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
+    for (const [name, type] of cols) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  };
+  addColumns('telemetry', [
     ['heading', 'REAL'],
     ['signal', 'REAL'],
     ['satellites', 'INTEGER'],
     ['temperature', 'REAL'],
-  ] as const) {
-    if (!cols.has(name)) db.exec(`ALTER TABLE telemetry ADD COLUMN ${name} ${type}`);
-  }
+  ]);
+  // v0.3: per-org settings (retention), single sign-on subjects, pending SSO logins
+  addColumns('orgs', [['settings', "TEXT NOT NULL DEFAULT '{}'"]]);
+  addColumns('users', [
+    ['sso_subject', 'TEXT'],
+    ['last_login_at', 'INTEGER'],
+  ]);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_sso ON users(sso_subject) WHERE sso_subject IS NOT NULL;
+CREATE TABLE IF NOT EXISTS sso_pending (state TEXT PRIMARY KEY, nonce TEXT NOT NULL, verifier TEXT NOT NULL, return_to TEXT, created_at INTEGER NOT NULL);`);
 }
 
 export function tx<T>(db: DB, fn: () => T): T {

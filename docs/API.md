@@ -23,12 +23,12 @@ Errors are `{"error": "<message for people>", "code": "<machine code>"}` with co
 
 The demo environment includes a separate organisation, **13STORE Developer Sandbox**:
 
-| What | Value |
-|---|---|
-| Users | `dev` (dispatcher), `devop` (operator); password `demo1234` |
-| Integration key | `sk_sandbox_demo_key` |
-| Gateway key | `gw_sandbox_demo_key` |
-| Registered device | `SBX-ROVER-01` (for your own adapter) |
+| What              | Value                                                       |
+| ----------------- | ----------------------------------------------------------- |
+| Users             | `dev` (dispatcher), `devop` (operator); password `demo1234` |
+| Integration key   | `sk_sandbox_demo_key`                                       |
+| Gateway key       | `gw_sandbox_demo_key`                                       |
+| Registered device | `SBX-ROVER-01` (for your own adapter)                       |
 
 Nothing in the sandbox can see or touch the demo organisation, and the reverse.
 
@@ -105,7 +105,6 @@ Open `ws://host/api/v1/ws`, send `{"type":"auth","token":"<session token>"}`, re
 `timeline`, `evidence`, `assignment`, `audit` (if permitted), `notice`, `resync` (reload the
 snapshot). Events are filtered by the same organisation, site and role rules as the REST API.
 
-
 ### Device equipment
 
 `GET /api/v1/devices/:id` includes `components`: the parts the adapter declared
@@ -114,6 +113,16 @@ snapshot). Events are filtered by the same organisation, site and role rules as 
 that part has not been exercised yet. Gateways declare the list in `hello` and send changes in
 telemetry as `components: [{id, status?, version?, detail?}]`; unknown ids are ignored, strings
 are bounded and unknown kinds/statuses fall back to `other` / `pending`.
+
+## Enterprise endpoints
+
+- `GET /license` — license state (`valid` / `expiring` / `grace` / `expired` / `evaluation`), limits and usage.
+  Registering a device or creating a user past a limit returns `402 {"code":"license"}`.
+- `GET /auth/sso` → 302 to the identity provider; the callback lands on the console with `#sso=<session token>`.
+  API clients keep using local accounts or API keys.
+- `GET /ready`, `GET /metrics` — readiness and Prometheus metrics (see OPERATIONS.md → Monitoring).
+- `GET|PATCH /admin/settings`, `POST /admin/retention/run`, `GET /admin/privacy?q=`, `POST /admin/privacy/erase` —
+  retention policy and PDPA requests (OPERATIONS.md → Retention and privacy).
 
 ## Replay
 

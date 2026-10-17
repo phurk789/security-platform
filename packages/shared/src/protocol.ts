@@ -170,7 +170,38 @@ export interface Meta {
   serverTime: number;
   /** Page-level data label (UXUI §7). */
   dataLabel: 'SIMULATION' | 'MIXED DEMO' | 'LIVE';
+  /** Single sign-on, when the server is configured for it. */
+  sso?: { name: string; startUrl: string };
+  /** License state for the console banner. */
+  license?: Pick<LicenseStatus, 'state' | 'customer' | 'daysLeft'>;
 }
+
+export interface LicenseStatus {
+  state: 'valid' | 'expiring' | 'grace' | 'expired' | 'evaluation';
+  customer: string;
+  org: string;
+  appliesToOrg: boolean;
+  expiresAt?: number;
+  daysLeft?: number;
+  limits: { sites: number; devices: number; users: number };
+  usage: { sites: number; devices: number; users: number };
+  features: string[];
+  problem?: string;
+}
+
+/** Per-organisation settings an administrator can change (stored as JSON on the org). */
+export interface OrgSettings {
+  retention: {
+    /** Days to keep telemetry samples (0 = keep). */
+    telemetryDays: number;
+    /** Days after closing to delete an incident with its missions, commands, timeline and evidence (0 = keep). */
+    closedIncidentDays: number;
+    /** Days to keep evidence files regardless of incident state (0 = keep). */
+    evidenceDays: number;
+  };
+}
+
+export const DEFAULT_ORG_SETTINGS: OrgSettings = { retention: { telemetryDays: 90, closedIncidentDays: 0, evidenceDays: 0 } };
 
 export interface SessionUser extends User {
   orgId: string;
@@ -208,7 +239,7 @@ export interface Snapshot {
 
 export interface ApiError {
   error: string;
-  code: 'unauthenticated' | 'forbidden' | 'step_up_required' | 'not_found' | 'invalid' | 'conflict' | 'replay_mode' | 'stale_telemetry' | 'control_held';
+  code: 'unauthenticated' | 'forbidden' | 'step_up_required' | 'not_found' | 'invalid' | 'conflict' | 'replay_mode' | 'stale_telemetry' | 'control_held' | 'license';
 }
 
 // ---------------------------------------------------------------------------
