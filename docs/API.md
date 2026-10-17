@@ -124,6 +124,20 @@ are bounded and unknown kinds/statuses fall back to `other` / `pending`.
 - `GET|PATCH /admin/settings`, `POST /admin/retention/run`, `GET /admin/privacy?q=`, `POST /admin/privacy/erase` —
   retention policy and PDPA requests (OPERATIONS.md → Retention and privacy).
 
+## Video: recordings and detections
+
+- `GET /media/{id}/recordings?from&to` → `{ label: 'RECORDED' | 'SIMULATED', segments: [{start, end}], playback }`.
+  Real cameras answer from the site media server's playback API; simulated ones from telemetry coverage.
+- `POST /media/{id}/clip {start, duration}` → `{ url, mime, label, expiresAt }`: an MP4 link on the media server
+  (viewer token, 60 s) or a storyboard SVG for simulated cameras. Audited `media.playback`.
+- `POST /incidents/{id}/evidence/clip {deviceId, start, duration}` → evidence of kind `clip` with checksum
+  (`evidence.add`, audited `evidence.clip`).
+- `POST /detections` (integration key; one object or a list ≤ 100) → `{ id, outcome, incidentId?, ruleId? }`.
+  Outcomes: `incident`, `merged`, `logged`, `ignored`, `duplicate`. See VIDEO.md for fields and rules.
+- `GET /detections?from&to&deviceId&type&outcome&limit`, `GET /detections/stats`.
+- Gateway adapters raise detections as `{ t: 'event', kind: 'detection', detection: {…} }` on the gateway channel
+  (the ONVIF adapter does this for camera analytics events).
+
 ## Replay
 
 Clients showing past data send `X-Console-Mode: replay`. The server then refuses every change

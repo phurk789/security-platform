@@ -87,6 +87,8 @@ export interface StreamInfo {
   rtspSub?: string;
   whepSub?: string;
   hlsSub?: string;
+  /** Media server playback (recordings) base URL, e.g. https://edge.example:9996 (MediaMTX playback server). */
+  playback?: string;
 }
 
 export const CAMERA_ACTIONS: CameraAction['action'][] = ['gimbal_speed', 'gimbal_angle', 'center', 'zoom', 'zoom_to', 'photo', 'record'];
@@ -125,7 +127,14 @@ export function sanitizeCameraAction(raw: unknown): CameraAction | null {
       return typeof a.on === 'boolean' ? { action: a.action, on: a.on } : null;
     case 'announce': {
       const preset = ANNOUNCEMENTS.find((m) => m.id === a.message);
-      const text = preset ? preset.en : typeof a.message === 'string' ? a.message.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 160) : '';
+      const text = preset
+        ? preset.en
+        : typeof a.message === 'string'
+          ? a.message
+              .replace(/[\u0000-\u001f]/g, ' ')
+              .trim()
+              .slice(0, 160)
+          : '';
       return text ? { action: 'announce', message: text } : null;
     }
     default:
@@ -226,7 +235,16 @@ export function stepSimGimbal(g: SimGimbal, dt: number) {
 /** Rounded copy for telemetry. */
 export function gimbalSample(g: SimGimbal): GimbalState {
   const s = g.state;
-  return { yaw: Math.round(s.yaw * 10) / 10, pitch: Math.round(s.pitch * 10) / 10, roll: 0, zoom: Math.round(s.zoom * 10) / 10, recording: s.recording, spotlight: s.spotlight, beacon: s.beacon, announcing: s.announcing };
+  return {
+    yaw: Math.round(s.yaw * 10) / 10,
+    pitch: Math.round(s.pitch * 10) / 10,
+    roll: 0,
+    zoom: Math.round(s.zoom * 10) / 10,
+    recording: s.recording,
+    spotlight: s.spotlight,
+    beacon: s.beacon,
+    announcing: s.announcing,
+  };
 }
 
 /** Short English description for audit entries and status lines. */

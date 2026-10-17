@@ -6,6 +6,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_ORG_SETTINGS, type Incident, type OrgSettings } from '@13store/shared';
 import type { DB } from './db';
+import { defaultRules, validateRules } from './detections';
 
 const DAY = 86_400_000;
 
@@ -17,18 +18,34 @@ export function getOrgSettings(db: DB, orgId: string): OrgSettings {
   } catch {
     stored = {};
   }
-  return { retention: { ...DEFAULT_ORG_SETTINGS.retention, ...(stored.retention ?? {}) } };
+  return {
+    retention: { ...DEFAULT_ORG_SETTINGS.retention, ...(stored.retention ?? {}) },
+    detection: {
+      rules: Array.isArray(stored.detection?.rules) ? stored.detection!.rules : defaultRules(),
+      timezone: stored.detection?.timezone || DEFAULT_ORG_SETTINGS.detection.timezone,
+    },
+  };
 }
 
 /** Validates and stores a settings patch. Days: integers 0–3650 (0 = keep forever). */
 export function setOrgSettings(db: DB, orgId: string, patch: Partial<OrgSettings>): OrgSettings {
   const cur = getOrgSettings(db, orgId);
-  const next: OrgSettings = { retention: { ...cur.retention } };
+  const next: OrgSettings = { retention: { ...cur.retention }, detection: { rules: cur.detection.rules, timezone: cur.detection.timezone } };
   for (const k of Object.keys(DEFAULT_ORG_SETTINGS.retention) as (keyof OrgSettings['retention'])[]) {
     const v = patch.retention?.[k];
     if (v === undefined) continue;
     if (!Number.isInteger(v) || v < 0 || v > 3650) throw new Error(`${k} must be a whole number of days between 0 and 3650`);
     next.retention[k] = v;
+  }
+  if (patch.detection?.rules !== undefined) next.detection.rules = validateRules(patch.detection.rules);
+  if (patch.detection?.timezone !== undefined) {
+    const tz = String(patch.detection.timezone);
+    try {
+      new Intl.DateTimeFormat('en-GB', { timeZone: tz });
+    } catch {
+      throw new Error(`Unknown time zone ${tz}`);
+    }
+    next.detection.timezone = tz;
   }
   db.prepare('UPDATE orgs SET settings = ? WHERE id = ?').run(JSON.stringify(next), orgId);
   return next;
@@ -38,12 +55,13 @@ export interface PurgeReport {
   telemetry: number;
   incidents: number;
   evidence: number;
+  detections: number;
 }
 
 /** Deletes what the organisation's retention policy says has expired. Returns what was removed. */
 export function purgeExpired(db: DB, orgId: string, dataDir: string, now: number, settings = getOrgSettings(db, orgId)): PurgeReport {
   const r = settings.retention;
-  const report: PurgeReport = { telemetry: 0, incidents: 0, evidence: 0 };
+  const report: PurgeReport = { telemetry: 0, incidents: 0, evidence: 0, detections: 0 };
   if (r.telemetryDays > 0) {
     const ids = (db.prepare('SELECT id FROM devices WHERE org_id = ?').all(orgId) as { id: string }[]).map((d) => d.id);
     for (const id of ids) report.telemetry += Number(db.prepare('DELETE FROM telemetry WHERE device_id = ? AND received_time < ?').run(id, now - r.telemetryDays * DAY).changes);
@@ -59,11 +77,17 @@ export function purgeExpired(db: DB, orgId: string, dataDir: string, now: number
       db.prepare('DELETE FROM commands WHERE org_id = ? AND mission_id IN (SELECT id FROM missions WHERE incident_id = ?)').run(orgId, inc.id);
       db.prepare('DELETE FROM missions WHERE org_id = ? AND incident_id = ?').run(orgId, inc.id);
       db.prepare('DELETE FROM assignments WHERE org_id = ? AND incident_id = ?').run(orgId, inc.id);
+      db.prepare('DELETE FROM detections WHERE org_id = ? AND incident_id = ?').run(orgId, inc.id);
       db.prepare('DELETE FROM incidents WHERE id = ?').run(inc.id);
       report.incidents++;
     }
   }
   if (r.evidenceDays > 0) report.evidence += deleteEvidence(db, orgId, dataDir, "json_extract(data, '$.capturedAt') < ?", [now - r.evidenceDays * DAY]);
+  // Detections that raised an incident live and die with it; the rest expire on their own clock.
+  if (r.detectionDays > 0)
+    report.detections += Number(
+      db.prepare("DELETE FROM detections WHERE org_id = ? AND at < ? AND outcome IN ('logged', 'ignored', 'duplicate')").run(orgId, now - r.detectionDays * DAY).changes,
+    );
   return report;
 }
 
@@ -76,7 +100,7 @@ function deleteEvidence(db: DB, orgId: string, dataDir: string, where: string, p
   const rows = db.prepare(`SELECT id, path FROM evidence WHERE org_id = ? AND ${where}`).all(orgId, ...(params as string[])) as { id: string; path: string | null }[];
   for (const e of rows) {
     if (e.path) {
-      const p = join(dataDir, 'evidence', e.path);
+      const p = join(dataDir, e.path);
       if (existsSync(p)) rmSync(p, { force: true });
     }
     db.prepare('DELETE FROM evidence WHERE id = ?').run(e.id);

@@ -59,6 +59,18 @@ const STEPS: Step[] = [
     dwellMs: 9000,
   },
   {
+    id: 'detect',
+    shot: { kind: 'point', p: { x: 352, y: 232 }, dist: 120 },
+    who: 'u-alex',
+    title: 'AI detection, rules decide',
+    say: "A thermal camera reports a hotspot at the transformer. The organisation's rules turn it into a high-severity incident, attach the frame as evidence and point the nearest camera. Plain motion would be ignored; a vehicle only logged.",
+    run: ({ s, dispatch }) => {
+      if (!s.incidents.some((i) => i.type === 'Detection: Thermal hotspot')) dispatch({ type: 'demoInjectDetection', kind: 'thermal_hotspot' });
+    },
+    done: (s) => s.incidents.some((i) => i.type === 'Detection: Thermal hotspot'),
+    dwellMs: 8000,
+  },
+  {
     id: 'camera',
     shot: { kind: 'point', p: GATE_POS, dist: 110 },
     who: 'u-alex',

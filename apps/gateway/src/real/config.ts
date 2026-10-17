@@ -5,6 +5,7 @@ import { defaultAdapters } from '../adapters';
 import type { Adapter } from '../sdk';
 import { MavlinkVehicleAdapter, UNIRC7_DATALINK, type VehicleProfile } from './mavlinkVehicle';
 import { SiyiCameraAdapter } from './siyiCamera';
+import { OnvifCameraAdapter, type OnvifCameraConfig } from './onvifCamera';
 import { RosNav2Adapter, type RosNav2Config } from './rosNav2';
 import { SIYI_DEFAULT } from './siyiProtocol';
 
@@ -44,6 +45,7 @@ export type DeviceConfig =
       /** Bearing of the gimbal's centre position, lens height, field of view: lets the platform point it at alerts. */
       mount?: CameraMount;
     }
+  | ({ type: 'onvif' } & OnvifCameraConfig)
   | { type: 'simulated'; offline?: string[] };
 
 export interface SiteConfig {
@@ -80,6 +82,13 @@ export function parseSiteConfig(json: unknown): SiteConfig {
       throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required.`);
     if (d.type === 'siyi-camera' && d.mount && (!Number.isFinite(d.mount.bearingDeg) || !Number.isFinite(d.mount.heightM)))
       throw new ConfigError(`${d.deviceId}: mount needs bearingDeg and heightM.`);
+    if (d.type === 'onvif') {
+      if (!d.host || typeof d.host !== 'string') throw new ConfigError(`${d.deviceId}: host (camera IP or name) is required.`);
+      if (typeof d.username !== 'string' || typeof d.password !== 'string')
+        throw new ConfigError(`${d.deviceId}: username and password are required (create an ONVIF user on the camera).`);
+      if (!d.pos || !Number.isFinite(d.pos.x) || !Number.isFinite(d.pos.y)) throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required.`);
+      if (d.mount && (!Number.isFinite(d.mount.bearingDeg) || !Number.isFinite(d.mount.heightM))) throw new ConfigError(`${d.deviceId}: mount needs bearingDeg and heightM.`);
+    }
   }
   return c;
 }
@@ -110,7 +119,10 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
         }),
       );
     else if (d.type === 'ros2-nav2') out.push(new RosNav2Adapter(d));
-    else
+    else if (d.type === 'onvif') {
+      const { type: _t, ...cfg } = d;
+      out.push(new OnvifCameraAdapter(cfg));
+    } else
       out.push(
         new SiyiCameraAdapter({
           deviceId: d.deviceId,

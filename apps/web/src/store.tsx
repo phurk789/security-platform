@@ -22,7 +22,26 @@ export interface Session {
   cameraControl(deviceId: string, action: CameraAction): Promise<CameraResult>;
   /** Point a gimbal camera at an incident or a site position. */
   aimCamera(deviceId: string, target: { incidentId: string } | Point): Promise<CameraResult>;
+  /** Recorded video coverage for a camera between two times. */
+  recordings(deviceId: string, from: number, to: number): Promise<Recordings>;
+  /** A playable link for a stretch of recording (MP4 from the media server, or a storyboard for simulated cameras). */
+  clip(deviceId: string, start: number, durationS: number): Promise<ClipLink>;
+  /** Save a stretch of recording to the incident as evidence. */
+  saveClip(incidentId: string, deviceId: string, start: number, durationS: number): Promise<void>;
   reload(): Promise<void>;
+}
+
+export interface Recordings {
+  label: 'RECORDED' | 'SIMULATED';
+  segments: { start: number; end: number }[];
+  playback: boolean;
+}
+
+export interface ClipLink {
+  url: string;
+  mime: string;
+  label: 'RECORDED' | 'SIMULATED';
+  expiresAt: number;
 }
 
 export interface MediaSession {
@@ -70,7 +89,10 @@ export function StandaloneProvider({ children }: { children: ReactNode }) {
   useToastTimer(s, dispatch);
 
   // SHA-256 for evidence integrity display (checksum ≠ legal admissibility, PRD §8).
-  const missingKey = s.evidence.filter((e) => !e.checksum).map((e) => e.id).join(',');
+  const missingKey = s.evidence
+    .filter((e) => !e.checksum)
+    .map((e) => e.id)
+    .join(',');
   useEffect(() => {
     const missing = s.evidence.filter((e) => !e.checksum);
     if (!missing.length || !crypto?.subtle) return;

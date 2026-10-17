@@ -1,0 +1,56 @@
+{
+  "gatewayId": "edge-site-02",
+  "serverUrl": "wss://platform.example.com",
+  "key": "gw_pilot_REPLACE_WITH_KEY_FROM_ADMIN",
+  "geo": {
+    "originLat": 13.7563,
+    "originLon": 100.5018,
+    "rotationDeg": 0
+  },
+  "devices": [
+    {
+      "type": "onvif",
+      "deviceId": "CAM-PTZ-01",
+      "model": "Hikvision DS-2DE4A425IWG-E 4MP PTZ, car park mast",
+      "host": "192.168.10.21",
+      "port": 80,
+      "username": "onvif",
+      "password": "REPLACE_WITH_CAMERA_ONVIF_PASSWORD",
+      "pos": {
+        "x": 262,
+        "y": 152
+      },
+      "mount": {
+        "bearingDeg": 180,
+        "heightM": 7,
+        "fovDeg": 58,
+        "rangeM": 200
+      },
+      "panRangeDeg": 360,
+      "tiltRangeDeg": 180,
+      "maxZoom": 25,
+      "stream": {
+        "whep": "https://edge.example.com/cam-ptz-01/whep",
+        "whepSub": "https://edge.example.com/cam-ptz-01-sub/whep",
+        "playback": "https://edge.example.com:9996"
+      }
+    },
+    {
+      "type": "onvif",
+      "deviceId": "CAM-THERMAL-01",
+      "model": "Dahua TPC-BF5401 thermal bullet, transformer yard",
+      "host": "192.168.10.31",
+      "username": "onvif",
+      "password": "REPLACE_WITH_CAMERA_ONVIF_PASSWORD",
+      "pos": {
+        "x": 352,
+        "y": 232
+      },
+      "ptz": false,
+      "stream": {
+        "whep": "https://edge.example.com/cam-thermal-01/whep",
+        "playback": "https://edge.example.com:9996"
+      }
+    }
+  ]
+}

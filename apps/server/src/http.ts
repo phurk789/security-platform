@@ -63,6 +63,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     if (e.type === 'command' && e.command) metrics.inc('ps_command_events_total', { status: e.command.status });
     if (e.type === 'audit') metrics.inc('ps_audit_events_total');
   });
+  p.bus.on('detection', (m: { detection: { type: string; outcome: string } }) => metrics.inc('ps_detections_total', { type: m.detection.type, outcome: m.detection.outcome }));
 
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 12 * 1024 * 1024, trustProxy: true });
   await app.register(fastifyWebsocket, { options: { maxPayload: 1024 * 1024 } });
@@ -94,7 +95,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
 
   app.addHook('preHandler', async (req: FastifyRequest) => {
     const path = req.url.split('?')[0];
-    if (!path.startsWith('/api/v1/') || PUBLIC.has(path) || (path.startsWith('/api/v1/media/') && path.endsWith('/frame.svg'))) return;
+    if (!path.startsWith('/api/v1/') || PUBLIC.has(path) || (path.startsWith('/api/v1/media/') && (path.endsWith('/frame.svg') || path.endsWith('/storyboard.svg')))) return;
     const auth = accounts.authenticate(bearer(req));
     if (!auth) throw new ApiError(401, 'unauthenticated', 'Sign in to continue.');
     if (auth.actor.role === 'gateway') throw new ApiError(403, 'forbidden', 'Gateway keys can only open the gateway channel.');
@@ -203,6 +204,28 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     const b = body(req);
     return p.createIncident({ ...a, name: String(b.source ?? a.name).slice(0, 80) }, { ...(b as any), source: String(b.source ?? a.name).slice(0, 80) });
   });
+  // AI / sensor detections: one object or a list of up to 100, from an integration key or a signed-in dispatcher.
+  app.post('/api/v1/detections', async (req: Req) => {
+    const a = A(req);
+    if (a.role !== 'integration' && !['dispatcher', 'supervisor', 'admin'].includes(a.role))
+      throw new ApiError(403, 'forbidden', 'Detections are sent with an integration API key.');
+    const b = req.body;
+    const list = Array.isArray(b) ? b : [b ?? {}];
+    if (list.length > 100) throw new ApiError(400, 'invalid', 'At most 100 detections per request.');
+    const out = list.map((x) => p.ingestDetection({ ...a, name: String((x as { source?: string })?.source ?? a.name).slice(0, 80) }, x));
+    return Array.isArray(b) ? out : out[0];
+  });
+  app.get('/api/v1/detections', async (req: Req) =>
+    p.listDetections(A(req), {
+      from: num(req.query.from),
+      to: num(req.query.to),
+      deviceId: req.query.deviceId || undefined,
+      type: req.query.type || undefined,
+      outcome: req.query.outcome || undefined,
+      limit: num(req.query.limit),
+    }),
+  );
+  app.get('/api/v1/detections/stats', async (req: Req) => p.detectionStats(A(req), num(req.query.from, p.now() - 30 * 86_400_000)!, num(req.query.to, p.now())!));
   app.get('/api/v1/incidents/:id', async (req: Req) => p.getIncident(A(req), req.params.id));
   app.patch('/api/v1/incidents/:id', async (req: Req) => p.editIncident(A(req), req.params.id, body(req)));
   app.post('/api/v1/incidents/:id/triage', async (req: Req) => p.triage(A(req), req.params.id));
@@ -218,6 +241,9 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   });
   app.get('/api/v1/incidents/:id/evidence', async (req: Req) => p.listEvidence(A(req), req.params.id));
   app.post('/api/v1/incidents/:id/evidence', async (req: Req) => p.addEvidence(A(req), req.params.id, body(req)));
+  app.post('/api/v1/incidents/:id/evidence/clip', async (req: Req) =>
+    p.clipToEvidence(A(req), req.params.id, String(body(req).deviceId ?? ''), Number(body(req).start), Number(body(req).duration ?? 30)),
+  );
   app.get('/api/v1/incidents/:id/report', async (req: Req, reply: FastifyReply) => {
     const download = req.query.download === '1';
     const r = p.report(A(req), req.params.id, download);
@@ -264,6 +290,13 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.post('/api/v1/devices/:id/camera', async (req: Req) => p.cameraControl(A(req), req.params.id, body(req)));
   app.post('/api/v1/devices/:id/aim', async (req: Req) => p.aimCamera(A(req), req.params.id, body(req)));
   app.post('/api/v1/media/:id/session', async (req: Req) => p.mediaSession(A(req), req.params.id));
+  app.get('/api/v1/media/:id/recordings', async (req: Req) => p.recordings(A(req), req.params.id, num(req.query.from, p.now() - 3600_000)!, num(req.query.to, p.now())!));
+  app.post('/api/v1/media/:id/clip', async (req: Req) => p.clipUrl(A(req), req.params.id, Number(body(req).start), Number(body(req).duration ?? 30)));
+  app.get('/api/v1/media/:id/storyboard.svg', async (req: Req, reply: FastifyReply) => {
+    const svg = p.storyboard(req.params.id, Number(req.query.start), Number(req.query.duration), String(req.query.u ?? ''), Number(req.query.exp), String(req.query.sig ?? ''));
+    reply.header('Content-Type', 'image/svg+xml').header('Cache-Control', 'private, max-age=60');
+    return svg;
+  });
   // Site media server (MediaMTX authMethod: http) asks here before serving video. 200 = allow.
   app.post('/api/v1/media/auth', async (req: Req, reply: FastifyReply) => {
     const ok = p.mediaAuth(body(req));
@@ -371,6 +404,48 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     );
     p.audit(a, 'demo.inject_alert', inc.id);
     return inc;
+  });
+  // Demo: a detection as an analytics system would send it (person at the service gate, or a thermal hotspot).
+  app.post('/api/v1/demo/inject-detection', async (req: Req) => {
+    demoOnly(req);
+    const a = A(req);
+    const kind = String(body(req).type ?? 'person');
+    const thermal = kind === 'thermal_hotspot';
+    const frame = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="${thermal ? '#1a0b2b' : '#101b2b'}"/><polygon points="0,180 120,96 200,96 320,180" fill="#2a3442"/>${
+      thermal
+        ? '<circle cx="214" cy="118" r="22" fill="#fb923c" opacity="0.85"/><circle cx="214" cy="118" r="10" fill="#fef08a"/>'
+        : '<rect x="150" y="88" width="34" height="70" fill="none" stroke="#22d3ee" stroke-width="2"/><rect x="160" y="96" width="14" height="40" rx="6" fill="#e2e8f0"/>'
+    }<text x="10" y="20" fill="#f1f5f9" font-family="sans-serif" font-size="12">CCTV-02 · ${thermal ? 'THERMAL' : 'EO'}</text><text x="310" y="20" fill="#fbbf24" font-family="sans-serif" font-size="10" text-anchor="end">SIMULATED ANALYTICS</text><text x="150" y="84" fill="#22d3ee" font-family="monospace" font-size="10">${
+      thermal ? 'hotspot 78.5 °C' : 'person 0.87'
+    }</text></svg>`;
+    const det = p.ingestDetection(
+      { ...a, kind: 'system', role: 'system', name: 'Video analytics (simulated)' },
+      thermal
+        ? {
+            type: 'thermal_hotspot',
+            confidence: 0.93,
+            deviceId: 'CCTV-02',
+            source: 'Thermal analytics (simulated)',
+            zone: 'Zone B',
+            place: 'Service gate · transformer',
+            pos: { x: 352, y: 232 },
+            attributes: { temperatureC: 78.5 },
+            snapshot: { mime: 'image/svg+xml', base64: Buffer.from(frame).toString('base64') },
+          }
+        : {
+            type: 'person',
+            confidence: 0.87,
+            deviceId: 'CCTV-02',
+            source: 'Video analytics (simulated)',
+            zone: 'Zone B',
+            place: 'Service gate',
+            pos: { x: 341, y: 238 },
+            bbox: [0.47, 0.49, 0.1, 0.39],
+            snapshot: { mime: 'image/svg+xml', base64: Buffer.from(frame).toString('base64') },
+          },
+    );
+    p.audit(a, 'demo.inject_detection', det.id, 'ok', `${det.type} → ${det.outcome}${det.incidentId ? ` ${det.incidentId}` : ''}`);
+    return det;
   });
   app.post('/api/v1/demo/reset', async (req: Req) => {
     demoOnly(req);

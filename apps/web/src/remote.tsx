@@ -20,11 +20,23 @@ import {
 } from '@13store/shared';
 import { Api, ApiError, saveBlob } from './api';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
-import { StoreCtx, useToastTimer, type CameraResult, type MediaSession, type Session } from './store';
+import { StoreCtx, useToastTimer, type CameraResult, type ClipLink, type MediaSession, type Recordings, type Session } from './store';
 import { StepUpDialog } from './components/StepUp';
 import { tr } from './i18n';
 
-const LOCAL: Msg['type'][] = ['setView', 'setMapMode', 'toggleLayer', 'selectIncident', 'selectDevice', 'selectBuilding', 'setIndoor', 'dismissToast', 'togglePresentation', 'seekReplay', 'toast'];
+const LOCAL: Msg['type'][] = [
+  'setView',
+  'setMapMode',
+  'toggleLayer',
+  'selectIncident',
+  'selectDevice',
+  'selectBuilding',
+  'setIndoor',
+  'dismissToast',
+  'togglePresentation',
+  'seekReplay',
+  'toast',
+];
 
 const DEMO_USERS = [
   { username: 'alex', name: 'Alex Chen', role: 'dispatcher' },
@@ -43,7 +55,10 @@ function upsert<T extends { id: string }>(list: T[], item: T) {
 }
 
 function fromSnapshot(prev: AppState, snap: Snapshot, user: SessionUser, offset: number): AppState {
-  const selected = prev.selectedIncidentId && snap.incidents.some((i) => i.id === prev.selectedIncidentId) ? prev.selectedIncidentId : (snap.incidents.find((i) => i.status === 'new')?.id ?? snap.incidents[0]?.id ?? null);
+  const selected =
+    prev.selectedIncidentId && snap.incidents.some((i) => i.id === prev.selectedIncidentId)
+      ? prev.selectedIncidentId
+      : (snap.incidents.find((i) => i.status === 'new')?.id ?? snap.incidents[0]?.id ?? null);
   return {
     ...prev,
     now: Date.now() + offset,
@@ -165,7 +180,16 @@ export function RemoteProvider({
               temperatureC: m.temperatureC ?? d.temperatureC,
               gimbal: m.gimbal ?? d.gimbal,
             };
-            const sample: TelemetrySample = { deviceId: m.deviceId, at: m.lastSeen, x: m.pos.x, y: m.pos.y, speed: m.speed, battery: m.battery, signal: m.signal, heading: m.heading };
+            const sample: TelemetrySample = {
+              deviceId: m.deviceId,
+              at: m.lastSeen,
+              x: m.pos.x,
+              y: m.pos.y,
+              speed: m.speed,
+              battery: m.battery,
+              signal: m.signal,
+              heading: m.heading,
+            };
             const telemetry = d.kind === 'cctv' || p.replay.active ? p.telemetry : [...p.telemetry.slice(-3999), sample];
             return { ...p, devices: { ...p.devices, [m.deviceId]: nd }, telemetry };
           }
@@ -242,7 +266,10 @@ export function RemoteProvider({
         return;
       }
       const retry = () => run(msg);
-      const P = (path: string, body: unknown = {}) => () => api.post(path, body);
+      const P =
+        (path: string, body: unknown = {}) =>
+        () =>
+          api.post(path, body);
       switch (msg.type) {
         case 'tick':
         case 'setChecksum':
@@ -261,11 +288,20 @@ export function RemoteProvider({
           void Promise.all(
             movers.map((d) =>
               api
-                .get<{ receivedTime: number; x: number; y: number; speed?: number; battery?: number; signal?: number; heading?: number }[]>(
-                  `/devices/${encodeURIComponent(d.id)}/telemetry?from=${at - 10 * 60_000}&to=${Date.now() + offset.current}`,
-                )
+                .get<
+                  { receivedTime: number; x: number; y: number; speed?: number; battery?: number; signal?: number; heading?: number }[]
+                >(`/devices/${encodeURIComponent(d.id)}/telemetry?from=${at - 10 * 60_000}&to=${Date.now() + offset.current}`)
                 .then((rows) =>
-                  rows.map((r) => ({ deviceId: d.id, at: r.receivedTime, x: r.x, y: r.y, speed: r.speed ?? undefined, battery: r.battery ?? undefined, signal: r.signal ?? undefined, heading: r.heading ?? undefined })),
+                  rows.map((r) => ({
+                    deviceId: d.id,
+                    at: r.receivedTime,
+                    x: r.x,
+                    y: r.y,
+                    speed: r.speed ?? undefined,
+                    battery: r.battery ?? undefined,
+                    signal: r.signal ?? undefined,
+                    heading: r.heading ?? undefined,
+                  })),
                 ),
             ),
           )
@@ -344,6 +380,9 @@ export function RemoteProvider({
         case 'demoInjectAlert':
           void call(P('/demo/inject-alert'), retry);
           return;
+        case 'demoInjectDetection':
+          void call(P('/demo/inject-detection', { type: msg.kind ?? 'person' }), retry);
+          return;
         case 'demoCutLink':
           void call(P('/demo/link', { deviceId: msg.deviceId, cut: true }), retry);
           setS((p) => ({ ...p, linkCut: { ...p.linkCut, [msg.deviceId]: true } }));
@@ -399,6 +438,21 @@ export function RemoteProvider({
           return await api.post<CameraResult>(`/devices/${encodeURIComponent(deviceId)}/camera`, action);
         } catch (e) {
           return { ok: false, confirmed: false, detail: e instanceof Error ? e.message : String(e) };
+        }
+      },
+      recordings(deviceId: string, from: number, to: number) {
+        return api.get<Recordings>(`/media/${encodeURIComponent(deviceId)}/recordings?from=${Math.round(from)}&to=${Math.round(to)}`);
+      },
+      clip(deviceId: string, start: number, durationS: number) {
+        return api.post<ClipLink>(`/media/${encodeURIComponent(deviceId)}/clip`, { start: Math.round(start), duration: durationS });
+      },
+      async saveClip(incidentId: string, deviceId: string, start: number, durationS: number) {
+        try {
+          const ev = await api.post<{ id: string }>(`/incidents/${encodeURIComponent(incidentId)}/evidence/clip`, { deviceId, start: Math.round(start), duration: durationS });
+          toast('info', tr('Clip {id} saved to the incident evidence.', { id: ev.id }));
+        } catch (e) {
+          if (e instanceof ApiError && e.code === 'step_up_required') setStepUp({ retry: () => void session.saveClip(incidentId, deviceId, start, durationS) });
+          else toast('warn', e instanceof Error ? e.message : String(e));
         }
       },
     }),

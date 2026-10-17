@@ -18,6 +18,19 @@ authHTTPExclude:
   - action: api
   - action: metrics
 
+# Recordings: every path is recorded to disk and served back through the playback API, which the
+# console uses for the Recordings timeline and "Save to evidence". Playback requests are checked
+# with the platform like live viewing (action: playback). Keep recordDeleteAfter in line with the
+# customer's retention policy; the platform stores saved clips as evidence under its own policy.
+record: yes
+recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+recordFormat: fmp4
+recordPartDuration: 1s
+recordSegmentDuration: 1h
+recordDeleteAfter: 720h
+playback: yes
+playbackAddress: :9996
+
 # Streams are pulled from the camera only while someone is watching (sourceOnDemand), and the
 # browser drops its stream when the view is hidden, so an idle console uses no link bandwidth.
 pathDefaults:
@@ -35,3 +48,11 @@ paths:
     # Low-resolution sub-stream for the console's small view and slow links. Not every SIYI
     # model/firmware has one; remove this path and "whepSub" from site.json if yours does not.
     source: rtsp://192.168.144.25:8554/sub.264
+    record: no
+  # ONVIF cameras: use the RTSP URI the camera reports (Equipment tab → media) or the vendor's
+  # documented path. Credentials go in the URL; keep this file readable by root only.
+  cam-ptz-01:
+    source: rtsp://onvif:PASSWORD@192.168.10.21:554/Streaming/Channels/101
+  cam-ptz-01-sub:
+    source: rtsp://onvif:PASSWORD@192.168.10.21:554/Streaming/Channels/102
+    record: no

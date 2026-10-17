@@ -213,7 +213,9 @@ describe('retention and privacy requests', () => {
   afterAll(() => srv?.close());
 
   it('stores retention settings per organisation and purges expired telemetry', async () => {
-    expect((await ploy.get('/admin/settings')).body).toEqual({ retention: { telemetryDays: 90, closedIncidentDays: 0, evidenceDays: 0 } });
+    const st = (await ploy.get('/admin/settings')).body;
+    expect(st.retention).toEqual({ telemetryDays: 90, closedIncidentDays: 0, evidenceDays: 0, detectionDays: 90 });
+    expect(st.detection.rules.map((r: any) => r.id)).toEqual(['intrusion', 'fire', 'crowd', 'vehicles', 'motion']);
     expect((await ploy.patch('/admin/settings', { retention: { telemetryDays: 7000 } })).status).toBe(400);
     expect((await ploy.patch('/admin/settings', { retention: { telemetryDays: 1 } })).body.retention.telemetryDays).toBe(1);
     expect((await alex.get('/admin/settings')).status).toBe(403);

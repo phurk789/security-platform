@@ -102,7 +102,15 @@ function migrate(db: DB) {
     ['last_login_at', 'INTEGER'],
   ]);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_sso ON users(sso_subject) WHERE sso_subject IS NOT NULL;
-CREATE TABLE IF NOT EXISTS sso_pending (state TEXT PRIMARY KEY, nonce TEXT NOT NULL, verifier TEXT NOT NULL, return_to TEXT, created_at INTEGER NOT NULL);`);
+CREATE TABLE IF NOT EXISTS sso_pending (state TEXT PRIMARY KEY, nonce TEXT NOT NULL, verifier TEXT NOT NULL, return_to TEXT, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS detections (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, site_id TEXT NOT NULL, at INTEGER NOT NULL, received_at INTEGER NOT NULL,
+  device_id TEXT, type TEXT NOT NULL, confidence REAL NOT NULL, outcome TEXT NOT NULL, incident_id TEXT, rule_id TEXT,
+  external_id TEXT, data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS detections_org_time ON detections(org_id, at);
+CREATE INDEX IF NOT EXISTS detections_device ON detections(device_id, type, at);
+CREATE UNIQUE INDEX IF NOT EXISTS detections_external ON detections(org_id, external_id) WHERE external_id IS NOT NULL;`);
 }
 
 export function tx<T>(db: DB, fn: () => T): T {

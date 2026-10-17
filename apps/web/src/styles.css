@@ -3395,3 +3395,148 @@ html:lang(th) .meta dt {
 .presentation .lic-chip {
   display: none;
 }
+
+/* recordings timeline */
+.rec-card .row.between h3 {
+  margin: 0;
+}
+.rec-bar {
+  position: relative;
+  height: 30px;
+  margin: 10px 0 4px;
+  border-radius: 6px;
+  background: rgba(127, 150, 180, 0.14);
+  border: 1px solid var(--line);
+  cursor: crosshair;
+  overflow: hidden;
+}
+.rec-seg {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  background: var(--cyan);
+  opacity: 0.75;
+  border-radius: 3px;
+  min-width: 2px;
+}
+.rec-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+}
+.rec-mark.alert {
+  background: var(--red);
+}
+.rec-mark.replay {
+  background: var(--amber);
+}
+.rec-sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 2px solid #fff;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  min-width: 4px;
+}
+.rec-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  margin-bottom: 8px;
+}
+.rec-player {
+  margin-top: 10px;
+}
+.rec-player video,
+.rec-player img {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+  background: #000;
+  margin-top: 6px;
+}
+/* detection rules */
+.rules-card {
+  grid-column: 1 / -1;
+}
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.rule {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(127, 150, 180, 0.06);
+}
+.rule.dim {
+  opacity: 0.55;
+}
+.rule-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.rule-head .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.rule-head .rule-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.chip {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.76rem;
+  cursor: pointer;
+  min-height: 0;
+}
+.chip.on {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: rgba(34, 211, 238, 0.12);
+}
+.rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 0.8rem;
+  align-items: center;
+}
+.rule-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.rule-row input[type='number'] {
+  width: 72px;
+  text-align: right;
+}
+.rule-row input[type='time'] {
+  width: 110px;
+}
+.rule-row select {
+  min-height: 32px;
+}

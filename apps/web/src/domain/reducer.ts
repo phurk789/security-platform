@@ -73,6 +73,7 @@ export type Msg =
   | { type: 'setChecksum'; evidenceId: string; checksum: string }
   | { type: 'exportReport'; incidentId: string }
   | { type: 'demoInjectAlert' }
+  | { type: 'demoInjectDetection'; kind?: 'person' | 'thermal_hotspot' }
   | { type: 'demoCutLink'; deviceId: string }
   | { type: 'demoRestoreLink'; deviceId: string }
   | { type: 'demoReset' }
@@ -828,6 +829,44 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       event(s, inc.id, 'Alert received', { actor: 'Gate sensor SG-2', tone: 'alert', receivedAt: s.now + 600, detail: 'Same sensor as INC-024. Possible duplicate.' });
       autoAim(s, inc);
       toast(s, 'info', `New simulated alert ${inc.id}: ${inc.title}.`);
+      return s;
+    }
+    case 'demoInjectDetection': {
+      // Offline demo of the AI detection path: what the server's rules would do with an analytics event.
+      if (!guard(s, 'demo.control', 'scenario')) return s;
+      const thermal = msg.kind === 'thermal_hotspot';
+      const n = 25 + s.incidents.filter((i) => Number(i.id.slice(4)) >= 25).length;
+      const source = thermal ? 'Thermal analytics (simulated)' : 'Video analytics (simulated)';
+      const inc: Incident = {
+        id: `INC-0${n}`,
+        title: thermal ? 'Thermal hotspot 78.5 °C · CCTV-02' : 'Person detected · CCTV-02',
+        type: thermal ? 'Detection: Thermal hotspot' : 'Detection: Person',
+        severity: thermal ? 'high' : 'medium',
+        status: 'new',
+        zone: 'Zone B',
+        place: thermal ? 'Service gate · transformer' : 'Service gate',
+        pos: thermal ? { x: 352, y: 232 } : { x: 341, y: 238 },
+        source,
+        createdAt: s.now,
+        cameraId: 'CCTV-02',
+        thumb: 'gate',
+      };
+      s.incidents.unshift(inc);
+      event(s, inc.id, 'Alert received', { actor: source, tone: 'alert', detail: `${inc.type.replace('Detection: ', '')} reported.` });
+      event(s, inc.id, 'Detection details', { actor: source, detail: thermal ? `${source} · confidence 93% · 78.5 °C` : `${source} · confidence 87% · box 47/49/10/39%` });
+      s.evidence.push({
+        id: nextId(s, 'EV'),
+        incidentId: inc.id,
+        kind: 'snapshot',
+        title: `${source}: ${inc.title.split(' · ')[0]}`,
+        source,
+        capturedAt: s.now,
+        recordedBy: source,
+        simulated: true,
+      });
+      event(s, inc.id, 'Snapshot attached', { actor: source, detail: `${source}: ${inc.title.split(' · ')[0]}` });
+      autoAim(s, inc);
+      toast(s, 'info', `AI detection ${inc.id}: ${inc.title} (rule: ${thermal ? 'fire' : 'intrusion'}).`);
       return s;
     }
     case 'demoCutLink': {

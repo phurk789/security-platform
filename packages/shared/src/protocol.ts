@@ -114,12 +114,124 @@ export interface GwDeviceEvent {
   t: 'event';
   deviceId: string;
   at: number;
-  kind: 'failsafe_stop' | 'route_complete' | 'checkpoint' | 'snapshot' | 'fault';
+  kind: 'failsafe_stop' | 'route_complete' | 'checkpoint' | 'snapshot' | 'fault' | 'detection';
   detail?: string;
   /** For snapshot: base64 SVG/JPEG frame. */
   frame?: { mime: string; base64: string };
   checkpoint?: number;
+  /** For detection: what the camera's analytics saw (device id and time come from the event). */
+  detection?: Omit<DetectionInput, 'deviceId' | 'at'>;
 }
+
+// ---------------------------------------------------------------------------
+// AI / sensor detections (video analytics, thermal cameras, NVR events)
+// ---------------------------------------------------------------------------
+
+export type DetectionType = 'person' | 'vehicle' | 'intrusion' | 'loitering' | 'crowd' | 'fire' | 'smoke' | 'thermal_hotspot' | 'motion' | 'lpr' | 'other';
+export const DETECTION_TYPES: DetectionType[] = ['person', 'vehicle', 'intrusion', 'loitering', 'crowd', 'fire', 'smoke', 'thermal_hotspot', 'motion', 'lpr', 'other'];
+export const DETECTION_LABEL: Record<DetectionType, string> = {
+  person: 'Person',
+  vehicle: 'Vehicle',
+  intrusion: 'Intrusion',
+  loitering: 'Loitering',
+  crowd: 'Crowd',
+  fire: 'Fire',
+  smoke: 'Smoke',
+  thermal_hotspot: 'Thermal hotspot',
+  motion: 'Motion',
+  lpr: 'Licence plate',
+  other: 'Detection',
+};
+
+/** One detection as an analytics system, NVR or camera reports it. */
+export interface DetectionInput {
+  type: DetectionType;
+  /** 0–1. Missing = 1 (a plain sensor contact). */
+  confidence?: number;
+  /** When it happened at the source (ms). Missing = now. */
+  at?: number;
+  /** Camera or sensor device on the platform that saw it. */
+  deviceId?: string;
+  /** Analytics system or model name, e.g. "Hikvision DeepinView", "Thermal NVR". */
+  source?: string;
+  zone?: string;
+  place?: string;
+  pos?: Point;
+  /** Normalised box in the frame: x, y, width, height (0–1). */
+  bbox?: [number, number, number, number];
+  attributes?: { temperatureC?: number; plate?: string; count?: number; label?: string };
+  /** Frame at the moment of detection; stored as evidence when an incident is raised. */
+  snapshot?: { mime: string; base64: string };
+  /** The sender's own id for this detection; repeats are answered with the first outcome. */
+  externalId?: string;
+}
+
+export type DetectionOutcome = 'incident' | 'merged' | 'logged' | 'ignored' | 'duplicate';
+
+export interface Detection {
+  id: string;
+  at: number;
+  receivedAt: number;
+  type: DetectionType;
+  confidence: number;
+  source: string;
+  deviceId?: string;
+  zone?: string;
+  place?: string;
+  pos?: Point;
+  attributes?: DetectionInput['attributes'];
+  outcome: DetectionOutcome;
+  incidentId?: string;
+  ruleId?: string;
+  snapshotEvidenceId?: string;
+}
+
+/** A per-organisation rule deciding what a detection becomes. Rules are tried in order; the first match wins. */
+export interface DetectionRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  types: DetectionType[];
+  /** 0–1; detections below it do not match this rule. */
+  minConfidence: number;
+  /** Thermal hotspots only: ignore readings below this temperature. */
+  minTemperatureC?: number;
+  /** Only these zones (empty = anywhere). */
+  zones?: string[];
+  /** Only between these local times, HH:MM; may wrap midnight (e.g. 22:00–06:00). */
+  hours?: { from: string; to: string };
+  action: 'incident' | 'log' | 'ignore';
+  severity: 'low' | 'medium' | 'high';
+  /** Another detection of the same type from the same device within this window joins the open incident instead of raising a new one. */
+  cooldownS: number;
+}
+
+export const DEFAULT_DETECTION_RULES: DetectionRule[] = [
+  {
+    id: 'intrusion',
+    name: 'Person or intrusion in a protected area',
+    enabled: true,
+    types: ['intrusion', 'person', 'loitering'],
+    minConfidence: 0.6,
+    action: 'incident',
+    severity: 'medium',
+    cooldownS: 300,
+  },
+  {
+    id: 'fire',
+    name: 'Fire, smoke or thermal hotspot',
+    enabled: true,
+    types: ['fire', 'smoke', 'thermal_hotspot'],
+    minConfidence: 0.5,
+    minTemperatureC: 60,
+    action: 'incident',
+    severity: 'high',
+    cooldownS: 600,
+  },
+  { id: 'crowd', name: 'Crowd forming', enabled: true, types: ['crowd'], minConfidence: 0.6, action: 'incident', severity: 'low', cooldownS: 900 },
+  { id: 'vehicles', name: 'Vehicles and licence plates (log only)', enabled: true, types: ['vehicle', 'lpr'], minConfidence: 0.5, action: 'log', severity: 'low', cooldownS: 0 },
+  { id: 'motion', name: 'Plain motion (ignored)', enabled: true, types: ['motion'], minConfidence: 0, action: 'ignore', severity: 'low', cooldownS: 0 },
+];
 
 export type GatewayToServer = GwHello | GwTelemetry | GwCommandUpdate | GwDeviceEvent | GwCameraResult;
 
@@ -198,10 +310,20 @@ export interface OrgSettings {
     closedIncidentDays: number;
     /** Days to keep evidence files regardless of incident state (0 = keep). */
     evidenceDays: number;
+    /** Days to keep logged detections that did not become incidents (0 = keep). */
+    detectionDays: number;
+  };
+  detection: {
+    rules: DetectionRule[];
+    /** IANA time zone the rules' hours are read in. */
+    timezone: string;
   };
 }
 
-export const DEFAULT_ORG_SETTINGS: OrgSettings = { retention: { telemetryDays: 90, closedIncidentDays: 0, evidenceDays: 0 } };
+export const DEFAULT_ORG_SETTINGS: OrgSettings = {
+  retention: { telemetryDays: 90, closedIncidentDays: 0, evidenceDays: 0, detectionDays: 90 },
+  detection: { rules: DEFAULT_DETECTION_RULES, timezone: 'Asia/Bangkok' },
+};
 
 export interface SessionUser extends User {
   orgId: string;

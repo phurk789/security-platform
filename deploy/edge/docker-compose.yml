@@ -4,9 +4,9 @@
 #   docker compose up -d
 services:
   edge-gateway:
-    image: ps-twin:latest            # built from the repo Dockerfile
-    command: ["node", "apps/gateway/dist/index.js"]
-    network_mode: host               # reach 192.168.144.20 (UniRC datalink) and .25 (camera)
+    image: ps-twin:latest # built from the repo Dockerfile
+    command: ['node', 'apps/gateway/dist/index.js']
+    network_mode: host # reach 192.168.144.20 (UniRC datalink) and .25 (camera)
     environment:
       GATEWAY_CONFIG: /config/site.json
     volumes:
@@ -18,4 +18,5 @@ services:
     network_mode: host
     volumes:
       - ./mediamtx.yml:/mediamtx.yml:ro
+      - ./recordings:/recordings # recorded video (size it for recordDeleteAfter × bitrate × cameras)
     restart: unless-stopped

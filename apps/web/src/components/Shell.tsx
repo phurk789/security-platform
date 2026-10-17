@@ -11,6 +11,7 @@ import {
   FileText,
   Gamepad2,
   Filter,
+  Flame,
   History,
   House,
   LogOut,
@@ -20,6 +21,7 @@ import {
   Monitor,
   Plug,
   RotateCcw,
+  ScanEye,
   Send,
   Server,
   SlidersHorizontal,
@@ -525,6 +527,12 @@ export function Footer() {
                 <p className="pop-h">{t('Presenter controls')}</p>
                 <button disabled={!allowed} onClick={() => dispatch({ type: 'demoInjectAlert' })}>
                   <Bell size={14} /> {t('Inject duplicate gate alert')}
+                </button>
+                <button disabled={!allowed} onClick={() => dispatch({ type: 'demoInjectDetection', kind: 'person' })}>
+                  <ScanEye size={14} /> {t('AI detection: person at the gate')}
+                </button>
+                <button disabled={!allowed} onClick={() => dispatch({ type: 'demoInjectDetection', kind: 'thermal_hotspot' })}>
+                  <Flame size={14} /> {t('AI detection: thermal hotspot')}
                 </button>
                 {cut ? (
                   <button disabled={!allowed} onClick={() => dispatch({ type: 'demoRestoreLink', deviceId: 'UGV-01' })}>

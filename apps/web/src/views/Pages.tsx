@@ -9,6 +9,7 @@ import { age, ago, roleLabel, useT } from '../i18n';
 import { CommandBadge, FreshBadge, INCIDENT_LABEL, IncidentBadge, IntegrationBadge, MissionBadge } from '../components/Badges';
 import { CameraFeed } from '../components/CameraFeed';
 import { TwinMap } from '../components/TwinMap';
+import { RecordingsCard } from '../components/Recordings';
 
 function Page({ title, sub, children, actions }: { title: string; sub?: string; children: React.ReactNode; actions?: React.ReactNode }) {
   return (
@@ -381,6 +382,7 @@ export function EvidencePage() {
           {cam && (
             <CameraFeed scene={cam.view ?? 'gate'} label={`${cam.id} ${inc.place}`} time={at} freshness={s.replay.active ? 'live' : freshness(s, cam)} replay={s.replay.active} />
           )}
+          <RecordingsCard inc={inc} />
           <section className="card">
             <h3>{t('Files & notes ({n})', { n: files.length })}</h3>
             <ul className="files">

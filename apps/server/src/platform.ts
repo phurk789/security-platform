@@ -66,6 +66,9 @@ import {
   type CameraAction,
   type LicenseStatus,
   type OrgSettings,
+  type Detection,
+  type DetectionOutcome,
+  DETECTION_LABEL,
   type ComponentKind,
   type ComponentStatus,
   type ComponentUpdate,
@@ -77,6 +80,7 @@ import { appendAudit } from './audit';
 import { createBackup, pruneBackups } from './backup';
 import { License } from './license';
 import { getOrgSettings, privacyErase, privacyExport, purgeExpired, setOrgSettings } from './retention';
+import { detectionDetail, detectionTitle, matchRule, sanitizeDetection } from './detections';
 import type { Config } from './config';
 import { nextNumber, tx, type DB } from './db';
 import { hmac, safeEqual, sha256 } from './security';
@@ -446,6 +450,8 @@ export class Platform {
       source?: string;
       cameraId?: string;
       at?: number;
+      /** Skip pointing a camera at the position (e.g. the position is the camera itself). */
+      noAutoAim?: boolean;
     },
   ) {
     this.require(a, 'incident.create', 'incident');
@@ -477,7 +483,7 @@ export class Platform {
       (i) => i.id !== inc.id && i.place === inc.place && !['closed', 'duplicate', 'dismissed'].includes(i.status),
     );
     if (dupe) this.event(null, a.orgId, siteId, inc.id, `Possible duplicate of ${dupe.id}`, { tone: 'warn', detail: 'Same place within 10 minutes. Review before acting.' });
-    if (input.pos) void this.autoAim(a.orgId, siteId, inc).catch((e) => console.error('[auto-aim]', e));
+    if (input.pos && !input.noAutoAim) void this.autoAim(a.orgId, siteId, inc).catch((e) => console.error('[auto-aim]', e));
     return inc;
   }
 
@@ -1472,6 +1478,16 @@ export class Platform {
   deviceEvent(orgId: string, e: GwDeviceEvent) {
     const d = this.devices.get(e.deviceId);
     if (!d || d.orgId !== orgId) return;
+    if (e.kind === 'detection') {
+      if (!e.detection) return;
+      try {
+        // The camera speaks for itself: a system actor named after the device raises the detection.
+        this.ingestDetection(this.systemActor(orgId, 'system', d.id), { ...e.detection, deviceId: d.id, at: e.at, source: e.detection.source ?? `${d.id} analytics` });
+      } catch (err) {
+        console.error('[detection]', d.id, err instanceof Error ? err.message : err);
+      }
+      return;
+    }
     const m = this.activeMission(d.id);
     tx(this.db, () => {
       switch (e.kind) {
@@ -1525,7 +1541,7 @@ export class Platform {
           if (m) this.event(null, orgId, d.siteId, m.incidentId, `${d.id} fault`, { actor: d.id, tone: 'warn', at: e.at, detail: e.detail });
           break;
         case 'snapshot': {
-          const incidentId = m?.incidentId ?? this.lastMissionIncident(d.id);
+          const incidentId = m?.incidentId ?? this.lastMissionIncident(d.id) ?? this.lastCameraIncident(orgId, d.id);
           if (incidentId && e.frame)
             this.storeEvidence(orgId, d.siteId, incidentId, {
               kind: 'snapshot',
@@ -1546,6 +1562,181 @@ export class Platform {
   private lastMissionIncident(deviceId: string) {
     const r = this.db.prepare('SELECT incident_id FROM missions WHERE device_id = ? ORDER BY rowid DESC LIMIT 1').get(deviceId) as { incident_id: string } | undefined;
     return r?.incident_id;
+  }
+
+  /** The newest open incident a fixed camera is attached to (for its photos and detections). */
+  private lastCameraIncident(orgId: string, deviceId: string) {
+    const r = this.db
+      .prepare(
+        "SELECT id FROM incidents WHERE org_id = ? AND json_extract(data, '$.cameraId') = ? AND status NOT IN ('closed', 'dismissed', 'duplicate') ORDER BY json_extract(data, '$.createdAt') DESC LIMIT 1",
+      )
+      .get(orgId, deviceId) as { id: string } | undefined;
+    return r?.id;
+  }
+
+  // ---- AI / sensor detections ------------------------------------------------
+
+  /**
+   * A detection from video analytics, a thermal camera or an NVR. The organisation's rules decide:
+   * raise an incident (with the frame as evidence), join the open incident from the same camera,
+   * log it for the record, or ignore it. Every detection is stored; the console sees incidents.
+   */
+  ingestDetection(a: Actor, raw: unknown): Detection {
+    this.require(a, 'incident.create', 'detection');
+    const now = this.now();
+    let input: ReturnType<typeof sanitizeDetection>;
+    try {
+      input = sanitizeDetection(raw, now);
+    } catch (e) {
+      return fail(400, 'invalid', (e as Error).message);
+    }
+    if (input.externalId) {
+      const seen = this.db.prepare('SELECT data FROM detections WHERE org_id = ? AND external_id = ?').get(a.orgId, input.externalId) as { data: string } | undefined;
+      if (seen) return { ...(JSON.parse(seen.data) as Detection), outcome: 'duplicate' };
+    }
+    const d = input.deviceId ? this.devices.get(input.deviceId) : undefined;
+    if (input.deviceId && (!d || d.orgId !== a.orgId || !this.inScope(a, a.orgId, d.siteId))) fail(404, 'not_found', `Device ${input.deviceId} not found.`);
+    const siteId = d?.siteId ?? this.defaultSite(a);
+    const settings = getOrgSettings(this.db, a.orgId);
+    const source = input.source ?? (a.kind === 'apikey' ? a.name : (d?.id ?? 'Analytics'));
+    const det: Detection = {
+      id: `${this.prefix(a.orgId)}DET-${String(nextNumber(this.db, a.orgId, 'detection', 1)).padStart(5, '0')}`,
+      at: input.at,
+      receivedAt: now,
+      type: input.type,
+      confidence: input.confidence,
+      source,
+      deviceId: d?.id,
+      zone: input.zone ?? d?.zone,
+      place: input.place ?? (d ? `${d.id} view` : undefined),
+      pos: input.pos ?? d?.pos,
+      attributes: input.attributes,
+      outcome: 'logged',
+    };
+    const rule = matchRule(
+      settings.detection.rules,
+      { type: det.type, confidence: det.confidence, zone: det.zone, at: det.at, attributes: det.attributes },
+      settings.detection.timezone,
+    );
+    det.ruleId = rule?.id;
+    const simulated = d?.integration === 'simulated' || /simulat/i.test(source);
+    if (rule?.action === 'ignore') det.outcome = 'ignored';
+    else if (rule?.action === 'incident') {
+      const title = detectionTitle(det);
+      const detail = detectionDetail({ ...det, bbox: input.bbox });
+      const open = rule.cooldownS > 0 ? this.openDetectionIncident(a.orgId, d?.id, det.type, now - rule.cooldownS * 1000) : undefined;
+      if (open) {
+        det.outcome = 'merged';
+        det.incidentId = open.id;
+        this.event(null, a.orgId, siteId, open.id, `${title} again`, { actor: source, tone: 'alert', at: det.at, detail });
+        this.audit(a, 'detection.merge', det.id, 'ok', `${det.type} ${Math.round(det.confidence * 100)}% → ${open.id}`);
+      } else {
+        const inc = this.createIncident(
+          { ...a, name: source },
+          {
+            siteId,
+            title: `${title}${d ? ` · ${d.id}` : ''}`,
+            type: `Detection: ${det.attributes?.label ?? DETECTION_LABEL[det.type]}`,
+            severity: rule.severity,
+            zone: det.zone,
+            place: det.place,
+            pos: det.pos,
+            source: `${source}${simulated ? ' (simulated)' : ''}`,
+            cameraId: d?.kind === 'cctv' ? d.id : undefined,
+            at: det.at,
+            noAutoAim: !input.pos,
+          },
+        );
+        det.outcome = 'incident';
+        det.incidentId = inc.id;
+        this.event(null, a.orgId, siteId, inc.id, 'Detection details', { actor: source, at: det.at, detail });
+      }
+      if (input.snapshot && det.incidentId) {
+        const ev = this.storeEvidence(a.orgId, siteId, det.incidentId, {
+          kind: 'snapshot',
+          title: `${source}: ${title}`,
+          source,
+          recordedBy: source,
+          capturedAt: det.at,
+          mime: input.snapshot.mime,
+          bytes: Buffer.from(input.snapshot.base64, 'base64'),
+          simulated,
+        });
+        det.snapshotEvidenceId = ev.id;
+      }
+    }
+    this.db
+      .prepare(
+        'INSERT INTO detections (id, org_id, site_id, at, received_at, device_id, type, confidence, outcome, incident_id, rule_id, external_id, data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      )
+      .run(
+        det.id,
+        a.orgId,
+        siteId,
+        det.at,
+        det.receivedAt,
+        det.deviceId ?? null,
+        det.type,
+        det.confidence,
+        det.outcome,
+        det.incidentId ?? null,
+        det.ruleId ?? null,
+        input.externalId ?? null,
+        JSON.stringify(det),
+      );
+    this.bus.emit('detection', { orgId: a.orgId, detection: det });
+    return det;
+  }
+
+  /** The open incident a recent detection of this type from this device raised (cooldown window). */
+  private openDetectionIncident(orgId: string, deviceId: string | undefined, type: Detection['type'], since: number) {
+    const rows = this.db
+      .prepare(
+        "SELECT incident_id FROM detections WHERE org_id = ? AND device_id IS ? AND type = ? AND at >= ? AND outcome IN ('incident', 'merged') AND incident_id IS NOT NULL ORDER BY at DESC LIMIT 5",
+      )
+      .all(orgId, deviceId ?? null, type, since) as { incident_id: string }[];
+    for (const r of rows) {
+      const inc = this.db.prepare("SELECT data FROM incidents WHERE id = ? AND status NOT IN ('closed', 'dismissed', 'duplicate')").get(r.incident_id) as
+        | { data: string }
+        | undefined;
+      if (inc) return JSON.parse(inc.data) as Incident;
+    }
+    return undefined;
+  }
+
+  listDetections(a: Actor, q: { from?: number; to?: number; deviceId?: string; type?: string; outcome?: string; limit?: number }): Detection[] {
+    this.require(a, 'report.view', 'detections', { mutating: false });
+    const to = q.to ?? this.now();
+    const from = q.from ?? to - 24 * 3600_000;
+    const limit = Math.min(1000, Math.max(1, q.limit ?? 200));
+    const where = ['org_id = ?', 'at BETWEEN ? AND ?'];
+    const params: unknown[] = [a.orgId, from, to];
+    if (a.siteIds.length) {
+      where.push(`site_id IN (${a.siteIds.map(() => '?').join(',')})`);
+      params.push(...a.siteIds);
+    }
+    if (q.deviceId) {
+      where.push('device_id = ?');
+      params.push(q.deviceId);
+    }
+    if (q.type) {
+      where.push('type = ?');
+      params.push(q.type);
+    }
+    if (q.outcome) {
+      where.push('outcome = ?');
+      params.push(q.outcome);
+    }
+    const rows = this.db.prepare(`SELECT data FROM detections WHERE ${where.join(' AND ')} ORDER BY at DESC LIMIT ?`).all(...(params as string[]), limit) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as Detection);
+  }
+
+  /** Detection counts by type and outcome for the KPI views. */
+  detectionStats(a: Actor, from: number, to: number) {
+    this.require(a, 'report.view', 'detections', { mutating: false });
+    return this.db
+      .prepare('SELECT type, outcome, COUNT(*) AS n FROM detections WHERE org_id = ? AND at BETWEEN ? AND ? GROUP BY type, outcome ORDER BY n DESC')
+      .all(a.orgId, from, to) as { type: Detection['type']; outcome: DetectionOutcome; n: number }[];
   }
 
   // ---- timers -------------------------------------------------------------
@@ -1852,6 +2043,170 @@ export class Platform {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="#101b2b"/><polygon points="0,180 120,96 200,96 320,180" fill="#2a3442"/><rect x="120" y="110" width="96" height="6" fill="#e8edf2"/><text x="10" y="20" fill="#f1f5f9" font-family="sans-serif" font-size="12">${d.id}</text><text x="310" y="20" fill="#fbbf24" font-family="sans-serif" font-size="10" text-anchor="end">${banner}</text><text x="10" y="170" fill="#f1f5f9" font-family="monospace" font-size="11">${fmtDate(t)} ${fmtTime(t, true)}</text></svg>`;
   }
 
+  // ---- recordings (media server playback) ---------------------------------------
+
+  /**
+   * Recorded video available for a device between two times. Real devices answer from the site
+   * media server's playback API (MediaMTX); simulated devices derive coverage from telemetry and
+   * play back as a labelled storyboard, so the workflow can be shown without hardware.
+   */
+  async recordings(
+    a: Actor,
+    deviceId: string,
+    from: number,
+    to: number,
+  ): Promise<{ label: 'RECORDED' | 'SIMULATED'; segments: { start: number; end: number }[]; playback: boolean }> {
+    this.require(a, 'media.view', deviceId, { mutating: false });
+    const d = this.getDevice(a, deviceId);
+    if (!d.capabilities.includes('video') && !d.capabilities.includes('camera')) fail(400, 'invalid', `${d.id} has no camera.`);
+    if (!(to > from)) fail(400, 'invalid', 'to must be after from.');
+    if (to - from > 7 * 86_400_000) fail(400, 'invalid', 'At most 7 days at a time.');
+    const pb = this.playbackOf(d);
+    if (pb) {
+      const token = this.mediaToken(d.orgId, d.id, a.userId ?? '', this.now() + MEDIA_TOKEN_TTL_MS);
+      const url = `${pb.base}/list?path=${encodeURIComponent(pb.path)}&start=${encodeURIComponent(new Date(from).toISOString())}&end=${encodeURIComponent(new Date(to).toISOString())}&token=${encodeURIComponent(token)}`;
+      let list: { start: string; duration: number }[];
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        list = (await r.json()) as { start: string; duration: number }[];
+      } catch (e) {
+        return fail(502, 'error', `The site media server did not answer for recordings (${(e as Error).message}).`);
+      }
+      const segments = list
+        .map((x) => ({ start: Date.parse(x.start), end: Date.parse(x.start) + Math.round(Number(x.duration) * 1000) }))
+        .filter((x) => Number.isFinite(x.start) && x.end > x.start)
+        .sort((x, y) => x.start - y.start);
+      return { label: 'RECORDED', segments, playback: true };
+    }
+    // Coverage from telemetry: the device was online (and, for a simulated camera, "recording").
+    const gap = Math.max(5000, 3 * d.rateMs);
+    const starts = this.db
+      .prepare(
+        'WITH t AS (SELECT received_time rt, LAG(received_time) OVER (ORDER BY received_time) prev FROM telemetry WHERE device_id = ? AND received_time BETWEEN ? AND ?) SELECT rt FROM t WHERE prev IS NULL OR rt - prev > ?',
+      )
+      .all(d.id, from, to, gap) as { rt: number }[];
+    const ends = this.db
+      .prepare(
+        'WITH t AS (SELECT received_time rt, LEAD(received_time) OVER (ORDER BY received_time) nxt FROM telemetry WHERE device_id = ? AND received_time BETWEEN ? AND ?) SELECT rt FROM t WHERE nxt IS NULL OR nxt - rt > ?',
+      )
+      .all(d.id, from, to, gap) as { rt: number }[];
+    const segments = starts.map((st, i) => ({ start: st.rt, end: Math.max(st.rt + 1000, (ends[i]?.rt ?? st.rt) + d.rateMs) }));
+    return { label: 'SIMULATED', segments, playback: false };
+  }
+
+  /** A playable link for a stretch of recording. Real devices: the media server's MP4 export; simulated: a storyboard. */
+  clipUrl(a: Actor, deviceId: string, start: number, durationS: number) {
+    this.require(a, 'media.view', deviceId, { mutating: false });
+    const d = this.getDevice(a, deviceId);
+    const dur = clampDuration(durationS);
+    if (!Number.isFinite(start) || start > this.now()) fail(400, 'invalid', 'start must be a past timestamp in milliseconds.');
+    this.audit(a, 'media.playback', d.id, 'ok', `${new Date(start).toISOString()} +${dur}s`);
+    const exp = this.now() + MEDIA_TOKEN_TTL_MS;
+    const pb = this.playbackOf(d);
+    if (pb) {
+      const token = this.mediaToken(d.orgId, d.id, a.userId ?? '', exp);
+      return {
+        url: `${pb.base}/get?path=${encodeURIComponent(pb.path)}&start=${encodeURIComponent(new Date(start).toISOString())}&duration=${dur}&format=mp4&token=${encodeURIComponent(token)}`,
+        mime: 'video/mp4',
+        label: 'RECORDED' as const,
+        expiresAt: exp,
+      };
+    }
+    const sig = hmac(this.cfg.mediaSecret, `${d.orgId}|${d.id}|${a.userId ?? ''}|${exp}|sb|${start}|${dur}`);
+    return {
+      url: `/api/v1/media/${encodeURIComponent(d.id)}/storyboard.svg?start=${start}&duration=${dur}&u=${encodeURIComponent(a.userId ?? '')}&exp=${exp}&sig=${sig}`,
+      mime: 'image/svg+xml',
+      label: 'SIMULATED' as const,
+      expiresAt: exp,
+    };
+  }
+
+  /** Signed storyboard for simulated recordings: six frames with the time and where the device was. */
+  storyboard(deviceId: string, start: number, durationS: number, userId: string, exp: number, sig: string) {
+    if (!(exp > this.now())) fail(410, 'forbidden', 'Media link expired.');
+    const d = this.devices.get(deviceId);
+    const u = this.db.prepare('SELECT org_id FROM users WHERE id = ? AND active = 1').get(userId) as { org_id: string } | undefined;
+    if (!d || !u || u.org_id !== d.orgId) return fail(403, 'forbidden', 'Invalid media link.');
+    const dur = clampDuration(durationS);
+    if (!safeEqual(sig, hmac(this.cfg.mediaSecret, `${d.orgId}|${d.id}|${userId}|${exp}|sb|${start}|${dur}`))) return fail(403, 'forbidden', 'Invalid media link.');
+    return this.renderStoryboard(d, start, dur);
+  }
+
+  private renderStoryboard(d: Device, start: number, dur: number) {
+    const frames = 6;
+    const w = 240;
+    const h = 135;
+    const cells: string[] = [];
+    for (let i = 0; i < frames; i++) {
+      const t = start + ((dur * 1000) / (frames - 1)) * i;
+      const row = this.db.prepare('SELECT x, y, speed FROM telemetry WHERE device_id = ? AND received_time <= ? ORDER BY received_time DESC LIMIT 1').get(d.id, t) as
+        | { x: number; y: number; speed: number }
+        | undefined;
+      const x = 4 + i * (w + 6);
+      const pos = row ? `x ${Math.round(row.x)} · y ${Math.round(row.y)} · ${row.speed.toFixed(1)} m/s` : 'no telemetry';
+      cells.push(
+        `<g transform="translate(${x},4)"><rect width="${w}" height="${h}" rx="4" fill="#101b2b"/><polygon points="0,${h} 90,70 150,70 ${w},${h}" fill="#2a3442"/>` +
+          `<rect x="90" y="82" width="72" height="5" fill="#e8edf2"/>${row ? `<circle cx="${60 + ((i * 20) % 120)}" cy="${98}" r="5" fill="#22d3ee"/>` : ''}` +
+          `<text x="8" y="16" fill="#f1f5f9" font-family="sans-serif" font-size="11">${d.id}</text><text x="${w - 8}" y="16" fill="#fbbf24" font-family="sans-serif" font-size="9" text-anchor="end">SIMULATED RECORDING</text>` +
+          `<text x="8" y="${h - 20}" fill="#f1f5f9" font-family="monospace" font-size="10">${fmtDate(t)} ${fmtTime(t, true)}</text><text x="8" y="${h - 8}" fill="#9fb3c8" font-family="monospace" font-size="9">${pos}</text></g>`,
+      );
+    }
+    const W = frames * (w + 6) + 2;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${h + 8}" width="${W}" height="${h + 8}"><rect width="${W}" height="${h + 8}" fill="#0b1220"/>${cells.join('')}</svg>`;
+  }
+
+  /** Saves a stretch of recording to the incident as evidence (checksummed, audited). */
+  async clipToEvidence(a: Actor, incidentId: string, deviceId: string, start: number, durationS: number) {
+    this.require(a, 'evidence.add', incidentId);
+    const inc = this.getIncident(a, incidentId);
+    const d = this.getDevice(a, deviceId);
+    const dur = clampDuration(durationS);
+    if (!Number.isFinite(start) || start > this.now()) fail(400, 'invalid', 'start must be a past timestamp in milliseconds.');
+    const pb = this.playbackOf(d);
+    let bytes: Buffer;
+    let mime: string;
+    if (pb) {
+      const token = this.mediaToken(d.orgId, d.id, a.userId ?? '', this.now() + MEDIA_TOKEN_TTL_MS);
+      const url = `${pb.base}/get?path=${encodeURIComponent(pb.path)}&start=${encodeURIComponent(new Date(start).toISOString())}&duration=${dur}&format=mp4&token=${encodeURIComponent(token)}`;
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const ab = await r.arrayBuffer();
+        if (ab.byteLength > 256 * 1024 * 1024) throw new Error('clip larger than 256 MB');
+        bytes = Buffer.from(ab);
+      } catch (e) {
+        return fail(502, 'error', `Could not fetch the recording from the site media server (${(e as Error).message}).`);
+      }
+      if (!bytes.length) fail(404, 'not_found', 'No recording for that time.');
+      mime = 'video/mp4';
+    } else {
+      bytes = Buffer.from(this.renderStoryboard(d, start, dur), 'utf8');
+      mime = 'image/svg+xml';
+    }
+    const ev = this.storeEvidence(a.orgId, inc.siteId, inc.id, {
+      kind: 'clip',
+      title: `${d.id} recording ${fmtTime(start, true)}–${fmtTime(start + dur * 1000, true)}`,
+      source: d.id,
+      recordedBy: a.name,
+      capturedAt: start,
+      mime,
+      bytes,
+      simulated: !pb,
+    });
+    this.audit(a, 'evidence.clip', ev.id, 'ok', `${d.id} ${new Date(start).toISOString()} +${dur}s → ${inc.id}`);
+    return ev;
+  }
+
+  /** Playback base URL and recording path of a real device with a media-server stream. */
+  private playbackOf(d: Device): { base: string; path: string } | undefined {
+    const st = d.stream;
+    if (d.integration === 'simulated' || !st?.playback) return undefined;
+    const path = streamPath(st.whep ?? st.hls ?? st.whepSub ?? st.hlsSub ?? '');
+    if (!path) return undefined;
+    return { base: st.playback.replace(/\/+$/, ''), path };
+  }
+
   // ---- snapshot -----------------------------------------------------------
 
   meta(orgId: string): Meta {
@@ -1932,6 +2287,12 @@ export class Platform {
   userActor(u: SessionUser, extra: Partial<Actor> = {}): Actor {
     return { kind: 'user', orgId: u.orgId, siteIds: u.siteIds, userId: u.id, name: u.name, role: u.role, stepUpUntil: u.stepUpUntil, ...extra };
   }
+}
+
+/** Clip length: 5 s to 10 minutes, whole seconds. */
+function clampDuration(s: number) {
+  if (!Number.isFinite(s)) fail(400, 'invalid', 'duration must be seconds.');
+  return Math.max(5, Math.min(600, Math.round(s)));
 }
 
 /** Media server path of a stream URL: https://edge/cam-zt30-01/whep → cam-zt30-01. */

@@ -142,6 +142,15 @@ is needed.
 - Scheduled backups run every `BACKUP_INTERVAL_H` hours into `DATA_DIR/backups`, keep the newest
   `BACKUP_KEEP` and are audited (`admin.backup_create` by _Backup scheduler_).
 
+## Video recordings
+
+Recordings live on the edge PC (`deploy/edge/mediamtx.yml`: `record: yes`, `playback: yes`,
+`recordDeleteAfter`). Size the `recordings` volume for cameras × bitrate × retention (a 4 Mbit/s
+camera is ~43 GB per day). The platform never copies recordings except the clips an operator
+saves to an incident, which become evidence under the evidence retention policy. Each camera's
+`stream.playback` in `site.json` names the playback server (`https://edge.example.com:9996`); put
+it behind the same TLS proxy as the WHEP endpoints. See VIDEO.md.
+
 ## Retention and privacy (PDPA)
 
 Each organisation has a retention policy, set in Administration → Data retention or with

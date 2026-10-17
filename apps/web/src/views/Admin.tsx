@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BadgeCheck, DatabaseBackup, Eraser, KeyRound, Plus, RefreshCw, Router, Search, ShieldCheck, Timer, UserPlus } from 'lucide-react';
-import { DEFAULT_ORG_SETTINGS, fmtDate, fmtTime, type ApiKeyView, type LicenseStatus, type OrgSettings, type Role, type UserAdminView } from '@13store/shared';
+import { BadgeCheck, DatabaseBackup, Eraser, KeyRound, Plus, RefreshCw, Router, ScanEye, Search, ShieldCheck, Timer, Trash2, UserPlus } from 'lucide-react';
+import {
+  DEFAULT_DETECTION_RULES,
+  DEFAULT_ORG_SETTINGS,
+  DETECTION_LABEL,
+  DETECTION_TYPES,
+  fmtDate,
+  fmtTime,
+  type ApiKeyView,
+  type DetectionRule,
+  type LicenseStatus,
+  type OrgSettings,
+  type Role,
+  type UserAdminView,
+} from '@13store/shared';
 import { ApiError } from '../api';
 import { useStore } from '../store';
 import { roleLabel, useT } from '../i18n';
@@ -63,7 +76,9 @@ function Admin() {
   const [audit, setAudit] = useState<{ ok: boolean; count: number; brokenAt?: number } | null>(null);
   const [lic, setLic] = useState<LicenseStatus | null>(null);
   const [settings, setSettings] = useState<OrgSettings>(DEFAULT_ORG_SETTINGS);
-  const [ret, setRet] = useState<Record<keyof OrgSettings['retention'], string>>({ telemetryDays: '90', closedIncidentDays: '0', evidenceDays: '0' });
+  const [ret, setRet] = useState<Record<keyof OrgSettings['retention'], string>>({ telemetryDays: '90', closedIncidentDays: '0', evidenceDays: '0', detectionDays: '90' });
+  const [rules, setRules] = useState<DetectionRule[]>(DEFAULT_DETECTION_RULES);
+  const [rulesDirty, setRulesDirty] = useState(false);
   const [pq, setPq] = useState('');
   const [hits, setHits] = useState<PrivacyMatch[] | null>(null);
   const [reason, setReason] = useState('');
@@ -91,7 +106,14 @@ function Admin() {
     setAudit(a);
     setLic(l);
     setSettings(st);
-    setRet({ telemetryDays: String(st.retention.telemetryDays), closedIncidentDays: String(st.retention.closedIncidentDays), evidenceDays: String(st.retention.evidenceDays) });
+    setRules(st.detection.rules);
+    setRulesDirty(false);
+    setRet({
+      telemetryDays: String(st.retention.telemetryDays),
+      closedIncidentDays: String(st.retention.closedIncidentDays),
+      evidenceDays: String(st.retention.evidenceDays),
+      detectionDays: String(st.retention.detectionDays),
+    });
   }, [api]);
 
   useEffect(() => {
@@ -109,6 +131,12 @@ function Admin() {
       else setMsg({ tone: 'warn', text: e instanceof Error ? e.message : String(e) });
     }
   };
+
+  const testDetection = (type: 'person' | 'thermal_hotspot') =>
+    act(async () => {
+      const d = await api.post<{ outcome: string; incidentId?: string }>('/demo/inject-detection', { type });
+      setMsg({ tone: 'ok', text: t('Test detection sent: {outcome}{inc}', { outcome: d.outcome, inc: d.incidentId ? ` → ${d.incidentId}` : '' }) });
+    });
 
   return (
     <div className="page">
@@ -438,7 +466,12 @@ function Admin() {
             className="retention-form"
             onSubmit={(e) => {
               e.preventDefault();
-              const retention = { telemetryDays: Number(ret.telemetryDays), closedIncidentDays: Number(ret.closedIncidentDays), evidenceDays: Number(ret.evidenceDays) };
+              const retention = {
+                telemetryDays: Number(ret.telemetryDays),
+                closedIncidentDays: Number(ret.closedIncidentDays),
+                evidenceDays: Number(ret.evidenceDays),
+                detectionDays: Number(ret.detectionDays),
+              };
               act(() => api.patch('/admin/settings', { retention }), t('Retention policy saved.'));
             }}
           >
@@ -448,14 +481,12 @@ function Admin() {
             <input id="ret-inc" type="number" min={0} max={3650} value={ret.closedIncidentDays} onChange={(e) => setRet({ ...ret, closedIncidentDays: e.target.value })} />
             <label htmlFor="ret-ev">{t('Evidence files regardless of incident (days)')}</label>
             <input id="ret-ev" type="number" min={0} max={3650} value={ret.evidenceDays} onChange={(e) => setRet({ ...ret, evidenceDays: e.target.value })} />
+            <label htmlFor="ret-det">{t('Logged detections that did not become incidents (days)')}</label>
+            <input id="ret-det" type="number" min={0} max={3650} value={ret.detectionDays} onChange={(e) => setRet({ ...ret, detectionDays: e.target.value })} />
             <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
                 className="btn-primary"
-                disabled={
-                  ret.telemetryDays === String(settings.retention.telemetryDays) &&
-                  ret.closedIncidentDays === String(settings.retention.closedIncidentDays) &&
-                  ret.evidenceDays === String(settings.retention.evidenceDays)
-                }
+                disabled={(['telemetryDays', 'closedIncidentDays', 'evidenceDays', 'detectionDays'] as const).every((k) => ret[k] === String(settings.retention[k]))}
               >
                 {t('Save policy')}
               </button>
@@ -549,6 +580,182 @@ function Admin() {
                 </>
               )}
             </>
+          )}
+        </section>
+        <section className="card rules-card">
+          <h3>
+            <ScanEye size={16} /> {t('Detection rules')}
+          </h3>
+          <p className="fine" style={{ marginTop: 0 }}>
+            {t(
+              'What AI video analytics, thermal cameras and sensors may raise. Rules are tried top to bottom; the first match decides: raise an incident, log only, or ignore. A repeat from the same camera within the cooldown joins the open incident.',
+            )}
+          </p>
+          <div className="rules">
+            {rules.map((r, i) => {
+              const upd = (patch: Partial<DetectionRule>) => {
+                setRules(rules.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+                setRulesDirty(true);
+              };
+              return (
+                <div key={r.id} className={`rule ${r.enabled ? '' : 'dim'}`}>
+                  <div className="rule-head">
+                    <label className="check">
+                      <input type="checkbox" checked={r.enabled} onChange={(e) => upd({ enabled: e.target.checked })} /> <span className="mono">{r.id}</span>
+                    </label>
+                    <input className="rule-name" value={r.name} onChange={(e) => upd({ name: e.target.value })} aria-label={t('Rule name')} />
+                    <button
+                      className="btn-ghost small"
+                      onClick={() => {
+                        setRules(rules.filter((_, j) => j !== i));
+                        setRulesDirty(true);
+                      }}
+                      aria-label={t('Remove rule')}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="chips">
+                    {DETECTION_TYPES.map((ty) => (
+                      <button
+                        key={ty}
+                        type="button"
+                        className={`chip ${r.types.includes(ty) ? 'on' : ''}`}
+                        onClick={() => upd({ types: r.types.includes(ty) ? r.types.filter((x) => x !== ty) : [...r.types, ty] })}
+                      >
+                        {t(DETECTION_LABEL[ty])}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="rule-row">
+                    <label>
+                      {t('Min. confidence')}
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={Math.round(r.minConfidence * 100)}
+                        onChange={(e) => upd({ minConfidence: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })}
+                      />{' '}
+                      %
+                    </label>
+                    {r.types.includes('thermal_hotspot') && (
+                      <label>
+                        {t('Min. temperature')}
+                        <input
+                          type="number"
+                          min={-50}
+                          max={2000}
+                          value={r.minTemperatureC ?? ''}
+                          placeholder="—"
+                          onChange={(e) => upd({ minTemperatureC: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        />{' '}
+                        °C
+                      </label>
+                    )}
+                    <label>
+                      {t('Action')}
+                      <select value={r.action} onChange={(e) => upd({ action: e.target.value as DetectionRule['action'] })}>
+                        <option value="incident">{t('Raise incident')}</option>
+                        <option value="log">{t('Log only')}</option>
+                        <option value="ignore">{t('Ignore')}</option>
+                      </select>
+                    </label>
+                    {r.action === 'incident' && (
+                      <>
+                        <label>
+                          {t('Severity')}
+                          <select value={r.severity} onChange={(e) => upd({ severity: e.target.value as DetectionRule['severity'] })}>
+                            <option value="low">{t('low')}</option>
+                            <option value="medium">{t('medium')}</option>
+                            <option value="high">{t('high')}</option>
+                          </select>
+                        </label>
+                        <label>
+                          {t('Cooldown')}
+                          <input
+                            type="number"
+                            min={0}
+                            max={86400}
+                            step={30}
+                            value={r.cooldownS}
+                            onChange={(e) => upd({ cooldownS: Math.max(0, Math.round(Number(e.target.value))) })}
+                          />{' '}
+                          s
+                        </label>
+                      </>
+                    )}
+                    <label>
+                      {t('Hours')}
+                      <input
+                        type="time"
+                        value={r.hours?.from ?? ''}
+                        onChange={(e) => upd({ hours: e.target.value ? { from: e.target.value, to: r.hours?.to ?? '06:00' } : undefined })}
+                      />
+                      –
+                      <input
+                        type="time"
+                        value={r.hours?.to ?? ''}
+                        onChange={(e) => upd({ hours: e.target.value ? { from: r.hours?.from ?? '22:00', to: e.target.value } : undefined })}
+                      />
+                    </label>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="row gap-s wrap">
+            <button
+              className="btn-secondary small"
+              onClick={() => {
+                setRules([
+                  ...rules,
+                  {
+                    id: `rule-${Date.now().toString(36)}`,
+                    name: t('New rule'),
+                    enabled: true,
+                    types: ['person'],
+                    minConfidence: 0.6,
+                    action: 'incident',
+                    severity: 'medium',
+                    cooldownS: 300,
+                  },
+                ]);
+                setRulesDirty(true);
+              }}
+            >
+              <Plus size={14} /> {t('Add rule')}
+            </button>
+            <button
+              className="btn-ghost small"
+              onClick={() => {
+                setRules(DEFAULT_DETECTION_RULES);
+                setRulesDirty(true);
+              }}
+            >
+              {t('Reset to defaults')}
+            </button>
+            <button
+              className="btn-primary small"
+              disabled={!rulesDirty || rules.some((r) => !r.types.length || !r.name.trim())}
+              onClick={() => act(() => api.patch('/admin/settings', { detection: { rules, timezone: settings.detection.timezone } }), t('Detection rules saved.'))}
+            >
+              {t('Save rules')}
+            </button>
+            <span className="muted fine">
+              {t('Time zone')}: {settings.detection.timezone}
+            </span>
+          </div>
+          {session!.meta.env === 'demo' && (
+            <p className="fine">
+              {t('Try it:')}{' '}
+              <button className="btn-ghost small" onClick={() => testDetection('person')}>
+                {t('person at the gate')}
+              </button>{' '}
+              <button className="btn-ghost small" onClick={() => testDetection('thermal_hotspot')}>
+                {t('thermal hotspot 78 °C')}
+              </button>
+            </p>
           )}
         </section>
       </div>
