@@ -1,6 +1,7 @@
 // Imported site models (BIM → glTF) and orthophoto ground, described by media/twin.json.
 // Nothing here is required: without the file the twin draws buildings from their footprints.
 import * as THREE from 'three';
+import { siteVariant } from '@13store/shared';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export interface TwinModel {
@@ -28,6 +29,8 @@ export interface TwinManifest {
 export async function loadTwinManifest(): Promise<TwinManifest | null> {
   if (typeof location !== 'undefined' && location.protocol === 'file:') return null;
   try {
+    // media/twin.json describes the demo plant; the original civic demo has no imported models.
+    if (siteVariant !== 'amata') return null;
     const r = await fetch('media/twin.json', { cache: 'no-cache' });
     if (!r.ok) return null;
     const j = (await r.json()) as TwinManifest;

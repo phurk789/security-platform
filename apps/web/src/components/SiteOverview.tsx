@@ -3,7 +3,7 @@
 // device state distribution. Everything comes from the live app state — nothing is mocked.
 import { useMemo } from 'react';
 import { Activity, Building2, Cctv, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { BUILDINGS, SITE, type AppState, type Device } from '@13store/shared';
+import { BUILDINGS, SITE, siteVariant, type AppState, type Device } from '@13store/shared';
 import { freshness, isReady } from '../domain/policy';
 import { useT } from '../i18n';
 import { useStore } from '../store';
@@ -66,7 +66,7 @@ export function SiteOverview() {
           <div>
             <dt>{t('Site')}</dt>
             <dd>
-              {SITE.name} · {t('Civic campus')}
+              {t(SITE.name)} · {t(siteVariant === 'civic' ? 'Civic campus' : 'Industrial estate')}
             </dd>
           </div>
           <div>

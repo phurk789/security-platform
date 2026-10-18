@@ -13,7 +13,7 @@ export const SCENARIO_START = Date.UTC(2026, 9, 16, 22, 27, 0);
 export const DEMO_GEO: GeoAnchor = { originLat: 13.4367374, originLon: 101.0275798, rotationDeg: -28.5 };
 
 export const SITE = {
-  name: 'Demo Plant · Amata City Chonburi',
+  name: 'Demo Plant · Amata City Chonburi' as string,
   org: '13STORE Demo Org',
   width: 420,
   height: 290,
@@ -88,7 +88,8 @@ const info = (b: Omit<Building, 'bim'>, extra: Partial<BuildingInfo> & Pick<Buil
   };
 };
 
-export const BUILDINGS: Building[] = [
+/** Demo plant in Amata City Chonburi, buildings on the real roofs (satellite). */
+const BUILDINGS_AMATA: Building[] = [
   info(
     { id: 'B1', name: 'Building 1', use: 'Administration', x: 315, y: 125, w: 66, d: 53, h: 14, zone: 'Zone B' },
     {
@@ -135,6 +136,111 @@ export const BUILDINGS: Building[] = [
     },
   ),
 ];
+
+/** The original demo: a civic centre (placeholder location, drawn twin only). */
+const BUILDINGS_CIVIC: Building[] = [
+  info(
+    { id: 'B1', name: 'Building 1', use: 'Administration', x: 50, y: 52, w: 92, d: 56, h: 22, zone: 'Zone A' },
+    {
+      occupancy: 420,
+      yearBuilt: 2009,
+      structure: 'Reinforced concrete frame, curtain wall',
+      assets: ['Fire alarm panel, lobby L1', 'Server room L3 (east wing)', '2 lifts, 2 stair cores'],
+    },
+  ),
+  info(
+    { id: 'B2', name: 'Building 2', use: 'Public Services', x: 178, y: 26, w: 82, d: 62, h: 34, zone: 'Zone A' },
+    {
+      occupancy: 900,
+      yearBuilt: 2015,
+      basementLevels: 1,
+      structure: 'Reinforced concrete, glass façade',
+      assets: ['Fire alarm panel, security desk L1', 'Backup generator, basement', 'Public counters L1–L2', '3 lifts, 2 stair cores'],
+    },
+  ),
+  info(
+    { id: 'B3', name: 'Building 3', use: 'Civic Hall', x: 284, y: 40, w: 62, d: 72, h: 26, zone: 'Zone B' },
+    {
+      levels: 3,
+      levelHeightM: 8,
+      occupancy: 1200,
+      yearBuilt: 1998,
+      structure: 'Steel long-span roof on concrete frame',
+      assets: ['Auditorium 800 seats', 'Fire alarm panel, foyer', 'Sprinklered'],
+    },
+  ),
+  info(
+    { id: 'B4', name: 'Building 4', use: 'Operations', x: 300, y: 128, w: 74, d: 58, h: 24, zone: 'Zone B' },
+    { occupancy: 260, yearBuilt: 2012, structure: 'Reinforced concrete frame', assets: ['Security control room L2', 'Backup generator, roof', 'Vehicle bay, east side'] },
+  ),
+  info(
+    { id: 'B5', name: 'Building 5', use: 'Logistics', x: 78, y: 140, w: 84, d: 60, h: 18, zone: 'Zone A' },
+    {
+      levels: 2,
+      levelHeightM: 7.5,
+      occupancy: 80,
+      yearBuilt: 2004,
+      structure: 'Steel portal frame, metal cladding',
+      assets: ['Loading dock, south side', 'Fuel store (diesel 2000 L), west', 'Forklift charging area'],
+    },
+  ),
+];
+
+export type SiteVariant = 'amata' | 'civic';
+
+/** Positions that differ between the demo sites (devices, the seeded alert, camera aims). */
+export interface SiteLayout {
+  ugv04: { x: number; y: number };
+  cctv05: { x: number; y: number };
+  cctv03: { x: number; y: number };
+  inc023: { x: number; y: number };
+  cctv01Target: { x: number; y: number };
+  cctv03Target: { x: number; y: number };
+}
+
+export const SITE_VARIANTS: Record<SiteVariant, { name: string; geo: GeoAnchor; buildings: Building[]; layout: SiteLayout }> = {
+  amata: {
+    name: 'Demo Plant · Amata City Chonburi',
+    geo: { originLat: 13.4367374, originLon: 101.0275798, rotationDeg: -28.5 },
+    buildings: BUILDINGS_AMATA,
+    layout: {
+      ugv04: { x: 69, y: 158 },
+      cctv05: { x: 178, y: 185 },
+      cctv03: { x: 146, y: 214 },
+      inc023: { x: 146, y: 140 },
+      cctv01Target: { x: 285, y: 222 },
+      cctv03Target: { x: 146, y: 120 },
+    },
+  },
+  civic: {
+    name: 'Civic Center',
+    geo: { originLat: 13.7563, originLon: 100.5018, rotationDeg: 0 },
+    buildings: BUILDINGS_CIVIC,
+    layout: {
+      ugv04: { x: 87, y: 180 },
+      cctv05: { x: 219, y: 86 },
+      cctv03: { x: 36, y: 118 },
+      inc023: { x: 170, y: 120 },
+      cctv01Target: { x: 214, y: 128 },
+      cctv03Target: { x: 120, y: 120 },
+    },
+  },
+};
+
+/** Buildings of the current demo site (contents swapped by applySiteVariant). */
+export const BUILDINGS: Building[] = [...BUILDINGS_AMATA];
+export const LAYOUT: SiteLayout = structuredClone(SITE_VARIANTS.amata.layout);
+export let siteVariant: SiteVariant = 'amata';
+
+/** Switch the site-level data (call before anything is built from it; see variant.ts). */
+export function setSiteData(v: SiteVariant) {
+  const d = SITE_VARIANTS[v];
+  siteVariant = v;
+  SITE.name = d.name;
+  Object.assign(SITE.geo, d.geo);
+  BUILDINGS.splice(0, BUILDINGS.length, ...d.buildings);
+  Object.assign(LAYOUT, structuredClone(d.layout));
+}
 
 /** Nearest entrance of a building to a point (for pointing cameras and routing responders). */
 export function nearestEntrance(b: Building, p: { x: number; y: number }) {

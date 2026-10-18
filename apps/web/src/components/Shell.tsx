@@ -32,7 +32,8 @@ import {
 } from 'lucide-react';
 import { can, currentUser, fmtDate, fmtTime, freshness, isReady } from '../domain/policy';
 import { isTerminal, missionForIncident } from '../domain/reducer';
-import { SITE } from '@13store/shared';
+import { SITE, siteVariant, type SiteVariant } from '@13store/shared';
+import { chooseSiteVariant } from '../siteOverride';
 import type { AppState, Incident, View } from '@13store/shared';
 import { useStore } from '../store';
 import { LangToggle, ago, roleLabel, useLang, useT, type T } from '../i18n';
@@ -74,9 +75,7 @@ export function TopBar() {
             ))}
           </div>
         )}
-        <button className="site-select" title={t('Only sites you are authorised for are listed')}>
-          <MapPin size={16} /> {SITE.name} <ChevronDown size={16} />
-        </button>
+        <SitePicker />
         {s.replay.active ? (
           <span className="mode mode-replay">
             <History size={16} /> REPLAY · {fmtTime(s.replay.at, true)}
@@ -594,4 +593,44 @@ function missionStatusText(status: string | undefined, t: T) {
     failed: 'Failed',
   };
   return t(map[status ?? ''] ?? status ?? '');
+}
+
+/** Site picker. In the offline demo it switches between the two demo sites (reloads the page). */
+function SitePicker() {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const sites: { id: SiteVariant; name: string; note: string }[] = [
+    { id: 'civic', name: 'Civic Center', note: 'Original demo · drawn 3D twin' },
+    { id: 'amata', name: 'Demo Plant · Amata City Chonburi', note: 'Industrial estate · real 3D imagery' },
+  ];
+  if (!__STANDALONE__)
+    return (
+      <button className="site-select" title={t('Only sites you are authorised for are listed')}>
+        <MapPin size={16} /> {SITE.name} <ChevronDown size={16} />
+      </button>
+    );
+  return (
+    <div className="site-pick">
+      <button className="site-select" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <MapPin size={16} /> {t(SITE.name)} <ChevronDown size={16} />
+      </button>
+      {open && (
+        <ul className="site-pop" role="listbox" aria-label={t('Demo site')}>
+          {sites.map((x) => (
+            <li key={x.id}>
+              <button
+                role="option"
+                aria-selected={x.id === siteVariant}
+                className={x.id === siteVariant ? 'on' : ''}
+                onClick={() => (x.id === siteVariant ? setOpen(false) : chooseSiteVariant(x.id))}
+              >
+                <b>{t(x.name)}</b>
+                <small>{t(x.note)}</small>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }

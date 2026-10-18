@@ -3908,3 +3908,43 @@ a.latlon:hover {
   pointer-events: none;
   z-index: 2;
 }
+
+/* demo site picker (offline demo) */
+.site-pick {
+  position: relative;
+}
+.site-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  min-width: 300px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.site-pop button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.site-pop button:hover,
+.site-pop button.on {
+  background: var(--line);
+}
+.site-pop small {
+  color: var(--text-2);
+}

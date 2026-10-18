@@ -301,13 +301,15 @@ export function makeWarehouseFloor(b: Building, level = 1): FloorPlan {
 const plans = new Map<string, FloorPlan>();
 /** Demo floor plans: Building 2 (levels 1–2), Building 4 (level 1) and the Building 5 warehouse
  *  (level 1). A real site imports its own. */
-export const FLOOR_PLANS: FloorPlan[] = [
-  makeOfficeFloor(BUILDINGS.find((b) => b.id === 'B2')!, 1),
-  makeOfficeFloor(BUILDINGS.find((b) => b.id === 'B2')!, 2),
-  makeOfficeFloor(BUILDINGS.find((b) => b.id === 'B4')!, 1),
-  makeWarehouseFloor(BUILDINGS.find((b) => b.id === 'B5')!, 1),
-];
-for (const p of FLOOR_PLANS) plans.set(`${p.buildingId}:${p.level}`, p);
+export const FLOOR_PLANS: FloorPlan[] = [];
+/** (Re)build the demo floor plans from the current buildings (after a site switch too). */
+export function rebuildFloorPlans() {
+  const b = (id: string) => BUILDINGS.find((x) => x.id === id)!;
+  FLOOR_PLANS.splice(0, FLOOR_PLANS.length, makeOfficeFloor(b('B2'), 1), makeOfficeFloor(b('B2'), 2), makeOfficeFloor(b('B4'), 1), makeWarehouseFloor(b('B5'), 1));
+  plans.clear();
+  for (const p of FLOOR_PLANS) plans.set(`${p.buildingId}:${p.level}`, p);
+}
+rebuildFloorPlans();
 
 export function floorPlan(buildingId: string | undefined, level: number | undefined) {
   return buildingId === undefined || level === undefined ? undefined : plans.get(`${buildingId}:${level}`);

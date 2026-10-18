@@ -75,6 +75,50 @@ export const DEFAULT_GEOFENCES: Geofence[] = [
   },
 ];
 
+/** Geofence shapes per demo site (applied by applySiteVariant). */
+export const GEOFENCE_VARIANTS: Record<'amata' | 'civic', Record<string, { poly: Point[]; name: string; reason: string }>> = {
+  amata: Object.fromEntries(DEFAULT_GEOFENCES.map((g) => [g.id, { poly: g.poly.map((p) => ({ ...p })), name: g.name, reason: g.reason ?? '' }])),
+  civic: {
+    'GF-FUEL': {
+      name: 'Fuel store (diesel), Building 5 west',
+      reason: 'Diesel store: no vehicles or rotors within 8 m.',
+      poly: [
+        { x: 62, y: 150 },
+        { x: 84, y: 150 },
+        { x: 84, y: 192 },
+        { x: 62, y: 192 },
+      ],
+    },
+    'GF-B2-ROOF': {
+      name: 'Building 2 roof, no overflight',
+      reason: 'Public counters below: no overflight during opening hours.',
+      poly: [
+        { x: 170, y: 18 },
+        { x: 268, y: 18 },
+        { x: 268, y: 96 },
+        { x: 170, y: 96 },
+      ],
+    },
+    'GF-PLAZA': {
+      name: 'Plaza when occupied',
+      reason: 'Pedestrian area: walking pace, announce before entering.',
+      poly: [
+        { x: 186, y: 98 },
+        { x: 242, y: 98 },
+        { x: 242, y: 154 },
+        { x: 186, y: 154 },
+      ],
+    },
+  },
+};
+
+export function setGeofenceData(v: 'amata' | 'civic') {
+  for (const g of DEFAULT_GEOFENCES) {
+    const d = GEOFENCE_VARIANTS[v][g.id];
+    if (d) Object.assign(g, { poly: d.poly.map((p) => ({ ...p })), name: d.name, reason: d.reason });
+  }
+}
+
 export function insidePoly(p: Point, poly: Point[]) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {

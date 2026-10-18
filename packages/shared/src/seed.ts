@@ -1,5 +1,6 @@
 import type { Device, Evidence, Incident, TimelineEvent, User } from './types';
 import { catalogCapabilities } from './catalog';
+import { LAYOUT } from './site';
 
 const MIN = 60_000;
 
@@ -79,7 +80,7 @@ export function seedDevices(now: number): Record<string, Device> {
       commands: [],
       limitations: 'Simulated stream.',
       zone: 'Zone A',
-      pos: { x: 146, y: 214 },
+      pos: { ...LAYOUT.cctv03 },
       accuracyM: 1,
       lastSeen: now,
       rateMs: 1000,
@@ -230,7 +231,7 @@ export function seedDevices(now: number): Record<string, Device> {
       limitations:
         'Indoor only: patrols the Building 5 warehouse aisles, positioned by LiDAR SLAM on the floor map, Wi-Fi link. Speed limited to 1.5 m/s. Keeps out of the fuel store and forklift charging bay. No stairs or lifts.',
       zone: 'Zone A',
-      pos: { x: 69, y: 158 },
+      pos: { ...LAYOUT.ugv04 },
       heading: 0,
       indoor: { buildingId: 'B5', level: 1, positioning: 'slam' },
       accuracyM: 0.3,
@@ -258,7 +259,7 @@ export function seedDevices(now: number): Record<string, Device> {
       commands: [],
       limitations: 'Simulated indoor stream of the lobby and corridor.',
       zone: 'Zone A',
-      pos: { x: 178, y: 185 },
+      pos: { ...LAYOUT.cctv05 },
       mount: { bearingDeg: 0, heightM: 3.2, fovDeg: 80, rangeM: 40 },
       indoor: { buildingId: 'B2', level: 1, positioning: 'fixed' },
       accuracyM: 0.5,
@@ -325,7 +326,7 @@ export function seedIncidents(now: number): Incident[] {
       status: 'confirmed',
       zone: 'Zone A',
       place: 'West walkway',
-      pos: { x: 146, y: 140 },
+      pos: { ...LAYOUT.inc023 },
       source: 'Field responder report',
       createdAt: now - 8 * MIN,
       owner: 'Field team 2',

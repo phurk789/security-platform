@@ -2,11 +2,13 @@
 // the drawn twin and the real-imagery view. Kept apart from realTiles.ts so builds without a key
 // (or viewers who keep the drawn view) never load the tiles library.
 import { useSyncExternalStore } from 'react';
+import { siteVariant } from '@13store/shared';
 
 export const GOOGLE_KEY: string = ((import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ?? '').trim();
 
+/** Real imagery needs a key and a site on a real place (the civic demo is drawn only). */
 export function realTilesAvailable() {
-  return !!GOOGLE_KEY;
+  return !!GOOGLE_KEY && siteVariant === 'amata';
 }
 
 /** 'drawn' = the original stylised twin; 'real' = Google photorealistic tiles of the site. */
