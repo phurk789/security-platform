@@ -353,6 +353,7 @@ export class TwinWorld {
     (grid.material as THREE.Material).opacity = 0.5;
     grid.position.y = 0.02;
     this.hud.add(grid);
+    this.hudGrid = grid;
     const half = { w: SITE.width / 2, h: SITE.height / 2 };
     const perim = new THREE.LineLoop(
       new THREE.BufferGeometry().setFromPoints([
@@ -510,6 +511,7 @@ export class TwinWorld {
       );
       edges.position.set(p.x, b.h / 2, p.z);
       this.hud.add(overlay(edges));
+      this.hudEdges.set(b.id, edges);
       // BIM overlay, shown when the building is selected: level outlines and entrance markers
       const floors = new THREE.Group();
       const lineMat = new THREE.LineBasicMaterial({ color: 0x38e1ff, transparent: true, opacity: 0.85, toneMapped: false });
@@ -766,6 +768,9 @@ export class TwinWorld {
     this.scenery = s.children.filter((o) => !keep.has(o) && !(o as THREE.Light).isLight);
   }
 
+  private hudGrid: THREE.Object3D | null = null;
+  /** HUD wire outline of each drawn building. Over real tiles only the selected one shows. */
+  private hudEdges = new Map<string, THREE.Object3D>();
   /** Objects that model the real place; see setRealTiles. */
   private scenery: THREE.Object3D[] = [];
   /** Photorealistic 3D tiles of the real site are shown in place of the drawn scenery. */
@@ -774,6 +779,7 @@ export class TwinWorld {
     if (on === this.realTiles) return;
     this.realTiles = on;
     for (const o of this.scenery) o.visible = !on;
+    if (this.hudGrid) this.hudGrid.visible = !on;
     this.layersDirty = true;
   }
   private layersDirty = false;
@@ -1282,6 +1288,8 @@ export class TwinWorld {
     for (const [id, v] of this.buildingVis) {
       const on = id === selB || id === iv?.buildingId;
       if (v.floors.visible !== on) v.floors.visible = v.highlight.visible = on;
+      const edge = this.hudEdges.get(id);
+      if (edge) edge.visible = !this.realTiles || on;
       const glow = this.buildingGlow.get(id);
       if (glow) {
         glow.visible = id === selB;
