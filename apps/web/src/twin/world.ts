@@ -1547,6 +1547,7 @@ export class TwinWorld {
       slab.receiveShadow = true;
       g.add(slab);
       for (const w of plan.walls) {
+        if (w.kind === 'rack') continue; // racks are drawn as shelving below
         const a = toWorld(w.a.x, w.a.y);
         const bb = toWorld(w.b.x, w.b.y);
         const len = Math.hypot(bb.x - a.x, bb.z - a.z);
@@ -1557,6 +1558,38 @@ export class TwinWorld {
         m.castShadow = true;
         m.receiveShadow = true;
         g.add(m);
+      }
+      // Pallet racking: orange uprights and beams with stacked goods on each level.
+      if (plan.racks?.length) {
+        const rackH = Math.min(plan.rackHeightM ?? 6, b.bim.levelHeightM - 0.5);
+        const frameMat = new THREE.MeshStandardMaterial({ color: '#e8761b', roughness: 0.6, metalness: 0.3 });
+        const goodsMat = new THREE.MeshStandardMaterial({ color: '#b08a5a', roughness: 0.9 });
+        const levels = Math.max(2, Math.round(rackH / 1.6));
+        for (const r of plan.racks) {
+          const xs = r.poly.map((p) => p.x);
+          const ys = r.poly.map((p) => p.y);
+          const w = Math.max(...xs) - Math.min(...xs);
+          const d = Math.max(...ys) - Math.min(...ys);
+          const cc = toWorld(Math.min(...xs) + w / 2, Math.min(...ys) + d / 2);
+          const rack = new THREE.Group();
+          rack.position.set(cc.x, y0, cc.z);
+          for (let i = 0; i < levels; i++) {
+            const y = (i * rackH) / levels;
+            const beam = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), frameMat);
+            beam.position.y = y + 0.12;
+            const goods = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, (rackH / levels) * 0.7, d * 0.96), goodsMat);
+            goods.position.y = y + 0.18 + (rackH / levels) * 0.35;
+            goods.castShadow = goods.receiveShadow = true;
+            rack.add(beam, goods);
+          }
+          for (const sx of [-1, 1])
+            for (let k = 0; k <= Math.ceil(d / 2.7); k++) {
+              const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, rackH, 0.1), frameMat);
+              post.position.set((sx * w) / 2, rackH / 2, -d / 2 + (k * d) / Math.ceil(d / 2.7));
+              rack.add(post);
+            }
+          g.add(rack);
+        }
       }
       const nogoMat = new THREE.MeshBasicMaterial({ color: 0xf87171, transparent: true, opacity: 0.25, depthWrite: false, toneMapped: false });
       for (const r of plan.noGo) {

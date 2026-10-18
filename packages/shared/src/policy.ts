@@ -212,15 +212,15 @@ export function indoorRouteChecks(d: Device, m: Mission): Check[] {
       leg < 0
         ? 'No leg crosses a wall'
         : leg === 0
-          ? 'The leg from the vehicle to checkpoint 1 crosses a wall'
-          : `The leg between checkpoints ${leg} and ${leg + 1} crosses a wall`,
+          ? 'The leg from the vehicle to checkpoint 1 crosses a wall or rack'
+          : `The leg between checkpoints ${leg} and ${leg + 1} crosses a wall or rack`,
   });
   const bad = cps.findIndex((p) => inNoGo(plan, p));
   out.push({
-    label: 'Avoids stairs and lifts',
+    label: 'Avoids no-go areas',
     ok: bad < 0,
     hard: true,
-    detail: bad < 0 ? 'No checkpoint on stairs or in a lift' : `Checkpoint ${bad + 1} is in ${inNoGo(plan, cps[bad])?.name}`,
+    detail: bad < 0 ? 'No checkpoint in a no-go area (stairs, lifts, fuel store, charging bay)' : `Checkpoint ${bad + 1} is in ${inNoGo(plan, cps[bad])?.name}`,
   });
   return out;
 }

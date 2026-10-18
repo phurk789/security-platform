@@ -208,7 +208,8 @@ function TelemetryTab({ d }: { d: Device }) {
                   floorPlan(d.indoor.buildingId, d.indoor.level) ?? { walls: [], rooms: [], doors: [], noGo: [], patrolRoute: [], buildingId: '', level: 0, name: '' },
                   d.pos,
                 );
-                return r ? ` · ${t(r.name.replace(/ \d+\.\d+$/, ''))}` : '';
+                const aisle = r?.name.match(/^Aisle (\w)$/)?.[1];
+                return r ? ` · ${aisle ? t('Aisle {x}', { x: aisle }) : t(r.name.replace(/ \d+\.\d+$/, ''))}` : '';
               })()}{' '}
               <button className="link" onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: d.indoor!.buildingId, level: d.indoor!.level } })}>
                 {t('Floor plan')}

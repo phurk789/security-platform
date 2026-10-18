@@ -114,9 +114,11 @@ function DeviceCallout({ d }: { d: Device }) {
         ? `STALE · ${age(ageMs(s, d))}`
         : m
           ? t('On mission {id}', { id: m.id })
-          : d.commands.length
-            ? t('Standby')
-            : t('Display only');
+          : s.sim?.[d.id]?.floorPatrol
+            ? t('On floor patrol')
+            : d.commands.length
+              ? t('Standby')
+              : t('Display only');
   const cat = d.catalogId ? VEHICLE_CATALOG[d.catalogId] : undefined;
   const rows: [string, React.ReactNode][] =
     d.kind === 'cctv'

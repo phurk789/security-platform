@@ -92,7 +92,13 @@ export interface CameraChoice {
  * The best fixed gimbal camera for a point: online, mounted, in range, able to turn there and
  * with a clear line of sight. Nearest wins. `busy` lists cameras an operator is using right now.
  */
-export function pickCamera(devices: Device[], target: Point, buildings: Building[], isOnline: (d: Device) => boolean, busy: (id: string) => boolean = () => false): CameraChoice | null {
+export function pickCamera(
+  devices: Device[],
+  target: Point,
+  buildings: Building[],
+  isOnline: (d: Device) => boolean,
+  busy: (id: string) => boolean = () => false,
+): CameraChoice | null {
   const out: CameraChoice[] = [];
   for (const d of devices) {
     if (d.kind !== 'cctv' || !d.capabilities.includes('gimbal') || !d.mount || !isOnline(d) || busy(d.id)) continue;

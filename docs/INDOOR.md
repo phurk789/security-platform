@@ -26,8 +26,10 @@ needed on the vehicle and the site before an indoor mission is more than a demo.
 - **Wall-aware missions.** For an indoor vehicle the constraint checks become: route inside the
   building, every checkpoint on the vehicle's floor, no leg through a wall, no checkpoint on
   stairs or in a lift. Approval is refused otherwise, exactly like the outdoor checks.
-- **Demo.** UGV-04 is a D50 inside Building 2, level 1, positioned by (simulated) LiDAR SLAM
-  without GNSS; CCTV-05 watches the lobby.
+- **Demo.** UGV-04 is a D50 patrolling the Building 5 warehouse (level 1: 12 rack rows, aisles A–K,
+  loading dock, fuel store and forklift charging as no-go areas) on a serpentine route through
+  every aisle, positioned by (simulated) LiDAR SLAM
+  without GNSS. CCTV-05 watches the Building 2 lobby.
 - **Adapters.**
   - `ros2-nav2` (new): talks to a ROS 2 vehicle through rosbridge — pose from AMCL, battery,
     missions as `NavigateThroughPoses`, pause / resume / stop by cancelling and re-sending goals.

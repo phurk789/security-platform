@@ -189,7 +189,7 @@ export function FleetCard({ d, video }: { d: Device; video: boolean }) {
   const known = f !== 'offline';
   const battery = d.battery ?? 0;
   const progress = m ? Math.min(1, m.nextCp / Math.max(1, m.checkpoints.length)) : 0;
-  const state = !known ? t('No data') : m ? statusText(m.status, t) : d.commands.length ? t('Standby') : t('Display only');
+  const state = !known ? t('No data') : m ? statusText(m.status, t) : s.sim?.[d.id]?.floorPatrol ? t('On floor patrol') : d.commands.length ? t('Standby') : t('Display only');
   const thumb = useVehicleThumb(d);
   return (
     <article className={`fleet-card f-${f}${sel ? ' sel' : ''}`} onClick={() => dispatch({ type: 'selectDevice', id: d.id })}>

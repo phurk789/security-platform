@@ -607,19 +607,31 @@ function FloorPlanLayer({ P, plan }: { P: Proj; plan?: FloorPlan }) {
     <g className="floorplan">
       {plan.rooms.map((r) => {
         const [cx, cy] = centre(r.poly);
-        const corridor = r.name === 'Corridor';
+        const corridor = r.name === 'Corridor' || /aisle/i.test(r.name);
+        const aisle = r.name.match(/^Aisle (\w)$/)?.[1];
         return (
           <g key={r.id}>
             <polygon points={pts(r.poly)} className={corridor ? 'fp-corr' : 'fp-room'} />
-            {!corridor && (
-              <text x={cx} y={cy} className="fp-label" textAnchor="middle">
-                {t(r.name.replace(/ \d+\.\d+$/, ''))}
-                {r.name.match(/ (\d+\.\d+)$/)?.[0] ?? ''}
+            {aisle ? (
+              <text x={cx} y={cy} className="fp-label aisle" textAnchor="middle">
+                {aisle}
               </text>
+            ) : (
+              !corridor && (
+                <text x={cx} y={cy} className="fp-label" textAnchor="middle">
+                  {t(r.name.replace(/ \d+\.\d+$/, ''))}
+                  {r.name.match(/ (\d+\.\d+)$/)?.[0] ?? ''}
+                </text>
+              )
             )}
           </g>
         );
       })}
+      {plan.racks?.map((r) => (
+        <polygon key={r.id} points={pts(r.poly)} className="fp-rack">
+          <title>{r.name}</title>
+        </polygon>
+      ))}
       {plan.noGo.map((r) => {
         const [cx, cy] = centre(r.poly);
         return (
@@ -632,6 +644,7 @@ function FloorPlanLayer({ P, plan }: { P: Proj; plan?: FloorPlan }) {
         );
       })}
       {plan.walls.map((w, i) => {
+        if (w.kind === 'rack') return null; // drawn as the rack itself
         const [x1, y1] = P(w.a.x, w.a.y);
         const [x2, y2] = P(w.b.x, w.b.y);
         return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} className={`fp-wall ${w.kind ?? 'interior'}`} />;

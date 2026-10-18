@@ -41,7 +41,7 @@ import {
 } from './policy';
 import { initialState } from './scenario';
 import type { AppState, Command, CommandStatus, CommandType, Detection, Incident, Layers, Device, Mission, Point, TimelineEvent, VehicleSim, View } from '@13store/shared';
-import { INDOOR_UGV_SPEED, pickPlaybook } from '@13store/shared';
+import { INDOOR_UGV_SPEED, floorPlan, pickPlaybook, routeCrossesWalls } from '@13store/shared';
 
 export type Msg =
   | { type: 'tick'; dt: number }
@@ -242,6 +242,54 @@ function overwatchTarget(s: AppState): Incident | undefined {
   return withMission ?? open.sort((a, b) => b.createdAt - a.createdAt)[0];
 }
 
+/** Quiet time after the last command before an indoor vehicle goes back to its own round, so an
+ *  operator's stop is confirmed and stays visible. */
+const FLOOR_PATROL_RESUME_MS = 20_000;
+
+/**
+ * Indoor patrol vehicles (capability `floor_patrol`) drive their floor's patrol route on a loop
+ * whenever no mission holds them: the warehouse robot keeps doing rounds between alerts. It
+ * rejoins the round at the nearest point it can reach without crossing a wall or rack.
+ */
+function floorPatrolStep(s: AppState, d: Device, v: VehicleSim) {
+  if (!d.indoor || !d.capabilities.includes('floor_patrol')) return;
+  const busy = s.missions.some((m) => m.deviceId === d.id && ['assigned', 'executing', 'paused'].includes(m.status));
+  const lastCmd = Math.max(-Infinity, ...s.commands.filter((c) => c.deviceId === d.id).map((c) => c.issuedAt));
+  const blocked = busy || s.linkCut[d.id] || v.failsafeAt !== undefined || (d.battery ?? 100) < 20 || s.now - lastCmd < FLOOR_PATROL_RESUME_MS;
+  if (blocked) {
+    // Stop the round (a mission's own route is never touched: starting one clears the flag).
+    if (v.floorPatrol) {
+      v.motion.intent = 'hold';
+      v.motion.route = null;
+    }
+    v.floorPatrol = false;
+    return;
+  }
+  const m = v.motion;
+  if (v.floorPatrol && m.route && !m.done) return;
+  const plan = floorPlan(d.indoor.buildingId, d.indoor.level);
+  const loop = plan?.patrolRoute;
+  if (!plan || !loop || loop.length < 2) return;
+  const ring = loop[0].x === loop.at(-1)!.x && loop[0].y === loop.at(-1)!.y ? loop.slice(0, -1) : loop;
+  const here = { x: m.x, y: m.y };
+  let start = -1;
+  let best = Infinity;
+  ring.forEach((p, i) => {
+    const dd = Math.hypot(p.x - here.x, p.y - here.y);
+    if (dd < best && routeCrossesWalls([here, p], plan) < 0) {
+      best = dd;
+      start = i;
+    }
+  });
+  if (start < 0) return; // nowhere reachable in a straight line: wait for an operator
+  m.route = [...ring.slice(start), ...ring.slice(0, start), ring[start]].map((p) => ({ ...p }));
+  m.nextCp = 0;
+  m.done = false;
+  m.intent = 'drive';
+  m.brake = 'normal';
+  v.floorPatrol = true;
+}
+
 function tick(s: AppState, dt: number) {
   s.now += dt;
   const sec = dt / 1000;
@@ -261,6 +309,7 @@ function tick(s: AppState, dt: number) {
       } else {
         v.linkLostAt = undefined;
       }
+      floorPatrolStep(s, d, v);
       stepMotion(v.motion, sec);
     } else if (d.kind === 'uav') {
       // Overwatch (simulated): the orbit moves over a verified incident and back to the patrol loop after.
@@ -384,6 +433,7 @@ function actuate(s: AppState, c: Command) {
   const d = s.devices[c.deviceId];
   const m = mission(s, c.missionId);
   if (!d || !m) return;
+  simFor(s, d).floorPatrol = false; // a command from the platform always takes over from the round
   const v = simFor(s, d).motion;
   switch (c.type) {
     case 'start':

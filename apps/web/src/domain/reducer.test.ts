@@ -250,7 +250,11 @@ describe('gimbal camera control (offline demo)', () => {
     expect(yaw).toBeGreaterThan(20);
     s = advance(s, 1000);
     expect(s.devices['CCTV-02'].gimbal!.yaw).toBe(yaw); // stopped means stopped
-    s = run(s, { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'zoom_to', level: 10 } }, { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'record' } });
+    s = run(
+      s,
+      { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'zoom_to', level: 10 } },
+      { type: 'cameraControl', deviceId: 'CCTV-02', action: { action: 'record' } },
+    );
     s = advance(s, 2000);
     expect(s.devices['CCTV-02'].gimbal).toMatchObject({ zoom: 10, recording: true });
     expect(s.audit.filter((a) => a.action === 'camera.control' && a.result === 'ok')).toHaveLength(4);

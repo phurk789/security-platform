@@ -1,4 +1,4 @@
-// UGV-04 (indoor, Building 2 level 1): planned on its floor, limited to walking pace, SLAM telemetry,
+// UGV-04 (indoor, Building 5 warehouse, level 1): planned on its floor, limited to walking pace, SLAM telemetry,
 // and refused outdoor patrol routes.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { INDOOR_UGV_SPEED, floorPlan, newMotion, planFor, rankUnits, readSensors, newSensors, seedDevices, stepMotion } from '@13store/shared';
@@ -10,8 +10,8 @@ describe('indoor planning', () => {
   it('refuses an alert outside its building with a clear reason, and goes straight to one on its floor', () => {
     const out = planFor(u4, { x: 335, y: 236 });
     expect(out.ok).toBe(false);
-    expect(!out.ok && out.reason).toMatch(/Indoor only.*Building 2.*outside the building/);
-    const plan = floorPlan('B2', 1)!;
+    expect(!out.ok && out.reason).toMatch(/Indoor only.*Building 5.*outside the building/);
+    const plan = floorPlan('B5', 1)!;
     const inside = planFor(u4, plan.patrolRoute[1]);
     expect(inside.ok).toBe(true);
     // Ranking keeps indoor units with their reason instead of an impossible outdoor route.
@@ -70,10 +70,10 @@ describe('indoor vehicle on the platform', () => {
     expect(outdoor.status).toBe(400);
     expect(JSON.stringify(outdoor.body)).toMatch(/indoor vehicle/);
     const ok = await nida.post('/patrols', {
-      name: 'B2 night round',
+      name: 'Warehouse night round',
       deviceId: 'UGV-04',
       operatorId: 'u-somchai',
-      route: floorPlan('B2', 1)!.patrolRoute,
+      route: floorPlan('B5', 1)!.patrolRoute,
       days: [1],
       times: ['22:00'],
     });

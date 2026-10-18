@@ -8,7 +8,7 @@ import type { Point } from './types';
 export interface Wall {
   a: Point;
   b: Point;
-  kind?: 'exterior' | 'interior' | 'glass';
+  kind?: 'exterior' | 'interior' | 'glass' | 'rack';
 }
 
 export interface Room {
@@ -34,6 +34,11 @@ export interface FloorPlan {
   noGo: Room[];
   /** A sensible patrol route on this floor (used as the default when planning a mission). */
   patrolRoute: Point[];
+  /** Pallet racking (warehouses): drawn as tall shelving; their outlines are also walls, so routes
+   *  stay in the aisles. */
+  racks?: Room[];
+  /** Height of the racking in metres (3D view). */
+  rackHeightM?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,7 +53,8 @@ export function segmentsIntersect(p1: Point, p2: Point, p3: Point, p4: Point) {
   const d3 = cross(p1, p2, p3);
   const d4 = cross(p1, p2, p4);
   if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
-  const on = (p: Point, q: Point, r: Point) => Math.min(p.x, r.x) - 1e-9 <= q.x && q.x <= Math.max(p.x, r.x) + 1e-9 && Math.min(p.y, r.y) - 1e-9 <= q.y && q.y <= Math.max(p.y, r.y) + 1e-9;
+  const on = (p: Point, q: Point, r: Point) =>
+    Math.min(p.x, r.x) - 1e-9 <= q.x && q.x <= Math.max(p.x, r.x) + 1e-9 && Math.min(p.y, r.y) - 1e-9 <= q.y && q.y <= Math.max(p.y, r.y) + 1e-9;
   return (d1 === 0 && on(p3, p1, p4)) || (d2 === 0 && on(p3, p2, p4)) || (d3 === 0 && on(p1, p3, p2)) || (d4 === 0 && on(p1, p4, p2));
 }
 
@@ -146,12 +152,24 @@ export function makeOfficeFloor(b: Building, level: number): FloorPlan {
   const stairs = rect(cx - corridorW / 2 - 5, north, 5, 7.6);
   const lift = rect(cx + corridorW / 2, north, 3.2, 7.6);
   noGo.push({ id: `${b.id}-L${level}-stairs`, name: 'Stairs', poly: stairs }, { id: `${b.id}-L${level}-lift`, name: 'Lift', poly: lift });
-  doors.push({ id: `${b.id}-L${level}-stairs`, at: { x: cx - corridorW / 2 - 2.5, y: corridorN }, kind: 'stairs' }, { id: `${b.id}-L${level}-lift`, at: { x: cx + corridorW / 2 + 1.6, y: corridorN }, kind: 'lift' });
-  walls.push({ a: { x: cx - corridorW / 2 - 5, y: north }, b: { x: cx - corridorW / 2 - 5, y: corridorN } }, { a: { x: cx + corridorW / 2 + 3.2, y: north }, b: { x: cx + corridorW / 2 + 3.2, y: corridorN } });
-  walls.push(...wallsWithGaps({ x: cx - corridorW / 2 - 5, y: corridorN }, { x: cx + corridorW / 2 + 3.2, y: corridorN }, [{ x: cx - corridorW / 2 - 2.5, y: corridorN }, { x: cx + corridorW / 2 + 1.6, y: corridorN }]));
+  doors.push(
+    { id: `${b.id}-L${level}-stairs`, at: { x: cx - corridorW / 2 - 2.5, y: corridorN }, kind: 'stairs' },
+    { id: `${b.id}-L${level}-lift`, at: { x: cx + corridorW / 2 + 1.6, y: corridorN }, kind: 'lift' },
+  );
+  walls.push(
+    { a: { x: cx - corridorW / 2 - 5, y: north }, b: { x: cx - corridorW / 2 - 5, y: corridorN } },
+    { a: { x: cx + corridorW / 2 + 3.2, y: north }, b: { x: cx + corridorW / 2 + 3.2, y: corridorN } },
+  );
+  walls.push(
+    ...wallsWithGaps({ x: cx - corridorW / 2 - 5, y: corridorN }, { x: cx + corridorW / 2 + 3.2, y: corridorN }, [
+      { x: cx - corridorW / 2 - 2.5, y: corridorN },
+      { x: cx + corridorW / 2 + 1.6, y: corridorN },
+    ]),
+  );
   // rooms either side of the corridor
   const roomLen = 9;
-  const uses = level === 1 ? ['Reception', 'Security office', 'Meeting room', 'Archive', 'Post room', 'Facilities'] : ['Open office', 'Meeting room', 'Office', 'Store', 'Kitchen', 'Office'];
+  const uses =
+    level === 1 ? ['Reception', 'Security office', 'Meeting room', 'Archive', 'Post room', 'Facilities'] : ['Open office', 'Meeting room', 'Office', 'Store', 'Kitchen', 'Office'];
   let n = 0;
   for (const side of [-1, 1] as const) {
     const roomX = side < 0 ? west : cx + corridorW / 2;
@@ -169,16 +187,125 @@ export function makeOfficeFloor(b: Building, level: number): FloorPlan {
     }
     walls.push(...wallsWithGaps({ x: corrX, y: corridorN }, { x: corrX, y: corridorS }, doorsOnSide));
   }
-  const patrolRoute: Point[] = level === 1 ? [{ x: cx, y: south - 6 }, { x: cx, y: corridorS - 2 }, { x: cx, y: corridorN + 3 }, { x: cx, y: south - 6 }] : [{ x: cx, y: corridorS - 2 }, { x: cx, y: corridorN + 3 }, { x: cx, y: corridorS - 2 }];
-  return { buildingId: b.id, level, name: `Level ${level}`, walls, rooms, doors, noGo, patrolRoute: patrolRoute.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })) };
+  const patrolRoute: Point[] =
+    level === 1
+      ? [
+          { x: cx, y: south - 6 },
+          { x: cx, y: corridorS - 2 },
+          { x: cx, y: corridorN + 3 },
+          { x: cx, y: south - 6 },
+        ]
+      : [
+          { x: cx, y: corridorS - 2 },
+          { x: cx, y: corridorN + 3 },
+          { x: cx, y: corridorS - 2 },
+        ];
+  return {
+    buildingId: b.id,
+    level,
+    name: `Level ${level}`,
+    walls,
+    rooms,
+    doors,
+    noGo,
+    patrolRoute: patrolRoute.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })),
+  };
+}
+
+/**
+ * Warehouse / storage floor: one open hall with rows of double-sided pallet racking running
+ * north–south, a cross aisle at each end, a goods-in/out staging area behind the loading dock
+ * (roller shutters on the south face), a dispatch office in the south-west corner, the fuel store
+ * (west) and the forklift charging bay (north-east) as no-go areas. The patrol is a serpentine
+ * through every aisle, so the robot's camera looks down each rack face once per round.
+ */
+export function makeWarehouseFloor(b: Building, level = 1): FloorPlan {
+  const north = b.y + 0.3;
+  const south = b.y + b.d - 0.3;
+  const west = b.x + 0.3;
+  const east = b.x + b.w - 0.3;
+  const id = (s: string) => `${b.id}-L${level}-${s}`;
+  const walls: Wall[] = [];
+  const rooms: Room[] = [];
+  const doors: Door[] = [];
+  const noGo: Room[] = [];
+  const racks: Room[] = [];
+  const rackD = 2.4; // back-to-back pallet racking
+  const aisleW = 3.4; // narrow aisle for a reach truck; the robot drives the centre line
+  const pitch = rackD + aisleW;
+  const crossN = north + 9.7; // north cross aisle (centre line)
+  const crossS = south - 19.7; // south cross aisle, in front of the staging area
+  const rackN = crossN + 2;
+  const rackS = crossS - 2;
+  const rackW0 = west + 12.7; // west main aisle beside the fuel store and office
+  const nRows = Math.floor((east - 4.5 - rackW0 + aisleW) / pitch);
+  // exterior: 4 dock shutters + a personnel door on the south face, fire exit on the north face
+  const officeE = west + 13.7;
+  const docks = [0, 1, 2, 3].map((i) => ({ x: officeE + 10 + i * ((east - officeE - 16) / 3), y: south }));
+  const staff = { x: officeE + 3, y: south };
+  const fire = { x: (west + east) / 2, y: north };
+  walls.push(...wallsWithGaps({ x: west, y: north }, { x: east, y: north }, level === 1 ? [fire] : [], 1.3, 'exterior'));
+  walls.push(...wallsWithGaps({ x: east, y: north }, { x: east, y: south }, [], 1.3, 'exterior'));
+  walls.push(...wallsWithGaps({ x: east, y: south }, { x: west, y: south }, level === 1 ? docks : [], 4, 'exterior'));
+  if (level === 1) walls.push(...wallsWithGaps({ x: officeE + 6, y: south }, { x: officeE, y: south }, [staff], 1.2, 'exterior'));
+  walls.push(...wallsWithGaps({ x: west, y: south }, { x: west, y: north }, [], 1.3, 'exterior'));
+  docks.forEach((d, i) => doors.push({ id: id(`dock${i + 1}`), at: d, kind: 'door' }));
+  doors.push({ id: id('staff'), at: staff, kind: 'door' }, { id: id('fire'), at: fire, kind: 'fire' });
+  // dispatch office (south-west), door onto the staging area
+  const officeN = south - 13;
+  const officeDoor = { x: officeE, y: south - 6.5 };
+  rooms.push({ id: id('office'), name: 'Dispatch office', poly: rect(west, officeN, officeE - west, south - officeN) });
+  walls.push({ a: { x: west, y: officeN }, b: { x: officeE, y: officeN } }, ...wallsWithGaps({ x: officeE, y: officeN }, { x: officeE, y: south }, [officeDoor]));
+  doors.push({ id: id('office'), at: officeDoor, kind: 'door' });
+  // fuel store (west, fire-rated walls) and forklift charging (north-east): vehicles keep out
+  const fuel = rect(west, north + 12, 8, 12);
+  noGo.push({ id: id('fuel'), name: 'Fuel store', poly: fuel });
+  for (let i = 0; i < 4; i++) walls.push({ a: fuel[i], b: fuel[(i + 1) % 4] });
+  noGo.push({ id: id('charge'), name: 'Forklift charging', poly: rect(east - 12, north, 12, 7.5) });
+  // staging area behind the dock, the two cross aisles and the west main aisle
+  rooms.push({ id: id('staging'), name: 'Goods-in / goods-out staging', poly: rect(officeE, crossS + 2, east - officeE, south - crossS - 2) });
+  rooms.push({ id: id('crossN'), name: 'Cross aisle', poly: rect(rackW0, crossN - 2, east - rackW0, 4) });
+  rooms.push({ id: id('crossS'), name: 'Cross aisle', poly: rect(west + 8, crossS - 2, east - west - 8, 4) });
+  // racking rows and the aisles between them (Aisle A, B, …)
+  const aisles: number[] = [];
+  for (let k = 0; k < nRows; k++) {
+    const x0 = rackW0 + k * pitch;
+    const r = rect(x0, rackN, rackD, rackS - rackN);
+    racks.push({ id: id(`rack${k + 1}`), name: `Rack ${String(k + 1).padStart(2, '0')}`, poly: r });
+    for (let i = 0; i < 4; i++) walls.push({ a: r[i], b: r[(i + 1) % 4], kind: 'rack' });
+    if (k + 1 < nRows) {
+      const ax = x0 + rackD;
+      const letter = String.fromCharCode(65 + k);
+      rooms.push({ id: id(`aisle${letter}`), name: `Aisle ${letter}`, poly: rect(ax, rackN, aisleW, rackS - rackN) });
+      aisles.push(ax + aisleW / 2);
+    }
+  }
+  // the east aisle between the last rack and the outside wall closes the loop
+  const eastAisle = (rackW0 + (nRows - 1) * pitch + rackD + east) / 2;
+  rooms.push({ id: id('aisleE'), name: 'East aisle', poly: rect(rackW0 + (nRows - 1) * pitch + rackD, rackN, east - (rackW0 + (nRows - 1) * pitch + rackD), rackS - rackN) });
+  // serpentine patrol: up one aisle, down the next, back along the south cross aisle
+  const start = { x: rackW0 - 4, y: crossS };
+  const route: Point[] = [start];
+  aisles.forEach((x, i) => {
+    const [a, c] = i % 2 === 0 ? [crossS, crossN] : [crossN, crossS];
+    route.push({ x, y: a }, { x, y: c });
+  });
+  const endY = aisles.length % 2 === 1 ? crossN : crossS;
+  route.push({ x: eastAisle, y: endY });
+  if (endY === crossN) route.push({ x: eastAisle, y: crossS });
+  route.push(start);
+  const r1 = (p: Point) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 });
+  return { buildingId: b.id, level, name: `Level ${level} · warehouse`, walls, rooms, doors, noGo, racks, rackHeightM: 6, patrolRoute: route.map(r1) };
 }
 
 const plans = new Map<string, FloorPlan>();
-/** Demo floor plans: Building 2 (levels 1–2) and Building 4 (level 1). A real site imports its own. */
+/** Demo floor plans: Building 2 (levels 1–2), Building 4 (level 1) and the Building 5 warehouse
+ *  (level 1). A real site imports its own. */
 export const FLOOR_PLANS: FloorPlan[] = [
   makeOfficeFloor(BUILDINGS.find((b) => b.id === 'B2')!, 1),
   makeOfficeFloor(BUILDINGS.find((b) => b.id === 'B2')!, 2),
   makeOfficeFloor(BUILDINGS.find((b) => b.id === 'B4')!, 1),
+  makeWarehouseFloor(BUILDINGS.find((b) => b.id === 'B5')!, 1),
 ];
 for (const p of FLOOR_PLANS) plans.set(`${p.buildingId}:${p.level}`, p);
 

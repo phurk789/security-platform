@@ -2720,6 +2720,15 @@ html:lang(th) .meta dt {
 .floorplan .fp-label.nogo {
   fill: var(--red);
 }
+.floorplan .fp-label.aisle {
+  fill: var(--cyan);
+  font-size: 2.2px;
+}
+.floorplan .fp-rack {
+  fill: rgba(245, 158, 11, 0.32);
+  stroke: #f59e0b;
+  stroke-width: 0.3;
+}
 :root[data-theme='light'] .floorplan .fp-wall {
   stroke: #26384f;
 }

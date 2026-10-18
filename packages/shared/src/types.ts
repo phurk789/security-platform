@@ -319,6 +319,8 @@ export interface VehicleSim {
   orbit?: Point;
   /** UAV: incident it is on station over, once the orbit has arrived. */
   overwatchFor?: string;
+  /** Indoor UGV: currently driving its own floor patrol (no mission). */
+  floorPatrol?: boolean;
 }
 
 export interface Toast {
