@@ -47,7 +47,7 @@ and the API description at `/api/v1/openapi.json`.
 
 ## First run
 
-- **Demo:** seeds the Civic Center scenario, six demo users, simulated devices, a demo gateway
+- **Demo:** seeds the demo plant scenario (Amata City Chonburi), six demo users, simulated devices, a demo gateway
   key (`gw_demo_local_key`), a demo alert key (`sk_demo_alerts_local`) and the developer sandbox
   (`dev` / `devop`, keys `sk_sandbox_demo_key`, `gw_sandbox_demo_key`). These fixed values exist
   only in the demo environment.

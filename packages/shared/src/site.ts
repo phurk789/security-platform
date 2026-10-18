@@ -7,11 +7,12 @@ export const SCENARIO_START = Date.UTC(2026, 9, 16, 22, 27, 0);
 // ---------------------------------------------------------------------------
 
 /** WGS 84 position of the demo site's grid origin (north-west corner): the site centre is at
- *  13.9508348, 100.4622309 (Nonthaburi). Refine from a survey in Administration → Site & GIS. */
-export const DEMO_GEO: GeoAnchor = { originLat: 13.9521374, originLon: 100.4602871, rotationDeg: 0 };
+ *  13.4350, 101.0300 in Amata City Chonburi industrial estate (approximate). Fine-tune with
+ *  ?site=<lat>,<lon> in the web app, or from a survey in Administration → Site & GIS. */
+export const DEMO_GEO: GeoAnchor = { originLat: 13.4363026, originLon: 101.0280605, rotationDeg: 0 };
 
 export const SITE = {
-  name: 'Civic Center',
+  name: 'Demo Plant · Amata City Chonburi',
   org: '13STORE Demo Org',
   width: 420,
   height: 290,
@@ -97,24 +98,24 @@ export const BUILDINGS: Building[] = [
     },
   ),
   info(
-    { id: 'B2', name: 'Building 2', use: 'Public Services', x: 178, y: 26, w: 82, d: 62, h: 34, zone: 'Zone A' },
+    { id: 'B2', name: 'Building 2', use: 'Engineering & Offices', x: 178, y: 26, w: 82, d: 62, h: 34, zone: 'Zone A' },
     {
       occupancy: 900,
       yearBuilt: 2015,
       basementLevels: 1,
       structure: 'Reinforced concrete, glass façade',
-      assets: ['Fire alarm panel, security desk L1', 'Backup generator, basement', 'Public counters L1–L2', '3 lifts, 2 stair cores'],
+      assets: ['Fire alarm panel, security desk L1', 'Backup generator, basement', 'Engineering offices L1–L2', '3 lifts, 2 stair cores'],
     },
   ),
   info(
-    { id: 'B3', name: 'Building 3', use: 'Civic Hall', x: 284, y: 40, w: 62, d: 72, h: 26, zone: 'Zone B' },
+    { id: 'B3', name: 'Building 3', use: 'Production Hall', x: 284, y: 40, w: 62, d: 72, h: 26, zone: 'Zone B' },
     {
       levels: 3,
       levelHeightM: 8,
-      occupancy: 1200,
+      occupancy: 600,
       yearBuilt: 1998,
       structure: 'Steel long-span roof on concrete frame',
-      assets: ['Auditorium 800 seats', 'Fire alarm panel, foyer', 'Sprinklered'],
+      assets: ['Assembly lines A–C', 'Fire alarm panel, foyer', 'Sprinklered'],
     },
   ),
   info(
@@ -122,7 +123,7 @@ export const BUILDINGS: Building[] = [
     { occupancy: 260, yearBuilt: 2012, structure: 'Reinforced concrete frame', assets: ['Security control room L2', 'Backup generator, roof', 'Vehicle bay, east side'] },
   ),
   info(
-    { id: 'B5', name: 'Building 5', use: 'Logistics', x: 78, y: 140, w: 84, d: 60, h: 18, zone: 'Zone A' },
+    { id: 'B5', name: 'Building 5', use: 'Warehouse', x: 78, y: 140, w: 84, d: 60, h: 18, zone: 'Zone A' },
     {
       levels: 2,
       levelHeightM: 7.5,

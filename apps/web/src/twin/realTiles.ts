@@ -22,7 +22,7 @@ const DEG = Math.PI / 180;
 
 export function attachRealTiles(world: TwinWorld, renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): RealTiles | null {
   if (!GOOGLE_KEY) return null;
-  const geo = SITE.geo;
+  const geo = world.state?.geo ?? SITE.geo;
   const tiles = new TilesRenderer();
   tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: GOOGLE_KEY, autoRefreshToken: true }));
   tiles.registerPlugin(new ReorientationPlugin({ lat: geo.originLat * DEG, lon: geo.originLon * DEG, height: 0, recenter: true }));

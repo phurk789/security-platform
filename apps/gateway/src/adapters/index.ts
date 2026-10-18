@@ -17,7 +17,7 @@ export interface DefaultAdapterOptions {
   latency?: boolean;
 }
 
-/** The six seed devices of the Civic Center demo site, all simulated. */
+/** The seed devices of the demo site, all simulated. */
 export function defaultAdapters(opts: DefaultAdapterOptions = {}): Adapter[] {
   const offline = new Set(opts.offline ?? ['CCTV-04']);
   return Object.values(seedDevices(Date.now())).map((d) => {
