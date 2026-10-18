@@ -9,9 +9,12 @@ import { StandaloneProvider } from './store';
 import { Login } from './views/Login';
 import { LangProvider, tr } from './i18n';
 import './styles.css';
+import { installFavicon } from './components/Brand';
 import './light.css';
 
 type Phase = { k: 'checking' } | { k: 'login'; meta: Meta | null; error?: string } | { k: 'ready'; meta: Meta; user: SessionUser } | { k: 'standalone' };
+
+installFavicon();
 
 function Root() {
   const api = useMemo(() => new Api(), []);

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { BrandLogo } from '../components/Brand';
 import { KeyRound, LogIn, MonitorPlay, TriangleAlert } from 'lucide-react';
 import type { Meta } from '@13store/shared';
 import { ApiError } from '../api';
@@ -25,6 +26,9 @@ export function Login({
   return (
     <div className="login">
       <div className="login-card">
+        <div className="login-logo">
+          <BrandLogo height={110} />
+        </div>
         <div className="brand">
           <span className="logo">
             13<b>STORE</b>

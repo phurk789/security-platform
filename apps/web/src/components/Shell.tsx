@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { BrandMark } from './Brand';
 import {
   BadgeAlert,
   Bell,
@@ -59,6 +60,7 @@ export function TopBar() {
   return (
     <header className="topbar">
       <div className="brand">
+        <BrandMark />
         <span className="logo">
           13<b>STORE</b>
         </span>
