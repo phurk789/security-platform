@@ -6,9 +6,9 @@ export const SCENARIO_START = Date.UTC(2026, 9, 16, 22, 27, 0);
 // Site geometry (metres, local site grid; origin = north-west corner, +y = south)
 // ---------------------------------------------------------------------------
 
-/** WGS 84 position of the demo site's grid origin (north-west corner). Placeholder in central
- *  Bangkok; a real site gets its anchor from a survey (Administration → Site & GIS). */
-export const DEMO_GEO: GeoAnchor = { originLat: 13.7563, originLon: 100.5018, rotationDeg: 0 };
+/** WGS 84 position of the demo site's grid origin (north-west corner): the site centre is at
+ *  13.9508348, 100.4622309 (Nonthaburi). Refine from a survey in Administration → Site & GIS. */
+export const DEMO_GEO: GeoAnchor = { originLat: 13.9521374, originLon: 100.4602871, rotationDeg: 0 };
 
 export const SITE = {
   name: 'Civic Center',

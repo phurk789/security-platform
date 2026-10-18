@@ -52,7 +52,7 @@ const ROUTES: Op[] = [
     { type: 'FeatureCollection', features: [] },
   ],
   ['get', '/sites/{id}', 'Site record: name, geometry and WGS 84 anchor', 'Site'],
-  ['patch', '/sites/{id}/geo', 'Set the WGS 84 anchor of the site grid (admin, step-up)', 'Site', { originLat: 13.7563, originLon: 100.5018, rotationDeg: 0 }],
+  ['patch', '/sites/{id}/geo', 'Set the WGS 84 anchor of the site grid (admin, step-up)', 'Site', { originLat: 13.9521374, originLon: 100.4602871, rotationDeg: 0 }],
   ['get', '/sites/{id}/geojson', 'The site as a WGS 84 GeoJSON FeatureCollection (?layers=buildings,geofences,devices,incidents&download=1)', 'Site'],
   [
     'post',
