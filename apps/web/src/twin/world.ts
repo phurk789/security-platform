@@ -1226,7 +1226,15 @@ export class TwinWorld {
     if (this.skylineMat) this.skylineMat.emissiveIntensity = day ? 0 : 0.14;
     this.scene.environment = day ? this.envDay! : this.envNight!;
     this.scene.environmentIntensity = day ? 0.8 : 0.45;
-    for (const o of this.nightOnly) o.visible = !day;
+    for (const o of this.nightOnly) {
+      // Lights stay in the scene and only dim: adding or hiding a light changes every lit
+      // shader, and three.js would recompile them all on each day/night switch.
+      const l = o as THREE.Light;
+      if (l.isLight) {
+        l.userData.on ??= l.intensity;
+        l.intensity = day ? 0 : (l.userData.on as number);
+      } else o.visible = !day;
+    }
     this.exposure = day ? 0.95 : 1.35;
   }
 

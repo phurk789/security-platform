@@ -15,8 +15,13 @@ export function SceneSnapshot({ deviceId, label, refreshMs = 6000, className = '
     const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver((e) => (visible = e[0]?.isIntersecting ?? true)) : null;
     io?.observe(c);
     const draw = () => visible && document.visibilityState !== 'hidden' && snapshotInto(c, deviceId, { ir: night && deviceId.startsWith('CCTV'), day: !night });
-    // First frame once the world has had a tick; then refresh on the interval.
-    const t0 = setTimeout(draw, 400);
+    // First frame as soon as the shared renderer is ready (it builds its shaders in the
+    // background); then refresh on the interval.
+    let t0: ReturnType<typeof setTimeout> | undefined;
+    const first = () => {
+      if (!draw()) t0 = setTimeout(first, 700);
+    };
+    t0 = setTimeout(first, 400);
     const timer = setInterval(draw, refreshMs);
     return () => {
       clearTimeout(t0);

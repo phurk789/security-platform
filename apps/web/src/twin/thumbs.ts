@@ -68,34 +68,80 @@ function render(key: string): string | null {
   st.renderer.render(st.scene, st.cam);
   const url = st.canvas.toDataURL('image/png');
   st.scene.remove(root);
-  root.traverse((o) => {
-    const m = o as THREE.Mesh;
-    m.geometry?.dispose?.();
-    const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
-    for (const mt of mats) (mt as THREE.Material).dispose();
-  });
+  // Free the geometry but keep materials: disposing them would throw away their compiled
+  // shaders and every next model would compile them again (seconds each on slow GPUs).
+  root.traverse((o) => (o as THREE.Mesh).geometry?.dispose?.());
   return url;
+}
+
+const STORE = 'ps-thumb-v1:';
+const queue: (() => void)[] = [];
+let pumping = false;
+
+/** Render queued thumbnails one at a time, only once the twin itself is on screen and the
+ *  browser is idle, so they never compete with the first paint. */
+function pump() {
+  if (pumping) return;
+  pumping = true;
+  const step = () => {
+    const job = queue.shift();
+    if (!job) {
+      pumping = false;
+      return;
+    }
+    job();
+    later(step, 120);
+  };
+  const t0 = performance.now();
+  const wait = () => {
+    const twinUp = !document.querySelector('.t3-host') || document.querySelector('.t3-ready');
+    if (twinUp || performance.now() - t0 > 15000) later(step, 400);
+    else setTimeout(wait, 500);
+  };
+  wait();
+}
+
+function later(fn: () => void, ms: number) {
+  const ric = (window as unknown as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
+  setTimeout(() => (ric ? ric(fn, { timeout: 2000 }) : fn()), ms);
+}
+
+function readStored(key: string) {
+  try {
+    return localStorage.getItem(STORE + key);
+  } catch {
+    return null;
+  }
 }
 
 /** Data URL of a rendered thumbnail for a vehicle kind / catalogue model, or null when unavailable. */
 export function vehicleThumb(kind: 'ugv' | 'uav', model?: string, payload = false): Promise<string | null> {
   const key = `${kind}|${model ?? ''}|${payload ? 1 : 0}`;
-  const hit = cache.get(key);
-  if (hit) return Promise.resolve(hit);
+  const hit = cache.get(key) ?? readStored(key);
+  if (hit) {
+    cache.set(key, hit);
+    return Promise.resolve(hit);
+  }
   let p = waiting.get(key);
   if (!p) {
     p = new Promise<string | null>((resolve) => {
-      // Render off the critical path (a short timer: idle time is rare while the twin animates).
-      const run = () => {
+      queue.push(() => {
         try {
           const url = render(key);
-          if (url) cache.set(key, url);
+          if (url) {
+            cache.set(key, url);
+            try {
+              localStorage.setItem(STORE + key, url);
+            } catch {
+              /* storage full or blocked: keep the in-memory copy */
+            }
+          }
           resolve(url);
         } catch {
           resolve(null);
         }
-      };
-      setTimeout(run, 80 + waiting.size * 40);
+      });
+      pump();
     });
     waiting.set(key, p);
   }

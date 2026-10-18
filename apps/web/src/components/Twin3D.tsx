@@ -73,10 +73,15 @@ export const Twin3D = forwardRef<
 
   useEffect(() => {
     const el = host.current!;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Shadows are recomputed a few times a second, not every frame (only vehicles move).
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
+    // PCF directly: PCFSoft was removed in three.js and silently switched to PCF after the first
+    // frame, which made every shader compile twice.
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.35;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -89,13 +94,19 @@ export const Twin3D = forwardRef<
     const camera = new THREE.PerspectiveCamera(36, 1, 1, 4000);
     camera.position.copy(HOME.pos);
     camera.layers.enableAll();
-    // High quality: MSAA render target, bloom for lamps and windows, colour output pass.
+    // Both quality levels draw through a composer (MSAA render target + colour output pass), so
+    // the scene's shaders are the same either way and switching quality never recompiles them.
+    // High adds bloom for lamps and windows and 4× MSAA; low uses 2× and no bloom.
     const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
     const composer = new EffectComposer(renderer, target);
     composer.addPass(new RenderPass(world.scene, camera));
     const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.32, 0.5, 0.9);
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
+    const lowTarget = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 2 });
+    const lowComposer = new EffectComposer(renderer, lowTarget);
+    lowComposer.addPass(new RenderPass(world.scene, camera));
+    lowComposer.addPass(new OutputPass());
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.copy(HOME.target);
     controls.enableDamping = true;
@@ -112,8 +123,10 @@ export const Twin3D = forwardRef<
       const w = el.clientWidth || 1;
       const h = el.clientHeight || 1;
       renderer.setSize(w, h, false);
-      composer.setPixelRatio(renderer.getPixelRatio());
-      composer.setSize(w, h);
+      for (const c of [composer, lowComposer]) {
+        c.setPixelRatio(renderer.getPixelRatio());
+        c.setSize(w, h);
+      }
       labels.setSize(w, h);
       camera.aspect = w / h;
       // Panels floating over the map (HUD layout) cover its edges: centre the scene in the gap
@@ -168,7 +181,33 @@ export const Twin3D = forwardRef<
 
     let lastHeading = 999;
     const lastView = { x: Infinity, z: Infinity, d: Infinity, az: Infinity };
+    // Build every shader in the background before the first frame, so the page stays
+    // responsive while the GPU driver compiles (it can take many seconds on a first visit).
+    let ready = false;
+    const markReady = () => {
+      ready = true;
+      el.classList.add('t3-ready');
+    };
+    try {
+      // Compile for the composer's render target: shaders differ between drawing to a target
+      // and drawing to the screen, and compiling the wrong set would double the work.
+      world.update(0); // create the vehicles (and their lights) first, so nothing recompiles later
+      renderer.setRenderTarget(target);
+      const job = renderer.compileAsync(world.scene, camera);
+      renderer.setRenderTarget(null);
+      job.then(markReady, markReady);
+    } catch {
+      renderer.setRenderTarget(null);
+      markReady();
+    }
+    let shadowAcc = 0;
     const unsub = subscribeFrame((dt) => {
+      if (!ready) return;
+      shadowAcc += dt;
+      if (shadowAcc > 0.2) {
+        shadowAcc = 0;
+        renderer.shadowMap.needsUpdate = true;
+      }
       if (feedFrame(dt, performance.now()))
         dispatchRef.current({ type: 'toast', tone: 'warn', text: 'Switched the 3D twin to low quality to keep the picture smooth on this computer.' });
       const c = ctl.current!;
@@ -195,7 +234,7 @@ export const Twin3D = forwardRef<
         world.setComposed(true);
         composer.render();
         world.setComposed(false);
-      } else renderer.render(world.scene, camera);
+      } else lowComposer.render();
       labels.render(world.scene, camera);
       // Keep the info callout inside the view: flip it to the left of the anchor on the right half
       // of the map, and below the anchor near the top edge.
@@ -232,6 +271,8 @@ export const Twin3D = forwardRef<
       renderer.domElement.removeEventListener('wheel', onWheel);
       composer.dispose();
       target.dispose();
+      lowComposer.dispose();
+      lowTarget.dispose();
       renderer.dispose();
       el.innerHTML = '';
       ctl.current = null;
