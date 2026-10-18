@@ -41,7 +41,7 @@ import {
 } from './policy';
 import { initialState } from './scenario';
 import type { AppState, Command, CommandStatus, CommandType, Detection, Incident, Layers, Device, Mission, Point, TimelineEvent, VehicleSim, View } from '@13store/shared';
-import { pickPlaybook } from '@13store/shared';
+import { INDOOR_UGV_SPEED, pickPlaybook } from '@13store/shared';
 
 export type Msg =
   | { type: 'tick'; dt: number }
@@ -187,7 +187,7 @@ export const isTerminal = (c: Command) => TERMINAL.includes(c.status);
 /** Vehicle-side simulation state, created on first use. */
 function simFor(s: AppState, d: Device): VehicleSim {
   s.sim ??= {};
-  return (s.sim[d.id] ??= { motion: newMotion(d.pos, d.heading ?? 90), sensors: newSensors(d.battery ?? 100, d.kind) });
+  return (s.sim[d.id] ??= { motion: newMotion(d.pos, d.heading ?? 90, d.indoor ? INDOOR_UGV_SPEED : undefined), sensors: newSensors(d.battery ?? 100, d.kind) });
 }
 
 /** Auto-aim leaves a camera alone this long after an operator used it (same as the server). */
@@ -344,7 +344,7 @@ function tick(s: AppState, dt: number) {
 
 /** Copy what the device would report (noisy fix, honest accuracy, link quality) onto the platform's record. */
 function report(s: AppState, d: Device, v: VehicleSim) {
-  const r = readSensors(v.sensors, { x: v.motion.x, y: v.motion.y }, d.kind);
+  const r = readSensors(v.sensors, { x: v.motion.x, y: v.motion.y }, d.kind, { slam: d.indoor?.positioning === 'slam' });
   d.pos = r.pos;
   d.accuracyM = r.accuracyM;
   d.battery = r.battery;

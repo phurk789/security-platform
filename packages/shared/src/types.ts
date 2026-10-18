@@ -290,6 +290,8 @@ export interface VehicleMotion {
   intent: 'drive' | 'hold';
   brake: 'normal' | 'hard';
   done: boolean;
+  /** Top speed for this vehicle (m/s). Default UGV_SPEED; indoor vehicles are limited lower. */
+  maxSpeed?: number;
 }
 
 /** Slowly drifting sensor state of a simulated device. */

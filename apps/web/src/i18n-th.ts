@@ -1104,4 +1104,7 @@ export const TH: Record<string, string> = {
   Analytics: 'ระบบวิเคราะห์ภาพ',
   '{n} detections': 'ตรวจจับ {n} ครั้ง',
   stopped: 'หยุดทำงาน',
+  '{id} works inside {b} only (level {n}, LiDAR SLAM) and cannot reach this alert. The floor patrol checks the building; send an outdoor vehicle to the alert.':
+    '{id} ทำงานได้เฉพาะภายใน{b} (ชั้น {n}, ระบุตำแหน่งด้วย LiDAR SLAM) และไปถึงจุดเกิดเหตุนี้ไม่ได้ เส้นทางลาดตระเวนชั้นใช้ตรวจภายในอาคาร ให้ส่งยานพาหนะกลางแจ้งไปที่จุดเกิดเหตุแทน',
+  'Watch inside {b} · level {n}': 'ดูภายใน{b} · ชั้น {n}',
 };

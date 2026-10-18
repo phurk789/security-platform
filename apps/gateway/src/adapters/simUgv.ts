@@ -13,6 +13,7 @@ import {
   type SensorState,
   type SrvCommand,
   type VehicleMotion,
+  INDOOR_UGV_SPEED,
 } from '@13store/shared';
 import { admitCommand } from '../sdk';
 import { SimDevice, type SimOptions } from './base';
@@ -64,7 +65,7 @@ export class SimUgv extends SimDevice {
 
   protected resetState() {
     this.clearFailsafeTimer();
-    this.motion = newMotion(this.seed.pos, this.seed.heading ?? 90);
+    this.motion = newMotion(this.seed.pos, this.seed.heading ?? 90, this.seed.indoor ? INDOOR_UGV_SPEED : undefined);
     this.sensors = newSensors(this.seed.battery ?? 100, 'ugv');
     this.mode = 'idle';
     this.failsafeAt = undefined;
@@ -107,7 +108,7 @@ export class SimUgv extends SimDevice {
   }
 
   protected sendTelemetry(now: number) {
-    const r = readSensors(this.sensors, this.pos, 'ugv');
+    const r = readSensors(this.sensors, this.pos, 'ugv', { slam: !!this.seed.indoor });
     this.publish({
       seq: ++this.seq,
       sourceTime: now,

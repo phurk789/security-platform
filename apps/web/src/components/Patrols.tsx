@@ -2,7 +2,7 @@
 // from the supervisor who set the schedule. Server-backed; the offline demo shows the explanation.
 import { useMemo, useState } from 'react';
 import { CalendarClock, Play, Plus, Trash2 } from 'lucide-react';
-import { ROUTES, fmtDate, fmtTime, planRoute, type Point } from '@13store/shared';
+import { ROUTES, floorPlan, fmtDate, fmtTime, planRoute, type Point } from '@13store/shared';
 import { can, currentUser, userName } from '../domain/policy';
 import { useStore } from '../store';
 import { useT } from '../i18n';
@@ -33,6 +33,8 @@ export function PatrolsCard() {
   // Loop: the preset route and back to where the vehicle is parked, planned around buildings and keep-out zones.
   const loop = useMemo(() => {
     if (!dev) return undefined;
+    // Indoor vehicles patrol their floor plan; outdoor presets would cross walls.
+    if (dev.indoor) return floorPlan(dev.indoor.buildingId, dev.indoor.level)?.patrolRoute;
     const preset = (ROUTES.find((r) => r.id === form.routeId) ?? ROUTES[0]).pts;
     const home = dev.stats?.dock ?? dev.pos;
     const back = planRoute(preset[preset.length - 1], home, { fences: s.geofences, kind: dev.kind as 'ugv' | 'uav' });
@@ -144,13 +146,19 @@ export function PatrolsCard() {
               </option>
             ))}
           </select>
-          <select value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value })} aria-label={t('Route')}>
-            {ROUTES.map((r) => (
-              <option key={r.id} value={r.id}>
-                {t(r.label)}
-              </option>
-            ))}
-          </select>
+          {dev?.indoor ? (
+            <select value="floor" disabled aria-label={t('Route')}>
+              <option value="floor">{t('Floor patrol · {b} level {n} · {k} checkpoints', { b: dev.indoor.buildingId, n: dev.indoor.level, k: loop?.length ?? 0 })}</option>
+            </select>
+          ) : (
+            <select value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value })} aria-label={t('Route')}>
+              {ROUTES.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {t(r.label)}
+                </option>
+              ))}
+            </select>
+          )}
           <div className="chips">
             {DAYS.map((d, i) => (
               <button

@@ -14,6 +14,8 @@ export const COMMAND_ACK_TIMEOUT_MS = 5_000;
 export const COMMAND_TTL_MS = 10_000;
 /** Demo vehicle speed in m/s (accelerated for a 3-minute booth run). */
 export const UGV_SPEED = 6;
+/** Indoor UGVs (corridors, people nearby): walking pace. */
+export const INDOOR_UGV_SPEED = 1.5;
 /** Sensitive actions need a password check within this window (risk-based auth, PRD §8). */
 export const STEP_UP_WINDOW_MS = 15 * 60_000;
 

@@ -23,8 +23,8 @@ export const SITE_ANTENNA: Point = { x: 219, y: 40 };
 
 const SUBSTEP = 0.05;
 
-export function newMotion(p: Point, heading = 90): VehicleMotion {
-  return { x: p.x, y: p.y, speed: 0, heading, route: null, nextCp: 0, intent: 'hold', brake: 'normal', done: false };
+export function newMotion(p: Point, heading = 90, maxSpeed?: number): VehicleMotion {
+  return { x: p.x, y: p.y, speed: 0, heading, route: null, nextCp: 0, intent: 'hold', brake: 'normal', done: false, maxSpeed };
 }
 
 /** Bearing from a to b in degrees, 0 = north (−y), clockwise. */
@@ -47,7 +47,8 @@ function cornerSpeed(v: VehicleMotion, route: Point[], i: number) {
   const a = bearing(prev, route[i]);
   const b = bearing(route[i], route[i + 1]);
   const turn = Math.abs(((b - a + 540) % 360) - 180); // 0..180
-  return Math.max(1.2, UGV_SPEED * (1 - turn / 130));
+  const top = v.maxSpeed ?? UGV_SPEED;
+  return Math.min(top, Math.max(1.2, top * (1 - turn / 130)));
 }
 
 /**
@@ -65,7 +66,7 @@ export function stepMotion(v: VehicleMotion, dt: number): { checkpoints: number[
       const target = route[v.nextCp];
       const d = dist(v, target);
       const vCorner = cornerSpeed(v, route, v.nextCp);
-      const vAllow = Math.max(UGV_APPROACH, Math.min(UGV_SPEED, Math.sqrt(vCorner * vCorner + 2 * UGV_BRAKE * d)));
+      const vAllow = Math.max(UGV_APPROACH, Math.min(v.maxSpeed ?? UGV_SPEED, Math.sqrt(vCorner * vCorner + 2 * UGV_BRAKE * d)));
       v.speed = v.speed < vAllow ? Math.min(vAllow, v.speed + UGV_ACCEL * h) : Math.max(vAllow, v.speed - UGV_BRAKE * h);
       if (d > 0.05) v.heading = turnToward(v.heading, bearing(v, target), UGV_YAW_RATE * h);
       const step = v.speed * h;
@@ -178,10 +179,22 @@ export interface SensorReading {
 }
 
 /** What the device would report right now at its true position. */
-export function readSensors(st: SensorState, truePos: Point, kind: DeviceKind): SensorReading {
+export function readSensors(st: SensorState, truePos: Point, kind: DeviceKind, opts: { slam?: boolean } = {}): SensorReading {
   const env = siteEnvironment(truePos);
   const signal = Math.round(clamp(env.signal + st.sig, 25, 99));
   if (kind === 'cctv') return { pos: { ...truePos }, accuracyM: 1, signal: Math.round(clamp(94 + st.sig * 0.5, 80, 99)) };
+  if (opts.slam) {
+    // Indoor LiDAR SLAM on the floor map: no satellites, ~0.3 m, Wi-Fi link.
+    const accuracyM = Math.round(clamp(0.3 + st.acc * 0.2, 0.2, 0.6) * 10) / 10;
+    return {
+      pos: { x: round2(truePos.x + gaussian() * accuracyM * 0.2), y: round2(truePos.y + gaussian() * accuracyM * 0.2) },
+      accuracyM,
+      signal: Math.round(clamp(88 + st.sig * 0.5, 60, 99)),
+      satellites: 0,
+      temperatureC: Math.round(st.tempC * 10) / 10,
+      battery: round2(st.battery),
+    };
+  }
   const open = kind === 'uav';
   const accuracyM = Math.round(clamp((open ? 1.5 : env.accuracy) + st.acc, open ? 1.2 : 0.8, open ? 4 : 2.5) * 10) / 10;
   const sigma = accuracyM * 0.22;

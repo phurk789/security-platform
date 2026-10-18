@@ -100,6 +100,8 @@ import {
   type GeoLayer,
   SITE,
   type SiteInfo,
+  planFor,
+  indoorRouteChecks,
 } from '@13store/shared';
 import { appendAudit } from './audit';
 import { createBackup, pruneBackups } from './backup';
@@ -2604,7 +2606,7 @@ export class Platform {
     const via = Array.isArray(input.via)
       ? input.via.filter((p) => typeof p?.x === 'number' && typeof p?.y === 'number' && Number.isFinite(p.x) && Number.isFinite(p.y)).slice(0, 10)
       : undefined;
-    const plan = planRoute(d.pos, to, { fences: this.geofencesOf(a.orgId, d.siteId), kind: d.kind as 'ugv' | 'uav', via });
+    const plan = d.indoor ? planFor(d, to) : planRoute(d.pos, to, { fences: this.geofencesOf(a.orgId, d.siteId), kind: d.kind as 'ugv' | 'uav', via });
     return { deviceId: d.id, from: d.pos, to, ...plan };
   }
 
@@ -2681,6 +2683,11 @@ export class Platform {
     const op = this.db.prepare('SELECT role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(operatorId, a.orgId) as { role: Role } | undefined;
     if (!op || op.role !== 'operator') fail(400, 'invalid', 'Choose an active operator.');
     const route = this.clearRoute(a.orgId, d, this.validRoute((input.route ?? prev?.route ?? []) as Point[]));
+    if (d.indoor) {
+      // Indoor vehicles patrol their floor: the route has to pass the same checks as an indoor mission.
+      const bad = indoorRouteChecks(d, { checkpoints: route } as Mission).filter((c) => c.hard && !c.ok);
+      if (bad.length) fail(400, 'invalid', `${d.id} is an indoor vehicle: ${bad.map((c) => `${c.label.toLowerCase()} (${c.detail})`).join('; ')}.`);
+    }
     const days = [...new Set(((input.days ?? prev?.days ?? []) as unknown[]).map(Number))].filter((x) => Number.isInteger(x) && x >= 0 && x <= 6).sort();
     if (!days.length) fail(400, 'invalid', 'Pick at least one weekday.');
     const times = [...new Set(((input.times ?? prev?.times ?? []) as unknown[]).map(String))].filter((t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)).sort();

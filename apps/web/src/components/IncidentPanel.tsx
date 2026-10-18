@@ -25,7 +25,7 @@ import {
 import { ageMs, can, currentUser, fmtTime, freshness, isReady, userName } from '../domain/policy';
 import { isTerminal, missionForIncident } from '../domain/reducer';
 import { constraintChecks } from '../domain/policy';
-import { DEFAULT_ROUTE, planRoute, rankUnits } from '@13store/shared';
+import { DEFAULT_ROUTE, planFor, rankUnits } from '@13store/shared';
 import type { AppState, CommandType, Device, Incident, Mission, Point } from '@13store/shared';
 import { LatLon } from './LatLon';
 import { useStore } from '../store';
@@ -441,8 +441,8 @@ function useUnitRanking(inc: Incident | undefined) {
   return useMemo(() => {
     const out = new Map<string, { etaS: number; lengthM: number; ok: boolean; reason?: string; route: Point[] }>();
     if (!inc) return out;
-    // Indoor vehicles follow floor plans, not the site planner: no outdoor ETA for them.
-    const units = Object.values(s.devices).filter((d) => d.kind !== 'cctv' && !d.indoor);
+    // Indoor vehicles are planned on their floor: they get an ETA only for alerts inside their building.
+    const units = Object.values(s.devices).filter((d) => d.kind !== 'cctv');
     for (const r of rankUnits(units, inc.pos, s.geofences))
       out.set(
         r.unit.id,
@@ -590,13 +590,13 @@ function PrepareMission({ inc }: { inc: Incident }) {
   const indoorPlan = picked?.indoor ? floorPlan(picked.indoor.buildingId, picked.indoor.level) : undefined;
   // Route planned around buildings and keep-out zones from where the vehicle is now to the alert.
   const autoPlan = useMemo(
-    () => (picked && !picked.indoor && (picked.kind === 'ugv' || picked.kind === 'uav') ? planRoute(picked.pos, inc.pos, { fences: s.geofences, kind: picked.kind }) : undefined),
+    () => (picked && (picked.kind === 'ugv' || picked.kind === 'uav') ? planFor(picked, inc.pos, { fences: s.geofences }) : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deviceId, inc.id, Math.round(picked?.pos.x ?? 0), Math.round(picked?.pos.y ?? 0), s.geofences],
   );
   useEffect(() => {
-    // Indoor vehicle: the floor patrol is the only sensible default; outdoor routes would cross walls.
-    if (indoorPlan && route !== 'indoor') setRoute('indoor');
+    // Indoor vehicle: straight to the alert when it is on its floor, else the floor patrol; outdoor routes would cross walls.
+    if (indoorPlan) setRoute(autoPlan?.ok ? 'auto' : 'indoor');
     else if (!indoorPlan && (route === 'indoor' || route === 'auto')) setRoute(autoPlan?.ok ? 'auto' : 'direct');
     else if (!indoorPlan && autoPlan?.ok && route === 'direct') setRoute('auto');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -649,13 +649,23 @@ function PrepareMission({ inc }: { inc: Incident }) {
                 })}
               </option>
             )}
-            {ROUTES.map((r) => (
-              <option key={r.id} value={r.id}>
-                {t(r.label)}
-              </option>
-            ))}
+            {!indoorPlan &&
+              ROUTES.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {t(r.label)}
+                </option>
+              ))}
           </select>
         </label>
+        {indoorPlan && !autoPlan?.ok && (
+          <p className="banner warn" style={{ margin: '4px 0 0' }}>
+            {t('{id} works inside {b} only (level {n}, LiDAR SLAM) and cannot reach this alert. The floor patrol checks the building; send an outdoor vehicle to the alert.', {
+              id: picked!.id,
+              b: t(BUILDINGS.find((x) => x.id === indoorPlan.buildingId)?.name ?? ''),
+              n: indoorPlan.level,
+            })}
+          </p>
+        )}
         <label className="field">
           <span>
             <UserCheck size={14} /> {t('Operator')}
@@ -863,6 +873,15 @@ export function LiveMission({ m }: { m: Mission }) {
           <Lock size={15} /> CONTROL HELD · {t('Controlled by')} <strong>{userName(s, holder)}</strong>
           {iHold && <span className="muted"> {t('(you)')}</span>}
         </div>
+        {d.indoor && (
+          <button
+            className="btn-secondary small"
+            style={{ marginTop: 6 }}
+            onClick={() => dispatch({ type: 'setIndoor', view: { buildingId: d.indoor!.buildingId, level: d.indoor!.level } })}
+          >
+            <MapPin size={14} /> {t('Watch inside {b} · level {n}', { b: t(BUILDINGS.find((x) => x.id === d.indoor!.buildingId)?.name ?? d.indoor.buildingId), n: d.indoor.level })}
+          </button>
+        )}
         <dl className="meta">
           <div>
             <dt>{t('Telemetry')}</dt>

@@ -2,7 +2,9 @@
 // vehicles off buildings, inside the fence (through the gate) and out of keep-out zones, plus
 // the geometry every client and the server share to judge a route or a live position.
 import { BUILDINGS, FENCE_Y, GATE, SITE, insideDemoArea } from './site';
-import { UGV_SPEED } from './policy';
+import { INDOOR_UGV_SPEED, UGV_SPEED } from './policy';
+import { floorPlan, routeCrossesWalls } from './indoor';
+import { atBuilding } from './site';
 import type { Point } from './types';
 
 // ---------------------------------------------------------------------------
@@ -350,8 +352,34 @@ export function planRoute(from: Point, to: Point, opts: PlanOptions = {}): Plan 
   return { ok: true, checkpoints: cps, lengthM, etaS: etaSeconds(lengthM, kind === 'uav' ? 9 : UGV_SPEED) };
 }
 
+export interface IndoorUnit {
+  pos: Point;
+  indoor?: { buildingId: string; level: number };
+}
+
+/**
+ * Route for an indoor vehicle: it stays on its building floor (LiDAR SLAM, no GNSS), so it can only
+ * reach places inside that building, along a leg that does not cross a wall.
+ */
+export function planIndoor(u: IndoorUnit & { indoor: { buildingId: string; level: number } }, to: Point): Plan {
+  const b = BUILDINGS.find((x) => x.id === u.indoor.buildingId);
+  const name = b?.name ?? u.indoor.buildingId;
+  if (!b || !atBuilding(b, to, 0)) return { ok: false, reason: `Indoor only: stays on ${name}, level ${u.indoor.level}. The alert is outside the building.` };
+  const plan = floorPlan(u.indoor.buildingId, u.indoor.level);
+  if (!plan) return { ok: false, reason: `No floor plan for ${name}, level ${u.indoor.level}.` };
+  if (routeCrossesWalls([u.pos, to], plan) >= 0) return { ok: false, reason: `Inside ${name}: no wall-free direct leg. Use the floor patrol.` };
+  const lengthM = Math.round(Math.hypot(to.x - u.pos.x, to.y - u.pos.y));
+  return { ok: true, checkpoints: [{ x: round1(to.x), y: round1(to.y) }], lengthM, etaS: etaSeconds(lengthM, INDOOR_UGV_SPEED) };
+}
+
+/** planRoute for any vehicle: indoor vehicles use their floor, others the site planner. */
+export function planFor(u: IndoorUnit & { kind: string }, to: Point, opts: PlanOptions = {}): Plan {
+  if (u.indoor) return planIndoor(u as IndoorUnit & { indoor: { buildingId: string; level: number } }, to);
+  return planRoute(u.pos, to, { ...opts, kind: u.kind as FencedKind });
+}
+
 /** Candidate vehicles for a place, ranked by estimated arrival. */
-export function rankUnits<T extends { id: string; kind: string; pos: Point; battery?: number }>(
+export function rankUnits<T extends { id: string; kind: string; pos: Point; battery?: number; indoor?: { buildingId: string; level: number } }>(
   units: T[],
   to: Point,
   fences: Geofence[],
@@ -359,7 +387,7 @@ export function rankUnits<T extends { id: string; kind: string; pos: Point; batt
   return units
     .filter((u) => u.kind === 'ugv' || u.kind === 'uav')
     .map((u) => {
-      const plan = planRoute(u.pos, to, { fences, kind: u.kind as FencedKind });
+      const plan = planFor(u, to, { fences });
       return { unit: u, plan, etaS: plan.ok ? plan.etaS : Infinity, lengthM: plan.ok ? plan.lengthM : Infinity };
     })
     .sort((a, b) => a.etaS - b.etaS);
