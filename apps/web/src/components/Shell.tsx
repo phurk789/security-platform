@@ -61,9 +61,6 @@ export function TopBar() {
     <header className="topbar">
       <div className="brand">
         <BrandMark />
-        <span className="logo">
-          13<b>STORE</b>
-        </span>
         <span className="divider" />
         <span className="product">PUBLIC SECURITY TWIN</span>
       </div>

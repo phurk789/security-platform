@@ -30,10 +30,6 @@ export function Login({
           <BrandLogo height={110} />
         </div>
         <div className="brand">
-          <span className="logo">
-            13<b>STORE</b>
-          </span>
-          <span className="divider" />
           <span className="product">PUBLIC SECURITY TWIN</span>
           <LangToggle className="login-lang" />
         </div>
