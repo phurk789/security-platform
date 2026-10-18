@@ -16,7 +16,7 @@ import { INTERIOR_LAYER, getWorld, subscribeFrame } from '../twin/world';
 import { director, useDirector } from '../twin/director';
 import { useAppearance, useTheme } from './Hud';
 import { TwinCallout } from './TwinCallout';
-import { realTilesAvailable } from '../twin/realKey';
+import { getTwinLook, realTilesAvailable, useTwinLook } from '../twin/realKey';
 import type { RealTiles } from '../twin/realTiles';
 
 export interface Twin3DApi {
@@ -73,6 +73,9 @@ export const Twin3D = forwardRef<
   const scriptFollow = useRef<string | null>(null);
   const dir = useDirector();
   const attribRef = useRef<HTMLDivElement>(null);
+  const applyLookRef = useRef<(() => void) | null>(null);
+  const look = useTwinLook();
+  useEffect(() => applyLookRef.current?.(), [look]);
 
   useEffect(() => {
     const el = host.current!;
@@ -112,12 +115,25 @@ export const Twin3D = forwardRef<
     lowComposer.addPass(new RenderPass(world.scene, camera));
     lowComposer.addPass(new OutputPass());
     // Photorealistic tiles of the real site, when the build has a Google Maps key.
+    // Loaded the first time the real view is wanted (now, or later from the view switch).
     let real: RealTiles | null = null;
     let disposed = false;
-    if (realTilesAvailable())
-      void import('../twin/realTiles').then((m) => {
-        if (!disposed) real = m.attachRealTiles(world, renderer, camera);
-      });
+    let loading = false;
+    const applyLook = () => {
+      const want = getTwinLook() === 'real';
+      if (real) real.setVisible(want);
+      else if (want && !loading && realTilesAvailable()) {
+        loading = true;
+        void import('../twin/realTiles').then((m) => {
+          if (disposed) return;
+          real = m.attachRealTiles(world, renderer, camera);
+          real?.setVisible(getTwinLook() === 'real');
+        });
+      }
+      if (attribRef.current) attribRef.current.hidden = !want;
+    };
+    applyLookRef.current = applyLook;
+    applyLook();
     let attribAt = 0;
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.copy(HOME.target);
@@ -291,6 +307,7 @@ export const Twin3D = forwardRef<
       renderer.domElement.removeEventListener('pointerup', onUp);
       renderer.domElement.removeEventListener('wheel', onWheel);
       disposed = true;
+      applyLookRef.current = null;
       real?.dispose();
       composer.dispose();
       target.dispose();

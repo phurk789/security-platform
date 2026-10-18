@@ -24,6 +24,7 @@ import { useStore } from '../store';
 import { Twin3D, type Twin3DApi, type ViewInfo } from './Twin3D';
 import { webglAvailable } from '../twin/world';
 import { setQuality, useFps, useQuality } from '../twin/quality';
+import { realTilesAvailable, setTwinLook, useTwinLook } from '../twin/realKey';
 import { ago, tr, useT } from '../i18n';
 
 // --- projection ------------------------------------------------------------
@@ -88,6 +89,7 @@ export function TwinMap() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ivKey]);
   const quality = useQuality();
+  const look = useTwinLook();
   const fps = useFps();
   const drag = useRef<{ x: number; y: number; pan: [number, number] } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -264,6 +266,16 @@ export function TwinMap() {
             3D
           </button>
         </div>
+        {realTilesAvailable() && mode === '3d' && (
+          <div className="seg" role="group" aria-label={t('3D look')}>
+            <button className={look === 'drawn' ? 'on' : ''} onClick={() => setTwinLook('drawn')} title={t('The original drawn twin')}>
+              {t('Drawn')}
+            </button>
+            <button className={look === 'real' ? 'on' : ''} onClick={() => setTwinLook('real')} title={t('Real 3D imagery of the site (Google)')}>
+              {t('Real')}
+            </button>
+          </div>
+        )}
         <div className="layers">
           <button className="btn-ghost" onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen}>
             <Layers size={16} /> {t('Layers')}
@@ -291,6 +303,12 @@ export function TwinMap() {
                 </label>
               ))}
               <hr />
+              {realTilesAvailable() && (
+                <label>
+                  <input type="checkbox" checked={look === 'real'} onChange={() => setTwinLook(look === 'real' ? 'drawn' : 'real')} />
+                  {t('Real 3D imagery of the site (Google)')}
+                </label>
+              )}
               <label>
                 <input type="checkbox" checked={quality === 'high'} onChange={() => setQuality(quality === 'high' ? 'low' : 'high')} />
                 {t('High quality 3D (bloom, reflections)')}
