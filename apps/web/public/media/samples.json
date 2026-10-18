@@ -2,7 +2,8 @@
   "clips": {
     "UGV-04": {
       "src": "media/ugv-04-warehouse.mp4",
-      "credit": "Warehouse aisle patrol (sample footage)"
+      "credit": "Sample footage · Wikimedia Commons: QmcBeQ3G7DZCmY84uPgT (CC BY 4.0), Axisadman (CC BY-SA 3.0)",
+      "preferred": true
     },
     "kind:ugv": {
       "src": "media/ugv-onboard.mp4",

@@ -65,7 +65,7 @@ export function CameraFeed({
   const prefs = useFeedPrefs();
   const sample = useSampleClip(id, dev?.kind);
   const local = !compact && !liveStream && !replay && !!id && prefs.webcamDevice === id;
-  const recorded = !compact && !liveStream && !replay && !local && !!id && prefs.source === 'recorded' && !!sample.clip && !sample.missing;
+  const recorded = !compact && !liveStream && !replay && !local && !!id && (prefs.source === 'recorded' || (prefs.source === null && !!sample.clip?.preferred)) && !!sample.clip && !sample.missing;
   const live3d = !compact && !liveStream && !local && !recorded && !!id && webglAvailable();
   const g = dev?.capabilities.includes('gimbal') ? dev.gimbal : undefined;
   // The feed clips its content, so the source menu is positioned on the viewport.

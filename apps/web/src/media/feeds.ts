@@ -15,6 +15,8 @@ export interface SampleClip {
   credit?: string;
   /** True if the clip was shot by one of our devices (shown as RECORDED · OWN DEVICE). */
   ownDevice?: boolean;
+  /** Show this clip by default (until the viewer picks a source in the feed menu). */
+  preferred?: boolean;
 }
 
 export interface SampleManifest {
@@ -28,16 +30,18 @@ export interface SampleManifest {
 
 const KEY = 'ps-feed-source';
 const listeners = new Set<() => void>();
-let source: FeedSource = (() => {
+/** null until the viewer picks a source: then clips marked `preferred` show, everything else is 3D. */
+let source: FeedSource | null = (() => {
   try {
-    return localStorage.getItem(KEY) === 'recorded' ? 'recorded' : 'sim';
+    const v = localStorage.getItem(KEY);
+    return v === 'recorded' || v === 'sim' ? v : null;
   } catch {
-    return 'sim';
+    return null;
   }
 })();
 /** Device whose feed shows this computer's camera (not persisted: permission is per page load). */
 let webcamDevice: string | null = null;
-let snapshot: { source: FeedSource; webcamDevice: string | null } = { source, webcamDevice };
+let snapshot: { source: FeedSource | null; webcamDevice: string | null } = { source, webcamDevice };
 const notify = () => {
   snapshot = { source, webcamDevice };
   listeners.forEach((l) => l());
