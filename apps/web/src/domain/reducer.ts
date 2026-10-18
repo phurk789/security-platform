@@ -41,7 +41,7 @@ import {
 } from './policy';
 import { initialState } from './scenario';
 import type { AppState, Command, CommandStatus, CommandType, Detection, Incident, Layers, Device, Mission, Point, TimelineEvent, VehicleSim, View } from '@13store/shared';
-import { INDOOR_UGV_SPEED, floorPlan, pickPlaybook, routeCrossesWalls } from '@13store/shared';
+import { FLOOR_PATROL_RESUME_MS, INDOOR_UGV_SPEED, floorPatrolLoop, floorPlan, pickPlaybook } from '@13store/shared';
 
 export type Msg =
   | { type: 'tick'; dt: number }
@@ -242,10 +242,6 @@ function overwatchTarget(s: AppState): Incident | undefined {
   return withMission ?? open.sort((a, b) => b.createdAt - a.createdAt)[0];
 }
 
-/** Quiet time after the last command before an indoor vehicle goes back to its own round, so an
- *  operator's stop is confirmed and stays visible. */
-const FLOOR_PATROL_RESUME_MS = 20_000;
-
 /**
  * Indoor patrol vehicles (capability `floor_patrol`) drive their floor's patrol route on a loop
  * whenever no mission holds them: the warehouse robot keeps doing rounds between alerts. It
@@ -267,22 +263,9 @@ function floorPatrolStep(s: AppState, d: Device, v: VehicleSim) {
   }
   const m = v.motion;
   if (v.floorPatrol && m.route && !m.done) return;
-  const plan = floorPlan(d.indoor.buildingId, d.indoor.level);
-  const loop = plan?.patrolRoute;
-  if (!plan || !loop || loop.length < 2) return;
-  const ring = loop[0].x === loop.at(-1)!.x && loop[0].y === loop.at(-1)!.y ? loop.slice(0, -1) : loop;
-  const here = { x: m.x, y: m.y };
-  let start = -1;
-  let best = Infinity;
-  ring.forEach((p, i) => {
-    const dd = Math.hypot(p.x - here.x, p.y - here.y);
-    if (dd < best && routeCrossesWalls([here, p], plan) < 0) {
-      best = dd;
-      start = i;
-    }
-  });
-  if (start < 0) return; // nowhere reachable in a straight line: wait for an operator
-  m.route = [...ring.slice(start), ...ring.slice(0, start), ring[start]].map((p) => ({ ...p }));
+  const route = floorPatrolLoop(floorPlan(d.indoor.buildingId, d.indoor.level), { x: m.x, y: m.y });
+  if (!route) return; // nowhere reachable in a straight line: wait for an operator
+  m.route = route;
   m.nextCp = 0;
   m.done = false;
   m.intent = 'drive';

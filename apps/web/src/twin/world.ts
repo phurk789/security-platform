@@ -41,6 +41,13 @@ import {
 
 /** Devices are drawn larger than life so they stay visible at site scale (map symbol scale). */
 export const SYMBOL_SCALE = { ugv: 4.5, uav: 3.6 };
+/** Indoor robots are drawn near life size: enlarged, they would fill a 3 m aisle and push their
+ *  camera (mounted ahead of the drawn bumper) into the racks on every turn. */
+const INDOOR_UGV_SCALE = 1.5;
+/** Layer for the inside of a building (ceiling, full-height wall skins): seen by the robots' and
+ *  cameras' feeds, never by the map view, which stays an open cutaway. */
+export const INTERIOR_LAYER = 7;
+const ugvScale = (d: { indoor?: unknown } | undefined) => (d?.indoor ? INDOOR_UGV_SCALE : SYMBOL_SCALE.ugv);
 
 type Vis =
   | { kind: 'ugv'; m: UgvModel; pos: THREE.Vector3; heading: number; label: CSS2DObject; ring: THREE.Mesh; halo: THREE.Mesh }
@@ -780,7 +787,7 @@ export class TwinWorld {
     if (d.kind === 'ugv') {
       const m = makeUgv({ model: d.catalogId, payload: !!d.payloads?.length });
       if (m.spotBeam) overlay(m.spotBeam);
-      m.root.scale.setScalar(SYMBOL_SCALE.ugv);
+      m.root.scale.setScalar(ugvScale(d));
       m.root.userData = { kind: 'device', id: d.id };
       this.scene.add(m.root, overlay(ring), overlay(halo));
       v = { kind: 'ugv', m, pos, heading: 0, label, ring, halo };
@@ -979,7 +986,7 @@ export class TwinWorld {
 
       // label
       v.label.visible = visible && this.labelsVisible;
-      const h = v.kind === 'ugv' ? 1.7 * SYMBOL_SCALE.ugv + 2 : v.kind === 'uav' ? (d.alt ?? 40) + 4 : (CAMERA_VIEWS[d.id]?.height ?? 6) + 2.5;
+      const h = v.kind === 'ugv' ? 1.7 * ugvScale(d) + 2 : v.kind === 'uav' ? (d.alt ?? 40) + 4 : (CAMERA_VIEWS[d.id]?.height ?? 6) + 2.5;
       v.label.position.set(v.pos.x, h, v.pos.z);
       const sim = d.integration === 'simulated' ? '<i>SIM</i>' : '';
       const warn = fresh === 'live' ? '' : `<em class="${fresh}">${fresh === 'stale' ? 'STALE' : 'OFFLINE'}</em>`;
@@ -1417,7 +1424,7 @@ export class TwinWorld {
       const v = this.devices.get(s.selectedDeviceId);
       const d = s.devices[s.selectedDeviceId];
       if (v && d && s.layers[d.kind])
-        p = new THREE.Vector3(v.pos.x, v.pos.y + (v.kind === 'uav' ? 2 : v.kind === 'ugv' ? 1.7 * SYMBOL_SCALE.ugv + 2 : (CAMERA_VIEWS[d.id]?.height ?? 6) + 2.5), v.pos.z);
+        p = new THREE.Vector3(v.pos.x, v.pos.y + (v.kind === 'uav' ? 2 : v.kind === 'ugv' ? 1.7 * ugvScale(d) + 2 : (CAMERA_VIEWS[d.id]?.height ?? 6) + 2.5), v.pos.z);
     } else if (s.selectedIncidentId) {
       const v = this.incidents.get(s.selectedIncidentId);
       if (v?.root.visible) p = new THREE.Vector3(v.root.position.x, 26, v.root.position.z);
@@ -1440,6 +1447,7 @@ export class TwinWorld {
       const view = CAMERA_VIEWS[deviceId];
       if (!view) return null;
       cam ??= new THREE.PerspectiveCamera(view.fov, aspect, 0.3, 600);
+      cam.layers.enable(INTERIOR_LAYER);
       const p = toWorld(d.pos.x, d.pos.y);
       const t = toWorld(view.target.x, view.target.y);
       const g = this.gimbalView.get(deviceId) ?? (d.gimbal ? { yaw: d.gimbal.yaw, pitch: d.gimbal.pitch, zoom: d.gimbal.zoom ?? 1 } : null);
@@ -1463,19 +1471,20 @@ export class TwinWorld {
       const v = this.devices.get(deviceId);
       if (!v) return null;
       cam ??= new THREE.PerspectiveCamera(d.kind === 'uav' ? 70 : 62, aspect, 0.2, 600);
+      cam.layers.enable(INTERIOR_LAYER);
       const fwd = new THREE.Vector3(Math.sin(v.heading), 0, -Math.cos(v.heading));
       if (d.kind === 'ugv' && facing !== 'front') {
         // Secondary fixed cameras: rear / side views from the hull, no gimbal.
         const turn = facing === 'rear' ? Math.PI : facing === 'left' ? -Math.PI / 2 : facing === 'right' ? Math.PI / 2 : 0;
         const dir = facing === 'down' ? new THREE.Vector3(fwd.x * 0.3, -1, fwd.z * 0.3).normalize() : new THREE.Vector3(Math.sin(v.heading + turn), 0, -Math.cos(v.heading + turn));
-        const back = 0.75 * SYMBOL_SCALE.ugv;
+        const back = 0.75 * ugvScale(d);
         cam.position.set(v.pos.x + dir.x * back, facing === 'down' ? 1.6 : 1.1, v.pos.z + dir.z * back);
         cam.lookAt(cam.position.clone().addScaledVector(dir, 30));
         cam.fov = facing === 'down' ? 90 : 84;
       } else if (d.kind === 'ugv') {
         // Real camera: ~1.3 m up on the mast. The model is drawn enlarged, so put the
         // camera just ahead of the drawn bumper to keep the view clear.
-        const ahead = 0.75 * SYMBOL_SCALE.ugv;
+        const ahead = 0.75 * ugvScale(d);
         cam.position.set(v.pos.x + fwd.x * ahead, 1.4, v.pos.z + fwd.z * ahead);
         const g = this.gimbalView.get(deviceId);
         if (g) {
@@ -1515,6 +1524,34 @@ export class TwinWorld {
     return null;
   }
 
+  /**
+   * Run `fn` with the building cut open at `iv` (then put the main view's cutaway back). Camera
+   * feeds of indoor robots use it, so they always see their own floor — racks, walls — whatever
+   * the operator has open on the map. Only visibility changes, so nothing recompiles.
+   */
+  withCutaway(iv: { buildingId: string; level: number }, fn: () => void) {
+    const prev = this.cutaway;
+    // The selection highlight and level outlines are map overlays: from inside they would sit
+    // across the camera's view, so hide them for this render too.
+    const v = this.buildingVis.get(iv.buildingId);
+    const glow = this.buildingGlow.get(iv.buildingId);
+    const was = [v?.floors.visible, v?.highlight.visible, glow?.visible];
+    if (v) v.floors.visible = v.highlight.visible = false;
+    if (glow) glow.visible = false;
+    const same = prev === `${iv.buildingId}:${iv.level}`;
+    if (!same) this.syncCutaway(iv);
+    try {
+      fn();
+    } finally {
+      if (!same) {
+        const [bid, lvl] = prev ? prev.split(':') : [];
+        this.syncCutaway(prev ? { buildingId: bid, level: Number(lvl) } : null);
+      }
+      if (v) [v.floors.visible, v.highlight.visible] = [!!was[0], !!was[1]];
+      if (glow) glow.visible = !!was[2];
+    }
+  }
+
   /** Indoor view: hide the building's shell and show the walls of one floor at its height. */
   private syncCutaway(iv: { buildingId: string; level: number } | null) {
     const key = iv ? `${iv.buildingId}:${iv.level}` : null;
@@ -1543,7 +1580,9 @@ export class TwinWorld {
       const slabMat = new THREE.MeshStandardMaterial({ color: '#8d96a3', roughness: 0.95 });
       const slab = new THREE.Mesh(new THREE.BoxGeometry(b.w, 0.3, b.d), slabMat);
       const c = toWorld(b.x + b.w / 2, b.y + b.d / 2);
-      slab.position.set(c.x, y0 - 0.15, c.z);
+      // Top a few cm above the ground plane: level with it, the two surfaces z-fight and the
+      // robot's low camera saw the floor flicker.
+      slab.position.set(c.x, y0 - 0.12, c.z);
       slab.receiveShadow = true;
       g.add(slab);
       for (const w of plan.walls) {
@@ -1589,6 +1628,47 @@ export class TwinWorld {
               rack.add(post);
             }
           g.add(rack);
+        }
+      }
+      // Inside skin for camera feeds: full-height exterior walls facing in, a ceiling facing
+      // down and light strips. On their own layer, so the map view never sees them.
+      {
+        const H = b.bim.levelHeightM - 0.2;
+        const skinMat = new THREE.MeshStandardMaterial({ color: '#c9d1da', roughness: 0.9 });
+        const lampMat = new THREE.MeshBasicMaterial({ color: '#eef4ff' });
+        const centre = toWorld(b.x + b.w / 2, b.y + b.d / 2);
+        const inner: THREE.Mesh[] = [];
+        for (const w of plan.walls) {
+          if (w.kind !== 'exterior') continue;
+          const a = toWorld(w.a.x, w.a.y);
+          const bb = toWorld(w.b.x, w.b.y);
+          const len = Math.hypot(bb.x - a.x, bb.z - a.z);
+          if (len < 0.05) continue;
+          const m = new THREE.Mesh(new THREE.PlaneGeometry(len, H), skinMat);
+          m.position.set((a.x + bb.x) / 2, y0 + H / 2, (a.z + bb.z) / 2);
+          // face the building centre
+          const nx = -(bb.z - a.z);
+          const nz = bb.x - a.x;
+          const sgn = Math.sign(nx * (centre.x - m.position.x) + nz * (centre.z - m.position.z)) || 1;
+          m.lookAt(m.position.x + nx * sgn, m.position.y, m.position.z + nz * sgn);
+          inner.push(m);
+        }
+        const ceil = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.d), skinMat);
+        ceil.rotation.x = Math.PI / 2; // facing down
+        ceil.position.set(centre.x, y0 + H, centre.z);
+        inner.push(ceil);
+        // a light strip every 6 m across the hall
+        for (let x = b.x + 4; x < b.x + b.w - 2; x += 6) {
+          const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.35, b.d - 6), lampMat);
+          const p = toWorld(x, b.y + b.d / 2);
+          strip.rotation.x = Math.PI / 2;
+          strip.position.set(p.x, y0 + H - 0.05, p.z);
+          inner.push(strip);
+        }
+        for (const m of inner) {
+          m.layers.set(INTERIOR_LAYER);
+          m.raycast = () => {};
+          g.add(m);
         }
       }
       const nogoMat = new THREE.MeshBasicMaterial({ color: 0xf87171, transparent: true, opacity: 0.25, depthWrite: false, toneMapped: false });

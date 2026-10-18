@@ -114,7 +114,7 @@ function DeviceCallout({ d }: { d: Device }) {
         ? `STALE · ${age(ageMs(s, d))}`
         : m
           ? t('On mission {id}', { id: m.id })
-          : s.sim?.[d.id]?.floorPatrol
+          : d.floorPatrol || s.sim?.[d.id]?.floorPatrol
             ? t('On floor patrol')
             : d.commands.length
               ? t('Standby')

@@ -28,7 +28,8 @@ needed on the vehicle and the site before an indoor mission is more than a demo.
   stairs or in a lift. Approval is refused otherwise, exactly like the outdoor checks.
 - **Demo.** UGV-04 is a D50 patrolling the Building 5 warehouse (level 1: 12 rack rows, aisles A–K,
   loading dock, fuel store and forklift charging as no-go areas) on a serpentine route through
-  every aisle, positioned by (simulated) LiDAR SLAM
+  every aisle, positioned by (simulated) LiDAR SLAM. Between missions it drives the round on its own
+  (offline demo and server mode alike) and hands over as soon as the platform sends a command;
   without GNSS. CCTV-05 watches the Building 2 lobby.
 - **Adapters.**
   - `ros2-nav2` (new): talks to a ROS 2 vehicle through rosbridge — pose from AMCL, battery,

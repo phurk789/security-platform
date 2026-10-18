@@ -317,6 +317,33 @@ export function floorPlansOf(buildingId: string) {
   return FLOOR_PLANS.filter((p) => p.buildingId === buildingId).sort((a, b) => a.level - b.level);
 }
 
+/** Quiet time after the last command before an indoor patrol robot goes back to its own round,
+ *  so an operator's stop is confirmed and stays visible. */
+export const FLOOR_PATROL_RESUME_MS = 20_000;
+
+/**
+ * The floor's patrol round as a route starting from `here`: it rejoins at the nearest point
+ * reachable in a straight line without crossing a wall or rack, runs the loop once and closes it.
+ * Null when there is no round or nothing is reachable (the robot then waits for an operator).
+ */
+export function floorPatrolLoop(plan: FloorPlan | undefined, here: Point): Point[] | null {
+  const loop = plan?.patrolRoute;
+  if (!plan || !loop || loop.length < 2) return null;
+  const closed = loop[0].x === loop.at(-1)!.x && loop[0].y === loop.at(-1)!.y;
+  const ring = closed ? loop.slice(0, -1) : loop;
+  let start = -1;
+  let best = Infinity;
+  ring.forEach((p, i) => {
+    const d = Math.hypot(p.x - here.x, p.y - here.y);
+    if (d < best && routeCrossesWalls([here, p], plan) < 0) {
+      best = d;
+      start = i;
+    }
+  });
+  if (start < 0) return null;
+  return [...ring.slice(start), ...ring.slice(0, start), ring[start]].map((p) => ({ ...p }));
+}
+
 /** Height of a floor above site ground (metres). */
 export function levelHeight(b: Building, level: number) {
   return (level - 1) * b.bim.levelHeightM;

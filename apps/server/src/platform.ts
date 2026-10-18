@@ -1368,6 +1368,7 @@ export class Platform {
     if (t.heading !== undefined) d.heading = t.heading;
     if (t.signal !== undefined) d.signal = t.signal;
     if (t.satellites !== undefined) d.satellites = t.satellites;
+    if (d.indoor) d.floorPatrol = t.floorPatrol === true || undefined;
     if (t.temperatureC !== undefined) d.temperatureC = t.temperatureC;
     if (d.indoor && Number.isFinite(t.level)) d.indoor = { ...d.indoor, level: Math.round(t.level as number) };
     if (Array.isArray(t.components)) d.components = applyComponentUpdates(d.components, sanitizeComponentUpdates(t.components));

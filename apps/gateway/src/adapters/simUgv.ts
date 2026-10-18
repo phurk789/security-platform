@@ -14,6 +14,9 @@ import {
   type SrvCommand,
   type VehicleMotion,
   INDOOR_UGV_SPEED,
+  FLOOR_PATROL_RESUME_MS,
+  floorPatrolLoop,
+  floorPlan,
 } from '@13store/shared';
 import { admitCommand } from '../sdk';
 import { SimDevice, type SimOptions } from './base';
@@ -37,6 +40,9 @@ export class SimUgv extends SimDevice {
   sensors!: SensorState;
   mode: Mode = 'idle';
   failsafeAt?: number;
+  /** Indoor patrol robot (capability `floor_patrol`) driving its own floor round between missions. */
+  round = false;
+  private lastCmdAt = -Infinity;
   private failsafeTimer?: ReturnType<typeof setTimeout>;
   private physics?: ReturnType<typeof setInterval>;
   private lastPhysics = 0;
@@ -69,6 +75,8 @@ export class SimUgv extends SimDevice {
     this.sensors = newSensors(this.seed.battery ?? 100, 'ugv');
     this.mode = 'idle';
     this.failsafeAt = undefined;
+    this.round = false;
+    this.lastCmdAt = -Infinity;
   }
 
   start(ctx: Parameters<SimDevice['start']>[0]) {
@@ -91,11 +99,13 @@ export class SimUgv extends SimDevice {
     const now = this.ctx.now();
     const dt = Math.max(0, now - this.lastPhysics) / 1000;
     this.lastPhysics = now;
+    this.roundStep(now);
     const r = stepMotion(this.motion, dt);
     stepSensors(this.sensors, dt, 'ugv', this.motion.speed);
     // Docked: idle within 3 m of the home position → the charger tops the battery up (~1 % per 20 s).
     if (this.mode === 'idle' && this.motion.speed === 0 && Math.hypot(this.motion.x - this.seed.pos.x, this.motion.y - this.seed.pos.y) < 3)
       this.sensors.battery = Math.min(100, this.sensors.battery + 0.05 * dt);
+    if (this.round) return; // the robot's own round: no checkpoint or completion events for the platform
     const route = this.motion.route;
     for (const cp of r.checkpoints) {
       if (route && cp < route.length) this.emit({ kind: 'checkpoint', checkpoint: cp, detail: `Reached checkpoint ${cp + 1} of ${route.length}` });
@@ -105,6 +115,35 @@ export class SimUgv extends SimDevice {
       this.emit({ kind: 'route_complete', detail: 'Final checkpoint reached. Vehicle holding position.' });
       this.emit({ kind: 'snapshot', detail: 'Onboard camera frame at final checkpoint (simulated).', frame: snapshotFrame(this.declaration.deviceId, now) });
     }
+  }
+
+  /**
+   * Between missions an indoor patrol robot drives its floor's round on a loop, like the real one
+   * would on its own schedule. It stops the round when a command arrives, a mission holds it, the
+   * link drops or the battery is low, and resumes after FLOOR_PATROL_RESUME_MS of quiet.
+   */
+  private roundStep(now: number) {
+    const seed = this.seed;
+    if (!seed.indoor || !seed.capabilities.includes('floor_patrol')) return;
+    const m = this.motion;
+    const blocked = this.mode !== 'idle' || this.linkCut || this.failsafeAt !== undefined || this.sensors.battery < 20 || now - this.lastCmdAt < FLOOR_PATROL_RESUME_MS;
+    if (blocked) {
+      if (this.round && this.mode === 'idle') {
+        m.intent = 'hold';
+        m.route = null;
+      }
+      this.round = false;
+      return;
+    }
+    if (this.round && m.route && !m.done) return;
+    const route = floorPatrolLoop(floorPlan(seed.indoor.buildingId, seed.indoor.level), { x: m.x, y: m.y });
+    if (!route) return;
+    m.route = route;
+    m.nextCp = 0;
+    m.done = false;
+    m.intent = 'drive';
+    m.brake = 'normal';
+    this.round = true;
   }
 
   protected sendTelemetry(now: number) {
@@ -121,12 +160,20 @@ export class SimUgv extends SimDevice {
       satellites: r.satellites,
       temperatureC: r.temperatureC,
       quality: r.signal < 45 || r.accuracyM > 2.2 ? 'degraded' : 'good',
-      nextCp: this.motion.route ? this.motion.nextCp : undefined,
+      nextCp: this.motion.route && !this.round ? this.motion.nextCp : undefined,
+      floorPatrol: this.seed.indoor ? this.round : undefined,
     });
   }
 
   protected handleCommand(cmd: SrvCommand) {
     if (!admitCommand(this.ctx, this.declaration, this.ledger, cmd)) return;
+    // Any command from the platform takes over from the robot's own round.
+    this.lastCmdAt = this.ctx.now();
+    if (this.round) {
+      this.round = false;
+      this.motion.intent = 'hold';
+      this.motion.route = null;
+    }
     const why = this.invalid(cmd);
     if (why) return this.report(cmd.commandId, 'rejected', cmd, why);
     this.later(UGV_ACK_MS, () => this.report(cmd.commandId, 'acknowledged', cmd));

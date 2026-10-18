@@ -12,7 +12,7 @@ import type { Point } from '@13store/shared';
 import { feedFrame, getQuality, useQuality } from '../twin/quality';
 import { useStore } from '../store';
 import { fromWorld } from '../twin/layout';
-import { getWorld, subscribeFrame } from '../twin/world';
+import { INTERIOR_LAYER, getWorld, subscribeFrame } from '../twin/world';
 import { director, useDirector } from '../twin/director';
 import { useAppearance, useTheme } from './Hud';
 import { TwinCallout } from './TwinCallout';
@@ -94,6 +94,7 @@ export const Twin3D = forwardRef<
     const camera = new THREE.PerspectiveCamera(36, 1, 1, 4000);
     camera.position.copy(HOME.pos);
     camera.layers.enableAll();
+    camera.layers.disable(INTERIOR_LAYER); // the map is an open cutaway; ceilings are for camera feeds
     // Both quality levels draw through a composer (MSAA render target + colour output pass), so
     // the scene's shaders are the same either way and switching quality never recompiles them.
     // High adds bloom for lamps and windows and 4× MSAA; low uses 2× and no bloom.

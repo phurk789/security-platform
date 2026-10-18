@@ -101,6 +101,8 @@ export interface Device {
   /** Horizontal accuracy in metres. */
   accuracyM: number;
   battery?: number;
+  /** Indoor patrol robot driving its own floor round (no mission), as last reported. */
+  floorPatrol?: boolean;
   /** Sim time (ms) of the last telemetry received. */
   lastSeen: number;
   /** User id that holds control, if any (F08). */

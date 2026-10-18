@@ -68,7 +68,9 @@ export function drawCamera(
   const cam = world.feedCamera(deviceId, FEED_W / FEED_H, opts.facing);
   if (!cam) return false;
   st.renderer.toneMappingExposure = (opts.ir ? 2.4 : 1.6) * (world.daylight ? 0.6 : 1);
-  st.renderer.render(world.scene, cam);
+  const iv = world.state?.devices[deviceId]?.indoor;
+  if (iv) world.withCutaway(iv, () => st.renderer.render(world.scene, cam));
+  else st.renderer.render(world.scene, cam);
   const ctx = target.getContext('2d');
   if (!ctx) return false;
   if (target.width !== w || target.height !== h) {

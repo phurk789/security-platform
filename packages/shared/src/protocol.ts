@@ -94,6 +94,8 @@ export interface GwTelemetry {
   quality: 'good' | 'degraded';
   /** Index of the next checkpoint for an active route. */
   nextCp?: number;
+  /** Indoor patrol robot is driving its own floor round (no mission from the platform). */
+  floorPatrol?: boolean;
   /** Degrees, 0 = north (−y), clockwise. */
   heading?: number;
   /** Radio link quality 0–100 as measured by the device. */
