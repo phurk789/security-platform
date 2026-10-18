@@ -25,7 +25,8 @@ SIYI cameras record to their SD card (`.mp4`); the SIYI A8 mini / ZR10 / ZT30 fi
 as they are after the command above. Gimbal pan/tilt/zoom from the console is applied to the
 recorded picture digitally.
 
-Expected default file names: `ugv-onboard.mp4`, `cctv-gate.mp4`, `uav-aerial.mp4`.
+Expected default file names: `ugv-onboard.mp4`, `cctv-gate.mp4`, `uav-aerial.mp4`, and
+`ugv-04-warehouse.mp4` for the warehouse robot (UGV-04: a walk down a racking aisle at ~1 m height).
 
 ## Real building models (BIM)
 
