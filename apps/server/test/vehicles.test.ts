@@ -47,17 +47,17 @@ describe('route planner', () => {
   it('keeps ground vehicles out of keep-out zones and refuses destinations inside them', () => {
     const fuel = DEFAULT_GEOFENCES.find((g) => g.id === 'GF-FUEL')!;
     // Straight line from UGV-03's spot to the north of the fuel store would clip the zone.
-    const plan = planRoute({ x: 60, y: 214 }, { x: 72, y: 130 }, { fences: DEFAULT_GEOFENCES, kind: 'ugv' });
+    const plan = planRoute({ x: 60, y: 214 }, { x: 40, y: 125 }, { fences: DEFAULT_GEOFENCES, kind: 'ugv' });
     expect(plan.ok).toBe(true);
     if (plan.ok) {
       const pts = [{ x: 60, y: 214 }, ...plan.checkpoints];
       for (let i = 1; i < pts.length; i++) expect(segmentHitsPoly(pts[i - 1], pts[i], fuel.poly)).toBe(false);
     }
-    const inside = planRoute({ x: 60, y: 214 }, { x: 70, y: 170 }, { fences: DEFAULT_GEOFENCES, kind: 'ugv' });
+    const inside = planRoute({ x: 60, y: 214 }, { x: 44, y: 160 }, { fences: DEFAULT_GEOFENCES, kind: 'ugv' });
     expect(inside.ok).toBe(false);
     if (!inside.ok) expect(inside.reason).toMatch(/keep-out zone "Fuel store/);
     // Without the fence the same destination is fine.
-    expect(planRoute({ x: 60, y: 214 }, { x: 70, y: 170 }, { kind: 'ugv' }).ok).toBe(true);
+    expect(planRoute({ x: 60, y: 214 }, { x: 44, y: 160 }, { kind: 'ugv' }).ok).toBe(true);
   });
 
   it('uses the gate to cross the fence and refuses places outside the site', () => {
@@ -80,16 +80,16 @@ describe('route planner', () => {
   });
 
   it('aircraft ignore buildings and keep-out zones for ground vehicles but respect no-fly zones', () => {
-    const over = planRoute({ x: 318, y: 52 }, { x: 60, y: 60 }, { fences: DEFAULT_GEOFENCES, kind: 'uav' });
+    const over = planRoute({ x: 318, y: 146 }, { x: 110, y: 146 }, { fences: DEFAULT_GEOFENCES, kind: 'uav' });
     expect(over.ok).toBe(true);
     if (over.ok) {
       const noFly = DEFAULT_GEOFENCES.find((g) => g.id === 'GF-B2-ROOF')!;
-      const pts = [{ x: 318, y: 52 }, ...over.checkpoints];
+      const pts = [{ x: 318, y: 146 }, ...over.checkpoints];
       for (let i = 1; i < pts.length; i++) expect(segmentHitsPoly(pts[i - 1], pts[i], noFly.poly)).toBe(false);
     }
-    expect(routeViolations([{ x: 220, y: 50 }], { x: 318, y: 52 }, DEFAULT_GEOFENCES, 'uav').map((g) => g.id)).toEqual(['GF-B2-ROOF']);
-    expect(routeViolations([{ x: 220, y: 50 }], { x: 318, y: 52 }, DEFAULT_GEOFENCES, 'ugv')).toEqual([]);
-    expect(insidePoly({ x: 70, y: 170 }, DEFAULT_GEOFENCES[0].poly)).toBe(true);
+    expect(routeViolations([{ x: 110, y: 146 }], { x: 318, y: 146 }, DEFAULT_GEOFENCES, 'uav').map((g) => g.id)).toEqual(['GF-B2-ROOF']);
+    expect(routeViolations([{ x: 110, y: 146 }], { x: 318, y: 146 }, DEFAULT_GEOFENCES, 'ugv')).toEqual([]);
+    expect(insidePoly({ x: 44, y: 160 }, DEFAULT_GEOFENCES[0].poly)).toBe(true);
   });
 
   it('computes the next patrol time in the organisation time zone, wrapping the week', () => {
@@ -211,7 +211,7 @@ describe('scheduled patrols', () => {
     patrolId = r.body.id;
     expect(r.body).toMatchObject({ enabled: true, autoStart: true, createdBy: 'u-nida', route: body.route });
     expect(r.body.nextRunAt).toBeGreaterThan(Date.now());
-    expect((await nida.post('/patrols', { ...body, route: [{ x: 70, y: 170 }] })).status).toBe(409); // inside the fuel keep-out
+    expect((await nida.post('/patrols', { ...body, route: [{ x: 44, y: 160 }] })).status).toBe(409); // inside the fuel keep-out
     expect((await nida.post('/patrols', { ...body, times: ['25:00'] })).status).toBe(400);
     expect(((await alex.get('/patrols')).body as any[]).map((p) => p.id)).toContain(patrolId);
   });

@@ -1,0 +1,5 @@
+{
+  "models": [
+    { "src": "media/b1-clinic.glb", "origin": { "x": 348, "y": 151.5 }, "rotationDeg": 90, "scale": 1, "elevation": 0, "replaces": ["B1"] }
+  ]
+}

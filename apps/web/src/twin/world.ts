@@ -1433,7 +1433,8 @@ export class TwinWorld {
       if (!force && v.mesh.visible === bld) continue;
       for (const c of v.group.children) if (c !== v.floors && c !== v.highlight && c !== this.buildingGlow.get(id)) c.visible = bld && !importedBuildings.has(id);
     }
-    for (const g of this.imported) g.visible = bld;
+    // Imported BIM models were put there on purpose: they stay on over real tiles too.
+    for (const g of this.imported) g.visible = L.buildings !== false;
   }
 
   /** World position of the visible callout anchor, or null. */

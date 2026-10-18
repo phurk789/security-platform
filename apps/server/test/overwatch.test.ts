@@ -38,7 +38,7 @@ describe('UAV overwatch (simulated)', () => {
     const before = sent.length;
     expect((await alex.post('/incidents/INC-024/resolve', { outcome: 'False alarm: contractor at the gate.' })).status).toBe(200);
     // INC-023 (seeded as confirmed) is the remaining verified incident
-    expect(sent.slice(before).at(-1)).toEqual({ deviceId: 'UAV-02', target: { x: 170, y: 120 } });
+    expect(sent.slice(before).at(-1)).toEqual({ deviceId: 'UAV-02', target: { x: 146, y: 140 } });
     const n = sent.length;
     await alex.post('/incidents/INC-024/close');
     expect(sent.length).toBe(n); // same target as before: nothing new to send

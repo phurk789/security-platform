@@ -137,7 +137,10 @@ function segmentHitsRect(a: Point, c: Point, b: { x: number; y: number; w: numbe
 export function siteEnvironment(p: Point) {
   const near = Math.min(...BUILDINGS.map((b) => distToRect(p, b)));
   const urban = clamp(1 - near / 18, 0, 1);
-  const blocked = BUILDINGS.some((b) => b.id !== 'B2' && segmentHitsRect(SITE_ANTENNA, p, b));
+  // The building the antenna stands on does not block it.
+  const onRoof = (b: { x: number; y: number; w: number; d: number }) =>
+    SITE_ANTENNA.x >= b.x && SITE_ANTENNA.x <= b.x + b.w && SITE_ANTENNA.y >= b.y && SITE_ANTENNA.y <= b.y + b.d;
+  const blocked = BUILDINGS.some((b) => !onRoof(b) && segmentHitsRect(SITE_ANTENNA, p, b));
   const edge = p.x > 392 || p.y > 238 || p.x < 24;
   const signal = 99 - dist(p, SITE_ANTENNA) * 0.08 - (blocked ? 17 : 0) - (edge ? 7 : 0);
   return { accuracy: 0.9 + urban * 1.3, satellites: 13.5 - urban * 4, signal, blocked };

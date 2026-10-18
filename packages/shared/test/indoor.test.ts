@@ -16,8 +16,11 @@ describe('indoor geometry', () => {
     expect(plan.rooms.some((r) => r.name === 'Lobby')).toBe(true);
     expect(plan.doors.some((d) => d.kind === 'fire')).toBe(true);
     expect(routeCrossesWalls(plan.patrolRoute, plan)).toBe(-1);
-    expect(roomAt(plan, { x: 219, y: 80 })?.name).toBe('Lobby');
-    expect(inNoGo(plan, { x: 215, y: 28 })?.name).toBe('Stairs');
+    const lobby = plan.rooms.find((r) => r.name === 'Lobby')!;
+    const lc = lobby.poly.reduce((a, p) => ({ x: a.x + p.x / 4, y: a.y + p.y / 4 }), { x: 0, y: 0 });
+    expect(roomAt(plan, lc)?.name).toBe('Lobby');
+    const st = plan.noGo.find((r) => r.name === 'Stairs')!;
+    expect(inNoGo(plan, st.poly.reduce((a, p) => ({ x: a.x + p.x / 4, y: a.y + p.y / 4 }), { x: 0, y: 0 }))?.name).toBe('Stairs');
   });
 
   it('builds a warehouse floor: rack rows, aisles, dock shutters and a serpentine patrol through every aisle', () => {
@@ -36,8 +39,10 @@ describe('indoor geometry', () => {
     const plan = floorPlan('B2', 1)!;
     const room = plan.rooms.find((r) => r.name.startsWith('Reception'))!;
     const c = room.poly.reduce((a, p) => ({ x: a.x + p.x / 4, y: a.y + p.y / 4 }), { x: 0, y: 0 });
+    const lobby = plan.rooms.find((r) => r.name === 'Lobby')!;
+    const lc = lobby.poly.reduce((a, p) => ({ x: a.x + p.x / 4, y: a.y + p.y / 4 }), { x: 0, y: 0 });
     // straight line from the lobby into the room centre crosses the room's partition wall
-    expect(routeCrossesWalls([{ x: 219, y: 80 }, c], plan)).toBe(0);
+    expect(routeCrossesWalls([lc, c], plan)).toBe(0);
   });
 });
 
@@ -68,7 +73,7 @@ describe('indoor mission constraints', () => {
     const intoFuel = constraintChecksAt(now, { ...d, lastSeen: now }, mission([fc]), () => '');
     expect(intoFuel.find((c) => c.label === 'Avoids no-go areas')?.ok).toBe(false);
     // straight across the hall cuts through the racking
-    const across = constraintChecksAt(now, { ...d, lastSeen: now }, mission([{ x: 155, y: 165 }]), () => '');
+    const across = constraintChecksAt(now, { ...d, lastSeen: now }, mission([{ x: 135, y: 120 }]), () => '');
     expect(across.find((c) => c.label === 'Route clear of walls')?.ok).toBe(false);
   });
 });

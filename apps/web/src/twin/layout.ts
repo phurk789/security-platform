@@ -62,9 +62,9 @@ export const PARKED: (Point & { c: number; r: number })[] = (() => {
 
 /** Where each fixed camera looks. Height in metres above ground. */
 export const CAMERA_VIEWS: Record<string, { height: number; target: Point; targetHeight?: number; fov: number }> = {
-  'CCTV-01': { height: 7, target: { x: 214, y: 128 }, fov: 58 },
+  'CCTV-01': { height: 7, target: { x: 285, y: 222 }, fov: 58 },
   'CCTV-02': { height: 6.5, target: { x: 335, y: 236 }, targetHeight: 0.5, fov: 52 },
-  'CCTV-03': { height: 6, target: { x: 120, y: 120 }, fov: 55 },
+  'CCTV-03': { height: 6, target: { x: 146, y: 120 }, targetHeight: 0.5, fov: 50 },
   'CCTV-04': { height: 6, target: { x: 360, y: 210 }, fov: 60 },
 };
 

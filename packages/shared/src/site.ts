@@ -7,9 +7,10 @@ export const SCENARIO_START = Date.UTC(2026, 9, 16, 22, 27, 0);
 // ---------------------------------------------------------------------------
 
 /** WGS 84 position of the demo site's grid origin (north-west corner): the site centre is at
- *  13.4350, 101.0300 in Amata City Chonburi industrial estate (approximate). Fine-tune with
+ *  13.4364928, 101.0299234 in Amata City Chonburi industrial estate, the grid turned 28.5°
+ *  anticlockwise to follow the estate's streets; buildings follow the real roofs (satellite). Fine-tune with
  *  ?site=<lat>,<lon> in the web app, or from a survey in Administration → Site & GIS. */
-export const DEMO_GEO: GeoAnchor = { originLat: 13.4363026, originLon: 101.0280605, rotationDeg: 0 };
+export const DEMO_GEO: GeoAnchor = { originLat: 13.4367374, originLon: 101.0275798, rotationDeg: -28.5 };
 
 export const SITE = {
   name: 'Demo Plant · Amata City Chonburi',
@@ -89,7 +90,7 @@ const info = (b: Omit<Building, 'bim'>, extra: Partial<BuildingInfo> & Pick<Buil
 
 export const BUILDINGS: Building[] = [
   info(
-    { id: 'B1', name: 'Building 1', use: 'Administration', x: 50, y: 52, w: 92, d: 56, h: 22, zone: 'Zone A' },
+    { id: 'B1', name: 'Building 1', use: 'Administration', x: 315, y: 125, w: 66, d: 53, h: 14, zone: 'Zone B' },
     {
       occupancy: 420,
       yearBuilt: 2009,
@@ -98,7 +99,7 @@ export const BUILDINGS: Building[] = [
     },
   ),
   info(
-    { id: 'B2', name: 'Building 2', use: 'Engineering & Offices', x: 178, y: 26, w: 82, d: 62, h: 34, zone: 'Zone A' },
+    { id: 'B2', name: 'Building 2', use: 'Engineering & Offices', x: 150, y: 100, w: 56, d: 92, h: 14, zone: 'Zone A' },
     {
       occupancy: 900,
       yearBuilt: 2015,
@@ -108,10 +109,10 @@ export const BUILDINGS: Building[] = [
     },
   ),
   info(
-    { id: 'B3', name: 'Building 3', use: 'Production Hall', x: 284, y: 40, w: 62, d: 72, h: 26, zone: 'Zone B' },
+    { id: 'B3', name: 'Building 3', use: 'Production Hall', x: 80, y: 6, w: 196, d: 66, h: 14, zone: 'Zone A' },
     {
-      levels: 3,
-      levelHeightM: 8,
+      levels: 1,
+      levelHeightM: 14,
       occupancy: 600,
       yearBuilt: 1998,
       structure: 'Steel long-span roof on concrete frame',
@@ -119,11 +120,11 @@ export const BUILDINGS: Building[] = [
     },
   ),
   info(
-    { id: 'B4', name: 'Building 4', use: 'Operations', x: 300, y: 128, w: 74, d: 58, h: 24, zone: 'Zone B' },
+    { id: 'B4', name: 'Building 4', use: 'Operations', x: 212, y: 100, w: 40, d: 92, h: 12, zone: 'Zone A' },
     { occupancy: 260, yearBuilt: 2012, structure: 'Reinforced concrete frame', assets: ['Security control room L2', 'Backup generator, roof', 'Vehicle bay, east side'] },
   ),
   info(
-    { id: 'B5', name: 'Building 5', use: 'Warehouse', x: 78, y: 140, w: 84, d: 60, h: 18, zone: 'Zone A' },
+    { id: 'B5', name: 'Building 5', use: 'Warehouse', x: 60, y: 74, w: 82, d: 104, h: 12, zone: 'Zone A' },
     {
       levels: 2,
       levelHeightM: 7.5,

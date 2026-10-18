@@ -2683,7 +2683,9 @@ export class Platform {
     const operatorId = String(input.operatorId ?? prev?.operatorId ?? '');
     const op = this.db.prepare('SELECT role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(operatorId, a.orgId) as { role: Role } | undefined;
     if (!op || op.role !== 'operator') fail(400, 'invalid', 'Choose an active operator.');
-    const route = this.clearRoute(a.orgId, d, this.validRoute((input.route ?? prev?.route ?? []) as Point[]));
+    const raw = this.validRoute((input.route ?? prev?.route ?? []) as Point[]);
+    // Indoor vehicles get the floor-plan checks below instead of the outdoor obstacle check.
+    const route = d.indoor ? raw : this.clearRoute(a.orgId, d, raw);
     if (d.indoor) {
       // Indoor vehicles patrol their floor: the route has to pass the same checks as an indoor mission.
       const bad = indoorRouteChecks(d, { checkpoints: route } as Mission).filter((c) => c.hard && !c.ok);
