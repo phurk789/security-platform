@@ -758,7 +758,25 @@ export class TwinWorld {
 
     this.poiGroup.visible = false;
     s.add(this.routeGroup, this.labelsGroup, this.poiGroup);
+    // Everything drawn so far that stands for the real place (ground, roads, trees, lamps, fences,
+    // traffic, people, skyline): hidden when photorealistic tiles of the real site are shown.
+    const keep = new Set<THREE.Object3D>([this.callout, this.hud, this.routeGroup, this.labelsGroup, this.poiGroup, sky]);
+    for (const v of this.buildingVis.values()) keep.add(v.group);
+    for (const z of this.zoneLines) keep.add(z.line).add(z.fill);
+    this.scenery = s.children.filter((o) => !keep.has(o) && !(o as THREE.Light).isLight);
   }
+
+  /** Objects that model the real place; see setRealTiles. */
+  private scenery: THREE.Object3D[] = [];
+  /** Photorealistic 3D tiles of the real site are shown in place of the drawn scenery. */
+  realTiles = false;
+  setRealTiles(on: boolean) {
+    if (on === this.realTiles) return;
+    this.realTiles = on;
+    for (const o of this.scenery) o.visible = !on;
+    this.layersDirty = true;
+  }
+  private layersDirty = false;
 
   // ---------------------------------------------------------------------------
   // dynamic objects
@@ -1397,12 +1415,14 @@ export class TwinWorld {
     this.routeGroup.visible = L.routes !== false;
     this.poiGroup.visible = L.poi === true;
     const traffic = L.traffic !== false;
-    for (const c of this.cars) c.g.visible = traffic;
-    for (const c of this.parked) c.visible = traffic;
-    const bld = L.buildings !== false;
+    for (const c of this.cars) c.g.visible = traffic && !this.realTiles;
+    for (const c of this.parked) c.visible = traffic && !this.realTiles;
+    const bld = L.buildings !== false && !this.realTiles;
+    const force = this.layersDirty;
+    this.layersDirty = false;
     for (const [id, v] of this.buildingVis) {
       if (this.cutaway?.startsWith(id + ':')) continue; // the indoor view manages that building
-      if (v.mesh.visible === bld) continue;
+      if (!force && v.mesh.visible === bld) continue;
       for (const c of v.group.children) if (c !== v.floors && c !== v.highlight && c !== this.buildingGlow.get(id)) c.visible = bld && !importedBuildings.has(id);
     }
     for (const g of this.imported) g.visible = bld;

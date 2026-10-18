@@ -16,6 +16,8 @@ import { INTERIOR_LAYER, getWorld, subscribeFrame } from '../twin/world';
 import { director, useDirector } from '../twin/director';
 import { useAppearance, useTheme } from './Hud';
 import { TwinCallout } from './TwinCallout';
+import { realTilesAvailable } from '../twin/realKey';
+import type { RealTiles } from '../twin/realTiles';
 
 export interface Twin3DApi {
   zoom(factor: number): void;
@@ -70,6 +72,7 @@ export const Twin3D = forwardRef<
   /** Vehicle the director asked us to follow (overview only). */
   const scriptFollow = useRef<string | null>(null);
   const dir = useDirector();
+  const attribRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = host.current!;
@@ -108,6 +111,14 @@ export const Twin3D = forwardRef<
     const lowComposer = new EffectComposer(renderer, lowTarget);
     lowComposer.addPass(new RenderPass(world.scene, camera));
     lowComposer.addPass(new OutputPass());
+    // Photorealistic tiles of the real site, when the build has a Google Maps key.
+    let real: RealTiles | null = null;
+    let disposed = false;
+    if (realTilesAvailable())
+      void import('../twin/realTiles').then((m) => {
+        if (!disposed) real = m.attachRealTiles(world, renderer, camera);
+      });
+    let attribAt = 0;
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.copy(HOME.target);
     controls.enableDamping = true;
@@ -229,6 +240,15 @@ export const Twin3D = forwardRef<
         }
       }
       controls.update();
+      if (real) {
+        real.update();
+        const now = performance.now();
+        if (now - attribAt > 2000 && attribRef.current) {
+          attribAt = now;
+          const a = real.attributions();
+          attribRef.current.textContent = a ? `Google · ${a}` : 'Google';
+        }
+      }
       renderer.toneMappingExposure = world.exposure;
       if (qualityRef.current === 'high') {
         bloom.strength = world.daylight ? 0.14 : 0.32;
@@ -270,6 +290,8 @@ export const Twin3D = forwardRef<
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('pointerup', onUp);
       renderer.domElement.removeEventListener('wheel', onWheel);
+      disposed = true;
+      real?.dispose();
       composer.dispose();
       target.dispose();
       lowComposer.dispose();
@@ -336,6 +358,7 @@ export const Twin3D = forwardRef<
   return (
     <div ref={host} className="t3-host" role="img" aria-label="3D digital twin">
       {createPortal(<TwinCallout />, world.calloutEl)}
+      {realTilesAvailable() && <div ref={attribRef} className="t3-attrib" aria-label="Map data attribution" />}
     </div>
   );
 });
