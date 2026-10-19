@@ -33,7 +33,12 @@ function getStudio() {
     fill.position.set(-4, 2, -2);
     scene.add(hemi, sun, fill);
     const cam = new THREE.PerspectiveCamera(30, W / H, 0.05, 100);
-    studio = { renderer, scene, cam, canvas };
+    const st = { renderer, scene, cam, canvas };
+    studio = st;
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      if (studio === st) studio = undefined;
+    });
   } catch {
     studio = null;
   }

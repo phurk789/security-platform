@@ -28,6 +28,12 @@ export function attachRealTiles(world: TwinWorld, renderer: THREE.WebGLRenderer,
   tiles.registerPlugin(new ReorientationPlugin({ lat: geo.originLat * DEG, lon: geo.originLon * DEG, height: 0, recenter: true }));
   tiles.registerPlugin(new TilesFadePlugin());
   tiles.errorTarget = 14;
+  // Keep the tile cache well under what laptops and tablets can hold on the GPU (the library
+  // default allows 400 MB; together with the twin itself that blanked some screens).
+  tiles.lruCache.minBytesSize = 0.12 * 2 ** 30;
+  tiles.lruCache.maxBytesSize = 0.18 * 2 ** 30;
+  tiles.lruCache.minSize = 1500;
+  tiles.lruCache.maxSize = 2500;
 
   // The reoriented tileset has north on +Z; the twin has south on +Z and the grid may be turned
   // (rotationDeg, clockwise from east). The site grid origin (the anchor) sits at toWorld(0, 0).
@@ -38,6 +44,7 @@ export function attachRealTiles(world: TwinWorld, renderer: THREE.WebGLRenderer,
   holder.position.set(o.x, 0, o.z);
   holder.add(tiles.group);
   world.scene.add(holder);
+  world.realHolder = holder;
 
   // Photogrammetry already carries its light and shadow: draw it unlit, dimmed at night.
   const night = new THREE.Color('#5d6b86');
@@ -109,6 +116,7 @@ export function attachRealTiles(world: TwinWorld, renderer: THREE.WebGLRenderer,
     },
     dispose() {
       world.setRealTiles(false);
+      if (world.realHolder === holder) world.realHolder = null;
       world.scene.remove(holder);
       tiles.dispose();
     },

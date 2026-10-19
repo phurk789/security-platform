@@ -855,6 +855,7 @@ export const TH: Record<string, string> = {
   'in progress': 'กำลังดำเนินการ',
   pending: 'รอตรวจ',
   'Switched the 3D twin to low quality to keep the picture smooth on this computer.': 'สลับ 3D เป็นคุณภาพต่ำเพื่อให้ภาพลื่นบนเครื่องนี้',
+  'The 3D view lost its graphics context. Rebuilding it…': 'ภาพ 3D ขาดการเชื่อมต่อกับการ์ดจอ กำลังสร้างใหม่…',
   // --- show mode ------------------------------------------------------------
   'Sound on (alerts, confirmations, announcements)': 'เสียงเปิด (แจ้งเตือน ยืนยันคำสั่ง ประกาศ)',
   'Sound off': 'เสียงปิด',

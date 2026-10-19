@@ -1,5 +1,5 @@
 // WebGL view of the digital twin. Orbit with drag, zoom with wheel/pinch, click a device or incident.
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -76,6 +76,8 @@ export const Twin3D = forwardRef<
   const applyLookRef = useRef<(() => void) | null>(null);
   const look = useTwinLook();
   useEffect(() => applyLookRef.current?.(), [look]);
+  // Bumped when the browser drops the WebGL context: the view is rebuilt on a fresh canvas.
+  const [gen, setGen] = useState(0);
 
   useEffect(() => {
     const el = host.current!;
@@ -93,6 +95,16 @@ export const Twin3D = forwardRef<
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.className = 't3-canvas';
     el.appendChild(renderer.domElement);
+    // GPU reset, driver update, memory pressure or a long sleep can take the context away; without
+    // this the twin stayed blank until the page was reloaded.
+    let lostTimer = 0;
+    const onLost = (e: Event) => {
+      e.preventDefault();
+      if (lostTimer) return;
+      dispatchRef.current({ type: 'toast', tone: 'warn', text: 'The 3D view lost its graphics context. Rebuilding it…' });
+      lostTimer = window.setTimeout(() => setGen((g) => g + 1), 800);
+    };
+    renderer.domElement.addEventListener('webglcontextlost', onLost);
     const labels = new CSS2DRenderer();
     labels.domElement.className = 't3-labels';
     el.appendChild(labels.domElement);
@@ -306,6 +318,8 @@ export const Twin3D = forwardRef<
       renderer.domElement.removeEventListener('pointerdown', onDown);
       renderer.domElement.removeEventListener('pointerup', onUp);
       renderer.domElement.removeEventListener('wheel', onWheel);
+      renderer.domElement.removeEventListener('webglcontextlost', onLost);
+      clearTimeout(lostTimer);
       disposed = true;
       applyLookRef.current = null;
       real?.dispose();
@@ -314,10 +328,15 @@ export const Twin3D = forwardRef<
       lowComposer.dispose();
       lowTarget.dispose();
       renderer.dispose();
-      el.innerHTML = '';
+      // dispose() alone keeps the context alive until garbage collection; browsers cap live
+      // contexts (about 16) and start dropping the oldest, so give it back now.
+      renderer.forceContextLoss();
+      // Remove only what this effect added: the attribution line is React's and must stay.
+      renderer.domElement.remove();
+      labels.domElement.remove();
       ctl.current = null;
     };
-  }, [world]);
+  }, [world, gen]);
 
   // Director shots (booth script): home, a point, follow a vehicle, or a slow idle orbit.
   useEffect(() => {

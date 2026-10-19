@@ -23,6 +23,12 @@ function studio() {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const st = { renderer, canvas, ready: false };
     shared = st;
+    // If the browser drops this context (GPU reset, memory pressure), build a fresh one next time.
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      st.ready = false;
+      if (shared === st) shared = undefined;
+    });
     // Build the shaders without blocking the page; feeds show their placeholder until then.
     const world = getWorld();
     const cam = new THREE.PerspectiveCamera(50, FEED_W / FEED_H, 0.5, 2000);
@@ -69,8 +75,10 @@ export function drawCamera(
   if (!cam) return false;
   st.renderer.toneMappingExposure = (opts.ir ? 2.4 : 1.6) * (world.daylight ? 0.6 : 1);
   const iv = world.state?.devices[deviceId]?.indoor;
-  if (iv) world.withCutaway(iv, () => st.renderer.render(world.scene, cam));
-  else st.renderer.render(world.scene, cam);
+  world.withoutRealTiles(() => {
+    if (iv) world.withCutaway(iv, () => st.renderer.render(world.scene, cam));
+    else st.renderer.render(world.scene, cam);
+  });
   const ctx = target.getContext('2d');
   if (!ctx) return false;
   if (target.width !== w || target.height !== h) {

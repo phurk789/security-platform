@@ -775,6 +775,35 @@ export class TwinWorld {
   private scenery: THREE.Object3D[] = [];
   /** Photorealistic 3D tiles of the real site are shown in place of the drawn scenery. */
   realTiles = false;
+  /** Group holding the Google tiles (set by realTiles.ts) — kept out of the camera feeds. */
+  realHolder: THREE.Object3D | null = null;
+
+  /**
+   * Run fn (a camera-feed render) with the drawn scenery in place of the real tiles. The feeds use a
+   * second WebGL context: drawing the tiles there too would upload every tile to the GPU twice,
+   * which ran some machines out of GPU memory and blanked the twin.
+   */
+  withoutRealTiles(fn: () => void) {
+    const h = this.realHolder;
+    if (!this.realTiles || !h || !h.visible) return fn();
+    const shown: THREE.Object3D[] = [...this.scenery];
+    if (this.hudGrid) shown.push(this.hudGrid);
+    if (this.state?.layers?.buildings !== false)
+      for (const [id, v] of this.buildingVis) {
+        if (importedBuildings.has(id) || this.cutaway?.startsWith(id + ':')) continue;
+        for (const c of v.group.children) if (c !== v.floors && c !== v.highlight && c !== this.buildingGlow.get(id)) shown.push(c);
+      }
+    const was = shown.map((o) => o.visible);
+    for (const o of shown) o.visible = true;
+    h.visible = false;
+    try {
+      fn();
+    } finally {
+      h.visible = true;
+      shown.forEach((o, i) => (o.visible = was[i]));
+    }
+  }
+
   setRealTiles(on: boolean) {
     if (on === this.realTiles) return;
     this.realTiles = on;
@@ -1807,7 +1836,10 @@ export function webglAvailable() {
   if (webgl !== null) return webgl;
   try {
     const c = document.createElement('canvas');
-    webgl = !!(c.getContext('webgl2') || c.getContext('webgl'));
+    const gl = (c.getContext('webgl2') || c.getContext('webgl')) as WebGLRenderingContext | null;
+    webgl = !!gl;
+    // Give the probe context back at once: browsers cap live contexts and drop the oldest.
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
   } catch {
     webgl = false;
   }
