@@ -16,6 +16,7 @@ import { FleetCard } from '../components/Hud';
 import { LiveMission } from '../components/IncidentPanel';
 import { TelemetryPanel } from '../components/TelemetryPanel';
 import { UgvHardwareReadiness } from '../components/UgvHardwareReadiness';
+import { showsReadiness } from '../domain/readiness';
 import { Twin3D } from '../components/Twin3D';
 import { webglAvailable } from '../twin/world';
 import './command-center.css';
@@ -98,7 +99,6 @@ export function CommandCenter() {
           </section>
 
           <aside className="cc-side">
-            {d.kind === 'ugv' && <UgvHardwareReadiness device={d} />}
             <section className="panel cc-box">
               <div className="panel-head">
                 <h2>{t('Mission control')}</h2>
@@ -127,6 +127,7 @@ export function CommandCenter() {
                 </div>
               </section>
             )}
+            {showsReadiness(d) && <UgvHardwareReadiness device={d} />}
             <section className="panel cc-box cc-log-box">
               <div className="panel-head">
                 <h2>{t('Activity')}</h2>

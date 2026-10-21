@@ -2,10 +2,21 @@
 
 This change adds a **read-only** hardware verification panel to the existing UGV Command Center. It deliberately **does not** grant manual drive authority or assert successful SIYI hardware integration.
 
-## What is observable
-- Platform telemetry freshness as determined by the existing application policy
-- Declared camera/gimbal capabilities (declarations are **not** hardware verification)
-- Explicit NOT VERIFIED status for SIYI/MAVLink integration, depth-based obstacle stopping, and physical E-stop
+## What the panel shows
+
+Shown in the Command Center side column (below the mission and camera controls) for **real** UGVs
+only (integration `testing` or `verified`); simulated vehicles have no hardware to check.
+
+| Row | Passes when |
+| --- | --- |
+| Vehicle telemetry | Telemetry is fresh. A link check only, never a hardware sign-off |
+| Controller (SIYI / MAVLink) | Every flight-controller, computer, remote and radio part the adapter declares reports `ok` |
+| Onboard / PTZ camera | Every camera and gimbal part reports `ok` |
+| Depth vision / obstacle stop | The lidar or depth camera reports `ok`; with none fitted the row says there is no automatic stop |
+| Physical E-stop / engine failsafe | The device's integration status is `verified`, set by an administrator after the site tests below |
+
+The worst part decides a row. Rows use the same status badges as the Equipment tab. Logic and
+tests: `apps/web/src/domain/readiness.ts`, `readiness.test.ts`.
 
 ## Required before vehicle operation
 1. Confirm the actual SIYI model, installed firmware, pinout, MAVLink serial transport and link bandwidth.
