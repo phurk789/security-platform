@@ -1,0 +1,78 @@
+# ArduPilot Rover starting parameters: tracked UGV, SIYI UniFC 6 Pico, SIYI air unit + UniRC 7 Pro.
+# DRAFT for bench testing. Not tested on the vehicle. Read docs/UGV_WIRING.md before loading.
+#
+# Assumes: hydraulic (or hydrostatic) drive, one linear actuator or servo per travel valve
+# (left / right), centre = neutral; engine speed held by its own governor; engine stop and
+# actuator power cut by a hardwired E-stop chain that does not depend on this board.
+#
+# Load in Mission Planner (Config > Full Parameter List > Load from file) or QGroundControl.
+# Lines marked CONFIRM depend on the board's UART map or on the vehicle; check before arming.
+
+# --- Vehicle ---------------------------------------------------------------
+FRAME_CLASS,1            # Rover
+FRAME_TYPE,0             # undefined (no motor mixer frame for skid steering)
+
+# --- Outputs: skid steering (one output per track) -------------------------
+SERVO1_FUNCTION,73       # ThrottleLeft  -> left travel valve actuator
+SERVO3_FUNCTION,74       # ThrottleRight -> right travel valve actuator
+SERVO1_MIN,1100          # CONFIRM on the bench: full reverse stroke
+SERVO1_TRIM,1500         # CONFIRM: valve neutral (track stopped)
+SERVO1_MAX,1900          # CONFIRM: full forward stroke
+SERVO1_REVERSED,0        # set 1 if "forward" drives the track backwards
+SERVO3_MIN,1100
+SERVO3_TRIM,1500
+SERVO3_MAX,1900
+SERVO3_REVERSED,0
+MOT_PWM_TYPE,0           # normal PWM
+MOT_SAFE_DISARM,0        # when disarmed, outputs sit at TRIM (valves neutral)
+MOT_THR_MAX,40           # limit stroke to 40 % for first tests; raise step by step
+MOT_SLEWRATE,50          # % per second: soften valve changes (hydraulic jolt)
+
+# --- Speed and navigation (walking pace to start) --------------------------
+CRUISE_SPEED,1.0         # m/s, measure with a manual drive, then tune
+CRUISE_THROTTLE,30       # % stroke at CRUISE_SPEED, measure, then tune
+WP_SPEED,1.0             # m/s in AUTO
+WP_RADIUS,2.0            # m: waypoint reached
+ATC_STR_RAT_MAX,45       # deg/s max turn rate
+ATC_ACCEL_MAX,0.5        # m/s/s
+ATC_DECEL_MAX,1.0        # m/s/s
+
+# --- Telemetry to the SIYI air unit (MAVLink 2) -----------------------------
+SERIAL1_PROTOCOL,2       # CONFIRM: SERIAL1 = TELEM1 on UniFC 6 Pico (check SIYI ArduPilot UART map)
+SERIAL1_BAUD,115         # must match the datalink baud set in the SIYI app (115200)
+SR1_POSITION,2           # Hz
+SR1_EXTRA1,2
+SR1_EXTRA2,2
+SR1_EXT_STAT,1
+SR1_RC_CHAN,1
+
+# --- GNSS / compass ----------------------------------------------------------
+SERIAL3_PROTOCOL,5       # CONFIRM: GPS port number on this board
+GPS_TYPE,1               # auto
+COMPASS_USE,1            # mount the GPS/compass mast away from the engine and steel frame
+
+# --- RC from the UniRC 7 Pro (SBUS via the air unit) -----------------------
+RCMAP_ROLL,1             # CH1 = steering
+RCMAP_THROTTLE,3         # CH3 = throttle
+MODE_CH,5                # 3-position switch on CH5
+MODE1,0                  # low  = MANUAL (pilot drives)
+MODE2,0
+MODE3,4                  # mid  = HOLD
+MODE4,4
+MODE5,10                 # high = AUTO (route from the platform)
+MODE6,10
+INITIAL_MODE,4           # boot in HOLD
+RC7_OPTION,153           # CONFIRM option list on your firmware: CH7 = arm/disarm switch on the remote
+
+# --- Failsafes -----------------------------------------------------------------
+FS_ACTION,2              # Hold on failsafe (stop in place)
+FS_TIMEOUT,1.5           # s
+FS_THR_ENABLE,1          # RC signal loss failsafe
+FS_THR_VALUE,910         # CONFIRM: below the receiver's failsafe PWM, above its normal minimum
+FS_GCS_ENABLE,1          # ground station link loss failsafe (platform/gateway heartbeat)
+FS_CRASH_CHECK,2         # Hold and disarm if stuck or crashed
+FS_EKF_ACTION,1          # Hold on bad position estimate
+
+# --- Arming ----------------------------------------------------------------------
+ARMING_CHECK,1           # all pre-arm checks
+ARMING_REQUIRE,1         # outputs stay at TRIM until armed
