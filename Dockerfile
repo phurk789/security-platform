@@ -8,6 +8,9 @@ COPY apps/gateway/package.json apps/gateway/
 COPY apps/web/package.json apps/web/
 COPY apps/field/package.json apps/field/
 RUN npm ci --no-audit --no-fund
+# Optional: Google Maps key for the photorealistic site view (Railway passes service variables as build args).
+ARG VITE_GOOGLE_MAPS_API_KEY=
+ENV VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
 COPY . .
 RUN npm run build -w @13store/web \
  && npm run build -w @13store/field \
@@ -21,12 +24,12 @@ WORKDIR /app
 RUN npm init -y >/dev/null && npm pkg set type=module \
  && npm install --omit=dev --no-audit --no-fund fastify@5 @fastify/websocket@11 @fastify/static@10 ws@8 \
  && mkdir -p /data && chown node:node /data
+# Data lives in /data: mount a volume there (docker-compose.yml declares one; on Railway add a volume at /data).
 COPY --from=build /src/apps/server/dist apps/server/dist
 COPY --from=build /src/apps/gateway/dist apps/gateway/dist
 COPY --from=build /src/apps/web/dist apps/web/dist
 COPY --from=build /src/apps/field/dist apps/field/dist
 USER node
-VOLUME ["/data"]
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=3s CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "apps/server/dist/index.js"]
