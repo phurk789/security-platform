@@ -90,7 +90,7 @@ npx tsx tools/siyi-bench/probe.ts
 | Autopilot is ArduPilot Rover | firmware ที่โหลดบน UniFC 6 Pico บอร์ดมาจากโรงงานเป็น ArduCopter ต้องแฟลช Rover สำหรับรถตีนตะขาบ |
 | Disarmed on the bench (FAIL) | **disarm ทันทีบนรีโมต** |
 | Boot mode is HOLD | `INITIAL_MODE=4` และตำแหน่งสวิตช์ mode บนรีโมต |
-| Telemetry streams arriving | `SR1_POSITION`, `SR1_EXTRA1`, `SR1_EXT_STAT` (probe ไม่ส่งคำสั่งขอ stream เพราะเป็นแบบอ่านอย่างเดียว) |
+| Telemetry streams arriving | `MAV2_POSITION`, `MAV2_EXTRA1`, `MAV2_EXT_STAT` (ArduPilot ก่อน 4.7 ใช้ชื่อ `SR1_*`) probe ไม่ส่งคำสั่งขอ stream เพราะเป็นแบบอ่านอย่างเดียว |
 | Battery voltage | power module และ `BATT_MONITOR` |
 | GNSS fix | ต้องมีโมดูล GPS และเห็นท้องฟ้า — **จำเป็นสำหรับการโชว์ตำแหน่งบนแผนที่** |
 | Parameters match | รายการที่ต่างพิมพ์ไว้ใต้ผลตรวจ บรรทัดที่ไฟล์ทำเครื่องหมาย CONFIRM ต้องวัดจากรถจริงก่อน |

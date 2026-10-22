@@ -15,6 +15,7 @@ describe('parameter file', () => {
     expect(byName.get('MOT_THR_MAX')?.value).toBe(40);
     expect(byName.get('SERIAL1_PROTOCOL')?.confirm).toBe(false); // port map confirmed on the bench
     expect(byName.get('BRD_SER1_RTSCTS')?.value).toBe(0);
+    expect(byName.get('MAV2_OPTIONS')?.value).toBe(4); // ignore REQUEST_DATA_STREAM from other GCSs
     expect(byName.get('SERVO1_TRIM')?.confirm).toBe(true);
     expect(byName.get('FS_THR_VALUE')?.confirm).toBe(true);
     expect(byName.get('FS_ACTION')?.confirm).toBe(false);

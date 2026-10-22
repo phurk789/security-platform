@@ -198,7 +198,7 @@ export function evaluate(state: BenchState, o: EvaluateOptions): CheckResult[] {
 
   const streams = [MSG.SYS_STATUS, MSG.GPS_RAW_INT, MSG.GLOBAL_POSITION_INT].filter((id) => state.seen.has(id));
   add('streams', 'Telemetry streams arriving', streams.length === 3 ? 'pass' : 'warn',
-    streams.length === 3 ? 'SYS_STATUS, GPS_RAW_INT, GLOBAL_POSITION_INT' : `only ${streams.length}/3 stream types seen — check SR1_* stream rates`);
+    streams.length === 3 ? 'SYS_STATUS, GPS_RAW_INT, GLOBAL_POSITION_INT' : `only ${streams.length}/3 stream types seen — check MAV2_* stream rates (SR1_* before ArduPilot 4.7)`);
 
   if (!state.battery?.voltageV) add('battery', 'Battery voltage reported', 'warn', 'no voltage — check the power module and BATT_MONITOR');
   else add('battery', 'Battery voltage reported', 'pass', `${state.battery.voltageV.toFixed(2)} V` + (state.battery.remainingPct !== undefined ? `, ${state.battery.remainingPct}%` : ''));

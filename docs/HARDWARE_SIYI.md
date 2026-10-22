@@ -108,7 +108,10 @@ build for this board. A ground vehicle needs **ArduPilot Rover** (decision D-34)
 | Bench tests (now) | `ArduRover V4.8.0-dev`, built 2026-10-21, ArduPilot `9c412baa` | `firmware.ardupilot.org/Rover/latest/SIYI-UniFC-6-PICO/ardurover.apj`. A development build, and the only official Rover build for this board: Rover `stable` and `beta` had none on 2026-10-22                          |
 | Launch event      | Rover **stable** for the UniFC 6 Pico                          | Requested from SIYI. If none arrives in time, pin one dated `latest` build, run the full hardware checklist on it, and do not change it before the event                                                                 |
 
-`latest` is rebuilt every day, so the file downloaded later may differ from the one above. After
+`latest` is rebuilt every day, so the file downloaded later may differ from the one above. Our
+unit was flashed on 2026-10-22 and prints `ArduRover V4.8.0-dev (9c412baa)`, `ChibiOS: 9aebaf4a`;
+its factory Copter parameters are kept in
+`deploy/vehicle/factory/unifc6pico-arducopter-4.6.3-factory.param`. After
 flashing, record the version the board prints at boot. The bench probe keeps it in the report under
 `statusText` (for example `ArduRover V4.8.0-dev (xxxxxxxx)`).
 
@@ -143,7 +146,9 @@ ArduPilot port map (UniFC 6 Pico manual §1.3, confirmed on the bench): `SERIAL1
 | `FS_GCS_ENABLE`                 | `1`                                         | act when the ground station link is lost (factory value is `0`)                             |
 | `FS_ACTION` (Rover)             | `2` Hold                                    | stop in place on link loss (Rover)                                                          |
 | `FS_GCS_ENABLE` action (Copter) | RTL or Land per site plan                   |                                                                                             |
-| `SRn_*` stream rates            | ≥ 1 Hz for position, extended status, extra | the adapter also requests 1 Hz with SET_MESSAGE_INTERVAL                                    |
+| `MAV2_*` stream rates           | ≥ 1 Hz for position, extended status, extra | `SR1_*` before ArduPilot 4.7. The adapter also requests 1 Hz with SET_MESSAGE_INTERVAL      |
+| `MAV2_OPTIONS`                  | `4` (bit 2, Ignore Streamrate)              | without it, UniGCS on the remote overwrote `MAV2_*` with 3/10/5/2/2 Hz on the bench. Only `REQUEST_DATA_STREAM` is ignored; the gateway's `SET_MESSAGE_INTERVAL` still works |
+| `ARMING_SKIPCHK`                | `0`                                         | skip no pre-arm check (4.7 replaced `ARMING_CHECK`; the bits are inverted)                  |
 
 **PX4**: set `MAV_n_CONFIG` to the TELEM port, `NAV_DLL_ACT` (data-link loss action) per the
 site safety plan, and check `COM_DL_LOSS_T`.
