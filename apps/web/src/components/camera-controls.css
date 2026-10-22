@@ -60,6 +60,11 @@
 /* Live video from the site media server (WebRTC). */
 .feed video.whep { width: 100%; height: 100%; display: block; object-fit: cover; background: #000; }
 .feed .whep-msg { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; font-size: 0.85rem; color: var(--text-2); background: #050a12; }
+/* Not live: the last frame stays visible behind the message, dimmed (labelled NO SIGNAL · last frame). */
+.feed .whep-msg.over-frame { background: rgba(5, 10, 18, 0.62); color: #e6f4ff; text-shadow: 0 1px 3px #000; }
+.feed .whep-msg small { display: block; margin-top: 4px; font-size: 0.74rem; opacity: 0.85; }
+.feed .whep-msg .whep-retry { margin-top: 10px; font-size: 0.74rem; padding: 4px 12px; cursor: pointer; }
+.feed.frozen video.whep { filter: grayscale(0.7) brightness(0.7); }
 
 @media (max-width: 480px) {
   .ptz { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'pad mid' 'act act' 'aim aim' 'status status'; }

@@ -14,6 +14,7 @@ import { DetectionOverlay } from './DetectionOverlay';
 import { RecordedFeed } from './RecordedFeed';
 import { LocalCameraFeed } from './LocalCameraFeed';
 import { localCameraAvailable, setFeedSource, setWebcamDevice, useFeedPrefs, useSampleClip } from '../media/feeds';
+import { videoBadge, type VideoBadge } from '../domain/videoState';
 
 export type Scene = 'gate' | 'plaza' | 'path' | 'lot' | 'ugv' | 'equipment';
 
@@ -21,7 +22,9 @@ export type Scene = 'gate' | 'plaza' | 'path' | 'lot' | 'ugv' | 'equipment';
  * Camera feed. Real device stream (WHEP) when there is one; otherwise the 3D twin (SIMULATED),
  * a recorded clip (RECORDED) or this computer's camera (LIVE · LOCAL CAMERA), as chosen in the
  * feed's source menu. When telemetry is stale or offline the frame freezes and the overlay says
- * so — a frozen picture is never labelled LIVE (UXUI §7).
+ * so — a frozen picture is never labelled LIVE (UXUI §7). A real stream is LIVE only while its
+ * frames keep arriving; the player reports DELAYED / RECONNECTING / OFFLINE otherwise
+ * (domain/videoState.ts).
  */
 export function CameraFeed({
   scene,
@@ -91,21 +94,29 @@ export function CameraFeed({
   const hasSub = liveStream && !!dev?.stream?.whepSub;
   const [hd, setHd] = useState(false);
   const useSub = hasSub && !hd;
+  // What the real stream's player says about its frames. A new stream (or SD/HD switch) starts
+  // as CONNECTING until its own player reports, so an old LIVE never carries over.
+  const streamKey = liveStream ? `${dev!.id}:${useSub ? 'sub' : 'main'}` : '';
+  const [reported, setReported] = useState<{ key: string; badge: VideoBadge } | null>(null);
+  const video = reported?.key === streamKey ? reported.badge : videoBadge({ phase: 'connecting', attempt: 0 });
+  const shownFrozen = liveStream ? !video.live : frozen && !local;
+  const frozenNote = liveStream ? video.frozen : frozen ? (freshness === 'offline' ? 'no_signal' : 'delayed') : null;
   const feed = (
-    <div className={`feed${compact ? ' compact' : ''}${frozen && !liveStream && !local ? ' frozen' : ''}${live3d ? ' feed-3d' : ''}${recorded ? ' feed-rec' : ''}`}>
+    <div className={`feed${compact ? ' compact' : ''}${shownFrozen ? ' frozen' : ''}${live3d ? ' feed-3d' : ''}${recorded ? ' feed-rec' : ''}`}>
       {local ? (
         <LocalCameraFeed key={id} />
       ) : recorded ? (
         <RecordedFeed key={sample.clip!.src} clip={sample.clip!} frozen={frozen} gimbal={g} />
       ) : liveStream ? (
         <WhepVideo
-          key={`${dev!.id}:${useSub ? 'sub' : 'main'}`}
+          key={streamKey}
           getUrl={async () => {
             const r = await session!.mediaSession(dev!.id);
             const u = useSub ? r.whepSub : (r.whep ?? r.whepSub);
             if (!u) throw new Error(tr('No live stream for this device.'));
             return u;
           }}
+          onBadge={(badge) => setReported({ key: streamKey, badge })}
         />
       ) : live3d ? (
         <SceneFeed deviceId={id!} ir={night && id!.startsWith('CCTV')} frozen={frozen} day={!night} facing={facing} />
@@ -204,8 +215,8 @@ export function CameraFeed({
                     )}
                 </div>
               )}
-              <span className={`feed-tag ${replay ? 'replay' : liveStream || local ? 'live' : recorded ? 'recorded' : ''}`}>
-                {replay ? 'REPLAY' : liveStream ? 'LIVE' : srcLabel}
+              <span className={`feed-tag ${replay ? 'replay' : (liveStream ? video.live : local) ? 'live' : recorded ? 'recorded' : ''}`}>
+                {replay ? 'REPLAY' : liveStream ? video.tag : srcLabel}
               </span>
             </span>
           </div>
@@ -215,7 +226,7 @@ export function CameraFeed({
             </span>
             {live3d && !frozen && <span className="feed-meta">{night && id!.startsWith('CCTV') ? 'IR · ' : ''}12 fps · 1.8 Mbps</span>}
             {recorded && !frozen && sample.clip?.credit && <span className="feed-meta">{sample.clip.credit}</span>}
-            {frozen && <span className="feed-frozen">{freshness === 'offline' ? `NO SIGNAL · ${tr('last frame')}` : `FEED DELAYED · ${tr('frame frozen')}`}</span>}
+            {frozenNote && <span className="feed-frozen">{frozenNote === 'no_signal' ? `NO SIGNAL · ${tr('last frame')}` : `FEED DELAYED · ${tr('frame frozen')}`}</span>}
           </div>
         </>
       )}
