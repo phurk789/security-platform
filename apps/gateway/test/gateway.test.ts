@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { AddressInfo } from 'node:net';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DEFAULT_ROUTE, GATEWAY_PROTOCOL, type GatewayToServer, type GwHello, type ServerToGateway } from '@13store/shared';
 import { defaultAdapters } from '../src/adapters';
 import { startGateway, type GatewayHandle } from '../src/gateway';
-import { silentLogger } from '../src/sdk';
+import { silentLogger, type Logger } from '../src/sdk';
 
 /** Minimal stand-in for the platform server's /api/v1/gateway endpoint. */
 class FakeServer {
@@ -66,16 +69,25 @@ afterEach(async () => {
   server = undefined;
 });
 
-function start(opts: { rateMs?: number } = {}) {
+function start(opts: { rateMs?: number; log?: Logger; dataDir?: string } = {}) {
   gw = startGateway({
     serverUrl: `ws://127.0.0.1:${server!.port}`,
     key: 'gw_test_key',
     gatewayId: 'edge-test',
     adapters: defaultAdapters({ rateMs: opts.rateMs ?? 200 }),
-    log: silentLogger,
+    log: opts.log ?? silentLogger,
     backoff: { initialMs: 50, maxMs: 200 },
+    dataDir: opts.dataDir,
+    // No clock-skew allowance: the fake server issues commands on this machine's clock.
+    ledger: { clockSkewMs: 0 },
   });
   return gw;
+}
+
+function linesLog() {
+  const lines: string[] = [];
+  const log: Logger = { info: (m) => lines.push(m), warn: (m) => lines.push(m), error: (m) => lines.push(m) };
+  return { log, lines };
 }
 
 describe('gateway ↔ server', () => {
@@ -174,5 +186,57 @@ describe('gateway ↔ server', () => {
     await until(() => server!.of('telemetry').length > 0);
     const first = server.of('telemetry')[0];
     expect(Date.now() - first.sourceTime).toBeLessThan(500);
+  });
+
+  it('counts telemetry dropped while offline and logs the count on reconnect', async () => {
+    server = await new FakeServer().listen();
+    const { log, lines } = linesLog();
+    start({ rateMs: 100, log });
+    await until(() => gw!.accepted.size === 10);
+    expect(gw!.dropped.telemetry).toBe(0);
+    const port = server.port;
+    await server.close();
+    await until(() => !gw!.connected);
+    await wait(600);
+    const whileDown = gw!.dropped.telemetry;
+    expect(whileDown).toBeGreaterThan(10); // 9 online devices at 10 Hz for ~0.6 s
+    server = await new FakeServer().listen(port);
+    await until(() => lines.some((l) => /^dropped during [\d.]+ s offline \(not buffered\): \d+ telemetry/.test(l)));
+    const n = Number(/: (\d+) telemetry/.exec(lines.find((l) => l.startsWith('dropped during'))!)![1]);
+    expect(n).toBeGreaterThanOrEqual(whileDown);
+    expect(gw!.dropped.telemetry).toBe(n); // nothing dropped yet before this outage
+  });
+});
+
+describe('gateway restart', () => {
+  let dataDir: string | undefined;
+  afterEach(() => {
+    if (dataDir) rmSync(dataDir, { recursive: true, force: true });
+    dataDir = undefined;
+  });
+
+  it('keeps one ledger file per device; a command re-sent after a gateway restart is re-reported, not re-run', async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'gw-data-'));
+    server = await new FakeServer().listen();
+    start({ dataDir });
+    await until(() => gw!.accepted.size === 10);
+    const c = { t: 'command', commandId: 'C9', idempotencyKey: 'k9', deviceId: 'UGV-01', type: 'start', route: DEFAULT_ROUTE, missionId: 'M1', expiresAt: Date.now() + 10_000 } as const;
+    server.send(c);
+    await until(() => server!.of('cmd').some((m) => m.commandId === 'C9' && m.status === 'succeeded'));
+    expect(readdirSync(join(dataDir, 'ledger')).sort()).toEqual(defaultAdapters().map((a) => `${a.declaration.deviceId}.json`).sort());
+
+    // Restart the gateway process (fresh adapters, nothing in memory) against the same data directory.
+    await gw!.stop();
+    const seen = server.received.length;
+    start({ dataDir });
+    await until(() => gw!.accepted.size === 10);
+    server.send({ ...c, commandId: 'C9-retry' });
+    await until(() => server!.received.slice(seen).some((m) => m.t === 'cmd'));
+    await wait(1_200); // the simulated UGV would have acknowledged, executed and moved by now
+    const after = server.received.slice(seen);
+    expect(after.filter((m) => m.t === 'cmd')).toEqual([expect.objectContaining({ commandId: 'C9', status: 'succeeded' })]);
+    const ugv = after.filter((m) => m.t === 'telemetry' && m.deviceId === 'UGV-01') as Extract<GatewayToServer, { t: 'telemetry' }>[];
+    expect(ugv.length).toBeGreaterThan(0);
+    expect(ugv.every((t) => t.speed === 0)).toBe(true);
   });
 });

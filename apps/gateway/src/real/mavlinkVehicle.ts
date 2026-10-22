@@ -143,6 +143,7 @@ export class MavlinkVehicleAdapter implements Adapter {
   private txSeq = 0;
   private telSeq = 0;
   private timers: ReturnType<typeof setInterval>[] = [];
+  /** Replaced by the gateway's (persistent) ledger in start(). */
   private ledger = new CommandLedger();
   private input = new PassThrough();
   private ackWaiters = new Map<number, Pending>();
@@ -222,6 +223,7 @@ export class MavlinkVehicleAdapter implements Adapter {
 
   start(ctx: AdapterContext) {
     this.ctx = ctx;
+    this.ledger = ctx.ledger;
     const stream = this.input.pipe(new MavLinkPacketSplitter()).pipe(new MavLinkPacketParser());
     stream.on('data', (p: MavLinkPacket) => this.onPacket(p));
     const sock = dgram.createSocket('udp4');

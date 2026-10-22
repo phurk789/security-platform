@@ -12,6 +12,20 @@
 //    during the outage may run after the link comes back.
 
 import type { AdapterDeclaration, CameraAction, GwCameraResult, GwCommandUpdate, GwDeviceEvent, GwTelemetry, SrvCommand, SrvDemo } from '@13store/shared';
+import type { CommandLedger } from './ledger';
+
+export {
+  CommandLedger,
+  LEDGER_CLOCK_SKEW_MS,
+  LEDGER_FORMAT,
+  LEDGER_MAX_ENTRIES,
+  LEDGER_RETAIN_MS,
+  ledgerFile,
+  writeFileAtomic,
+  type LedgerCheck,
+  type LedgerOptions,
+  type LedgerStatus,
+} from './ledger';
 
 export interface Logger {
   info(msg: string, extra?: unknown): void;
@@ -44,6 +58,11 @@ export interface AdapterContext {
   event(e: EventReport): void;
   /** Result of a camera control request (gimbal, zoom, photo, record). */
   cameraResult(r: Omit<GwCameraResult, 't' | 'deviceId'>): void;
+  /**
+   * This device's command ledger. Use it (with admitCommand) instead of your own `new CommandLedger()`:
+   * the gateway keeps it in `<dataDir>/ledger/<deviceId>.json` so dedupe survives a restart.
+   */
+  ledger: CommandLedger;
   log: Logger;
 }
 
@@ -61,39 +80,18 @@ export interface Adapter {
   onCamera?(requestId: string, action: CameraAction): void;
 }
 
-/** Outcome of checking an incoming command against the ledger. */
-export type LedgerCheck = { kind: 'new' } | { kind: 'duplicate'; status: GwCommandUpdate['status'] | 'received'; detail?: string } | { kind: 'expired' };
-
 /**
- * Tracks commands by idempotency key so a retried request never executes twice,
- * and rejects commands that arrive after their expiry.
+ * Commands that leave the device no further from a safe state if they ran twice. When the ledger
+ * cannot be saved these still run (refusing a stop is worse than repeating one); start and resume
+ * are refused, because after a restart nothing would stop them running a second time.
  */
-export class CommandLedger {
-  private byKey = new Map<string, { commandId: string; status: GwCommandUpdate['status'] | 'received'; detail?: string }>();
-
-  check(cmd: SrvCommand, now: number): LedgerCheck {
-    const seen = this.byKey.get(cmd.idempotencyKey);
-    if (seen) return { kind: 'duplicate', status: seen.status, detail: seen.detail };
-    if (now > cmd.expiresAt) return { kind: 'expired' };
-    return { kind: 'new' };
-  }
-
-  record(cmd: SrvCommand, status: GwCommandUpdate['status'] | 'received', detail?: string) {
-    this.byKey.set(cmd.idempotencyKey, { commandId: cmd.commandId, status, detail });
-  }
-
-  commandIdFor(key: string) {
-    return this.byKey.get(key)?.commandId;
-  }
-
-  clear() {
-    this.byKey.clear();
-  }
-}
+export const SAFE_TO_REPEAT: ReadonlySet<SrvCommand['type']> = new Set<SrvCommand['type']>(['stop', 'pause']);
 
 /**
  * Standard handling for the parts of a command every adapter must do the same way:
  * dedupe, expiry, and "not supported". Returns true if the adapter should go on and execute it.
+ * When it returns true the command is already in the ledger (on disk, for a persistent ledger),
+ * so it can never run twice, even if the gateway restarts while it is executing.
  */
 export function admitCommand(ctx: AdapterContext, decl: AdapterDeclaration, ledger: CommandLedger, cmd: SrvCommand): boolean {
   const res = ledger.check(cmd, ctx.now());
@@ -101,6 +99,11 @@ export function admitCommand(ctx: AdapterContext, decl: AdapterDeclaration, ledg
     // Re-report what we already know; never execute again.
     if (res.status !== 'received') ctx.commandUpdate({ commandId: ledger.commandIdFor(cmd.idempotencyKey) ?? cmd.commandId, status: res.status, detail: res.detail });
     ctx.log.info(`duplicate idempotency key ${cmd.idempotencyKey} ignored`);
+    return false;
+  }
+  if (res.kind === 'unknown') {
+    // It may have run before the gateway restarted. Say nothing (the server shows timed out) rather than guess.
+    ctx.log.warn(`${decl.deviceId}: ${cmd.type} ${cmd.commandId} may have reached the device before the gateway restarted; outcome unknown, not executed`);
     return false;
   }
   if (res.kind === 'expired') {
@@ -115,6 +118,15 @@ export function admitCommand(ctx: AdapterContext, decl: AdapterDeclaration, ledg
     ctx.commandUpdate({ commandId: cmd.commandId, status: 'rejected', detail });
     return false;
   }
-  ledger.record(cmd, 'received');
+  // Write-ahead: the entry is saved before the adapter acts on the command.
+  if (!ledger.record(cmd, 'received')) {
+    if (!SAFE_TO_REPEAT.has(cmd.type)) {
+      const detail = 'The gateway cannot save its command ledger, so it cannot guarantee this command runs only once. Not executed.';
+      ledger.record(cmd, 'rejected', detail);
+      ctx.commandUpdate({ commandId: cmd.commandId, status: 'rejected', detail });
+      return false;
+    }
+    ctx.log.warn(`${decl.deviceId}: command ledger not saved; running ${cmd.type} ${cmd.commandId} anyway (safe to repeat)`);
+  }
   return true;
 }

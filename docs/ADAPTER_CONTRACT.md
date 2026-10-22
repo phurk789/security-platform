@@ -49,7 +49,7 @@ Send `telemetry` at the declared rate:
 - `seq` increases by one per message. Gaps tell the server that data was lost.
 - `accuracyM` is the honest horizontal error. The map draws an uncertainty circle from it. Never send a more precise position than the device knows.
 - Never invent telemetry. If the device stops reporting, send nothing. The server shows STALE, then OFFLINE.
-- The gateway does not buffer telemetry while the server link is down. Old positions are not replayed as if they were live.
+- The gateway does not buffer telemetry while the server link is down. Old positions are not replayed as if they were live. It counts what it drops and logs the count when the link is back (§7).
 
 ## 3. Commands
 
@@ -82,7 +82,7 @@ Gateway → server, one message per status change:
 Rules:
 
 1. **Expiry.** If `now > expiresAt` when the command reaches the device, reply `rejected` and do nothing.
-2. **Idempotency.** A repeated `idempotencyKey` never executes again. Re-report the status you already have. `CommandLedger` and `admitCommand()` in the SDK do this for you.
+2. **Idempotency.** A repeated `idempotencyKey` never executes again, also after a gateway restart. Re-report the status you already have. Pass `ctx.ledger` to `admitCommand()` and record each status change in it: the gateway keeps that ledger on disk (§7).
 3. **Unsupported or wrong state.** Reply `rejected` with a `detail` the operator can act on, e.g. "Cannot resume while idle."
 4. **Success means confirmed.** Send `succeeded` only when the device confirms the effect: moving for start/resume, speed 0 for pause/stop. If the effect does not happen, send `failed`.
 5. **Silence is allowed.** If you cannot tell what happened, send nothing. The server shows _timed out_ (no ack in 5 s) or _unknown_. It never shows success by itself.
@@ -118,11 +118,63 @@ sent in time order once it is back. Command status updates from that period are 
 4. The server may send `demo` (`cut_link`, `restore_link`, `reset`) to simulators. Real adapters ignore it. `deviceId: "*"` targets every adapter.
 5. On disconnect the gateway reconnects with backoff (250 ms doubling to 5 s) and sends `hello` again.
 
-## 7. Test checklist before declaring `verified` (PRD §11)
+## 7. Command ledger across restarts
+
+The gateway gives each adapter a `CommandLedger` as `ctx.ledger` ([`apps/gateway/src/ledger.ts`](../apps/gateway/src/ledger.ts)).
+`admitCommand()` saves a command to it **before** the adapter acts on it, so a command that ran is on disk
+even if the gateway dies a moment later. After a restart, a re-delivered command is re-reported, never run again.
+
+| Item       | Rule                                                                                                                                                                                                                                                                                                                                |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Location   | `<GATEWAY_DATA_DIR>/ledger/<deviceId>.json`, one file per device. `GATEWAY_DATA_DIR` defaults to `$DATA_DIR/gateway` (`/data/gateway` in the Docker image), else `./data/gateway`. A device id that is not a plain file name gets `id-<sha256 prefix>.json`.                                                                       |
+| Storage    | Must survive a restart **and** a container re-create: a host directory or a named volume, writable by the gateway user (uid 1000 in the image). The container's own filesystem is not enough. `deploy/edge/docker-compose.yml` does not mount one yet.                                                                           |
+| Writes     | The whole file on every change: a temp file in the same directory, `fsync`, rename over the old file, then `fsync` of the directory (skipped on Windows). A crash leaves the old or the new file, never a mix. Stray `*.tmp` files are deleted at start. The file is created at start, so an unwritable directory shows up at once. |
+| Retention  | An entry is kept 10 min after its last update (`LEDGER_RETAIN_MS`, 60× the 10 s `COMMAND_TTL_MS`). Dedupe only needs it until the command expires; the longer retention means a late re-delivery gets the status the device really reported, not "expired, not executed".                                                         |
+| Size bound | At most 1,000 entries per device (`LEDGER_MAX_ENTRIES`), oldest dropped first. An entry whose command could still be admitted (now ≤ `expiresAt` + 2 s clock skew) is never dropped, by retention or by the bound: forgetting it would let the command run twice. A flood can therefore exceed the bound briefly (logged once).   |
+
+```json
+{
+  "format": "ps-gw-ledger/1",
+  "deviceId": "UGV-01",
+  "savedAt": 1792188206020,
+  "entries": [{ "key": "8f0c…", "commandId": "CMD-0042", "status": "succeeded", "expiresAt": 1792188215000, "at": 1792188206020 }],
+  "sha256": "<hex SHA-256 of JSON.stringify(entries)>"
+}
+```
+
+`status` is the last one the adapter recorded: `received` (admitted, no outcome yet), `acknowledged`,
+`executing`, `succeeded`, `rejected` or `failed`. `expiresAt` is the command's (server clock), `at` the
+last update (gateway clock).
+
+**Fail-safe start.** If the file is missing, unreadable or corrupt (does not parse, unknown format, written
+for another device, checksum mismatch, malformed entry), the gateway logs why and treats every command that
+may have been issued before it started as already seen with an unknown outcome. It does not run it and sends
+nothing, so the server shows _timed out_ (rule 5). The server sets `expiresAt = issuedAt + COMMAND_TTL_MS`,
+so these are exactly the commands with `expiresAt ≤ start + 10 s + 2 s`, and the window closes by itself
+about 12 s after the start. A corrupt file is kept as `<file>.corrupt-<ms>` for inspection and replaced by an
+empty ledger. This relies on the gateway clock being within 2 s of the server's: run NTP on the Edge PC.
+
+**If the file cannot be written** (disk full, read-only volume), `start` and `resume` are rejected with
+"The gateway cannot save its command ledger…", because after a restart nothing would stop them running a
+second time. `stop` and `pause` still run: running them twice cannot move the vehicle. The error is logged
+once, and again when saving works.
+
+**Without a data directory** (`startGateway()` without `dataDir`: tests and the server's embedded simulator)
+ledgers stay in memory, as before. An adapter that creates its own `new CommandLedger()` also gets a
+memory-only ledger: use `ctx.ledger`.
+
+**Telemetry is not persisted or buffered.** It is still dropped while the server link is down: the server
+judges freshness by when a sample arrives, so a replayed sample would look live. The gateway counts what it
+drops by message type (`GatewayHandle.dropped`) and logs each outage when the link is back, for example
+`dropped during 12.4 s offline (not buffered): 118 telemetry, 1 cmd`. Lost `cmd` or `event` messages are
+logged as a warning.
+
+## 8. Test checklist before declaring `verified` (PRD §11)
 
 | Check                               | How                                                                                                              |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Retry does not execute twice        | Send the same command twice with one `idempotencyKey`. The device moves once.                                    |
+| Gateway restart does not re-run     | Restart the gateway while a command runs, then re-send it with the same key. Expect its status, no new motion.   |
 | Expired command not executed        | Send with `expiresAt` in the past. Expect `rejected` and no motion.                                              |
 | Unauthorised user cannot command    | Covered by the server. Confirm the adapter only acts on gateway messages, with no side channel.                  |
 | Network cut mid-mission             | Pull the link. The device reaches its declared safe state. The server shows STALE and then unknown or timed out. |

@@ -4,6 +4,10 @@
 //   GATEWAY_KEY     gw_demo_local_key            (or "key" in the config)
 //   GATEWAY_ID      edge-civic-01                (or "gatewayId" in the config)
 //   OFFLINE         simulated device ids that start offline (default CCTV-04)
+//   GATEWAY_DATA_DIR  state kept across restarts (command ledgers in <dir>/ledger/).
+//                   Default $DATA_DIR/gateway (/data/gateway in the Docker image), else ./data/gateway.
+//                   Put it on persistent storage: see docs/ADAPTER_CONTRACT.md §7.
+import { join, resolve } from 'node:path';
 import { defaultAdapters } from './adapters';
 import { startGateway } from './gateway';
 import { ConfigError, adaptersFromConfig, loadSiteConfig } from './real/config';
@@ -28,7 +32,9 @@ try {
   process.exit(2);
 }
 console.log(`[gw] ${site ? `site config ${configPath}` : 'simulated devices'}: ${adapters.map((a) => `${a.declaration.deviceId} (${a.declaration.adapterVersion})`).join(', ')}`);
-const gw = startGateway({ serverUrl, key, gatewayId, adapters, geo: site?.geo });
+const dataDir = resolve(process.env.GATEWAY_DATA_DIR || (process.env.DATA_DIR ? join(process.env.DATA_DIR, 'gateway') : './data/gateway'));
+console.log(`[gw] command ledgers in ${join(dataDir, 'ledger')}`);
+const gw = startGateway({ serverUrl, key, gatewayId, adapters, geo: site?.geo, dataDir });
 const shutdown = async () => {
   console.log('[gw] shutting down');
   await gw.stop();
