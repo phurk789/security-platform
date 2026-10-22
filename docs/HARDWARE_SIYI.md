@@ -117,6 +117,7 @@ firmware** → `ardurover.apj`. The Rover button there only offers `stable`, whi
 this board. Use the `.apj`, not `ardurover_with_bl.hex`, which also rewrites the bootloader.
 Changing the vehicle type resets every parameter and calibration: load
 `deploy/vehicle/tracked-ugv-rover.param`, then redo accelerometer, compass and radio calibration.
+Step-by-step bench runbook (Thai): [`tools/siyi-bench/FLASH_ROVER.md`](../tools/siyi-bench/FLASH_ROVER.md).
 
 **Wiring.**
 

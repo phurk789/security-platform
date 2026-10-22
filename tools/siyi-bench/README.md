@@ -34,7 +34,7 @@ test ใน [`test/guard.test.ts`](test/guard.test.ts) ยืนยันกฎ�
 - **Firmware:** UniFC 6 Pico มาจากโรงงานเป็น **ArduCopter** (เครื่องของเราเป็น 4.6.3 เป็น build ของ SIYI) probe อ่านได้ทุก firmware แต่ข้อ Rover จะขึ้น WARN ก่อนใช้กับรถต้องแฟลช **ArduPilot Rover** แล้วโหลดไฟล์ param (D-34):
   - **บนโต๊ะ:** `ArduRover V4.8.0-dev` จาก `firmware.ardupilot.org/Rover/latest/SIYI-UniFC-6-PICO/` เพราะ Rover stable และ beta ยังไม่มีบอร์ดนี้ เป็น build ที่ยังพัฒนาอยู่และเปลี่ยนทุกวัน ให้บันทึกเวอร์ชันจากรายงาน probe (`statusText`) ทุกครั้งที่แฟลช
   - **งานโชว์:** Rover stable ที่ขอจาก SIYI
-  - วิธีแฟลชอยู่ใน [`docs/HARDWARE_SIYI.md`](../../docs/HARDWARE_SIYI.md) §1 ต้องใช้ Load custom firmware เพราะปุ่ม Rover ปกติของ Mission Planner หาบอร์ดนี้ไม่เจอ
+  - วิธีแฟลชทีละขั้นอยู่ใน [คู่มือแฟลช Rover](FLASH_ROVER.md) ต้องใช้ Load custom firmware เพราะปุ่ม Rover ปกติของ Mission Planner หาบอร์ดนี้ไม่เจอ
 - **สาย:** UART 1 ของ air unit (GH1.25 3 ขา) → TELEM1 ของ Pico (6 ขา) ต้องใช้สายแปลง ไขว้ TX↔RX ต่อ GND และ**ไม่ต่อ 5V** เพราะ air unit มีไฟจาก XT30 ของตัวเอง ดูตารางสายเต็มใน [`docs/HARDWARE_SIYI.md`](../../docs/HARDWARE_SIYI.md) §1
 - **ไฟ:** ทดสอบบนโต๊ะ ใช้ไฟ USB จาก PC เลี้ยงบอร์ดได้ แรงดันแบตที่ probe รายงานจะไม่ใช่ค่าจริงจนกว่าจะต่อ power module
 
