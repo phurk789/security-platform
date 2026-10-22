@@ -194,6 +194,10 @@ cd deploy/edge && docker compose up -d                                 # gateway
 
 Without Docker: `GATEWAY_CONFIG=deploy/edge/site.json npm start -w @13store/gateway`.
 
+The gateway keeps its command ledgers (once-only execution across restarts) in the `gateway-data`
+volume, or in `GATEWAY_DATA_DIR` without Docker (default `./data/gateway`). Keep it: `docker compose down -v`
+deletes it. See [ADAPTER_CONTRACT.md §7](ADAPTER_CONTRACT.md).
+
 `site.json` fields: `geo` (origin latitude/longitude of the site grid and rotation), and per
 device `type` (`mavlink` / `siyi-camera` / `simulated`), `deviceId`, `profile`
 (`ardupilot-rover`, `ardupilot-copter`, `px4-rover`, `px4-multicopter`), `link`, `pos` for a

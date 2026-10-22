@@ -9,8 +9,12 @@ services:
     network_mode: host # reach 192.168.144.20 (UniRC datalink) and .25 (camera)
     environment:
       GATEWAY_CONFIG: /config/site.json
+      GATEWAY_DATA_DIR: /data/gateway # command ledgers (docs/ADAPTER_CONTRACT.md §7)
     volumes:
       - ./site.json:/config/site.json:ro
+      # Named volume, so the ledgers survive restarts and container re-creates. Not a bind mount:
+      # a new named volume takes the image's /data ownership (node), a missing host dir is created root-owned.
+      - gateway-data:/data
     restart: unless-stopped
 
   media:
@@ -20,3 +24,6 @@ services:
       - ./mediamtx.yml:/mediamtx.yml:ro
       - ./recordings:/recordings # recorded video (size it for recordDeleteAfter × bitrate × cameras)
     restart: unless-stopped
+
+volumes:
+  gateway-data: # keep it: `docker compose down -v` deletes the ledgers
