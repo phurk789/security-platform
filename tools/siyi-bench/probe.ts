@@ -18,6 +18,7 @@ import { parseArgs } from 'node:util';
 import { MavLinkPacketParser, MavLinkPacketSplitter, MavLinkProtocolV2, ardupilotmega, common, minimal, type MavLinkData, type MavLinkPacket } from 'node-mavlink';
 import { assertGcsHeartbeat, assertSendAllowed } from './guard';
 import { diffParams, parseParamFile, type ParamDiff } from './params';
+import { createRawStats, diagnoseRawLink, recordDatagram, recordFrame } from './rawlink';
 import { applyMessage, createState, evaluate, MSG } from './telemetry';
 
 const REGISTRY: Record<number, new () => MavLinkData> = { ...minimal.REGISTRY, ...common.REGISTRY, ...ardupilotmega.REGISTRY } as never;
@@ -39,6 +40,7 @@ const durationMs = Number(args.duration) * 1000;
 const readParams = !args['no-params'];
 const expected = readParams ? parseParamFile(readFileSync(args.params!, 'utf8')) : [];
 const state = createState(Date.now());
+const raw = createRawStats();
 const proto = new MavLinkProtocolV2(255, 190);
 const sock = dgram.createSocket('udp4');
 const input = new PassThrough();
@@ -93,6 +95,7 @@ function requestMissingParams() {
 }
 
 input.pipe(new MavLinkPacketSplitter()).pipe(new MavLinkPacketParser()).on('data', (p: MavLinkPacket) => {
+  recordFrame(raw);
   const clazz = REGISTRY[p.header.msgid];
   if (!clazz) return;
   const data = p.protocol.data(p.payload, clazz as never) as unknown as Record<string, unknown>;
@@ -102,6 +105,7 @@ input.pipe(new MavLinkPacketSplitter()).pipe(new MavLinkPacketParser()).on('data
 
 sock.on('message', (msg, rinfo) => {
   if (args.listen && !peer) peer = { host: rinfo.address, port: rinfo.port };
+  recordDatagram(raw, msg);
   input.write(msg);
 });
 sock.on('error', (e) => console.error(`UDP error: ${e.message}`));
@@ -125,13 +129,15 @@ function finish() {
   sock.close();
   const now = Date.now();
   const paramDiffs: ParamDiff[] | undefined = readParams && state.paramCount ? diffParams(expected, state.params) : undefined;
-  const checks = evaluate(state, { nowMs: now, paramDiffs, paramsRequested: readParams });
+  const rawDiagnosis = diagnoseRawLink(raw);
+  const checks = evaluate(state, { nowMs: now, paramDiffs, paramsRequested: readParams, raw: rawDiagnosis });
   const report = {
     tool: 'siyi-bench-probe',
     readOnly: true,
     generatedAt: new Date(now).toISOString(),
     link: args.listen ? { mode: 'listen', port: Number(args.listen) } : { mode: 'client', host: args.host, port: Number(args.port) },
     durationS: (now - state.startedMs) / 1000,
+    rawLink: { datagrams: raw.datagrams, bytes: raw.bytes, frames: raw.frames, diagnosis: rawDiagnosis },
     autopilot: state.autopilot,
     armed: state.armed,
     mode: state.mode,

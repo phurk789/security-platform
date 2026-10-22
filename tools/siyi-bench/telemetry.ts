@@ -2,6 +2,7 @@
 // Pure functions only: the socket and parser live in probe.ts so this file is unit-testable.
 
 import type { ParamDiff } from './params';
+import type { RawLinkDiagnosis } from './rawlink';
 
 export const MSG = {
   HEARTBEAT: 0,
@@ -155,6 +156,24 @@ export interface EvaluateOptions {
   nowMs: number;
   paramDiffs?: ParamDiff[];
   paramsRequested: boolean;
+  /** What the raw bytes looked like; turns "no heartbeat" into a specific cause. */
+  raw?: RawLinkDiagnosis;
+}
+
+/** Explain a missing heartbeat from what actually arrived on the socket. */
+function noHeartbeatDetail(raw: RawLinkDiagnosis | undefined): string {
+  switch (raw?.kind) {
+    case 'silent':
+      return 'No data at all from the datalink. Check that the SIYI app datalink connection mode is UDP, the air unit is linked (ping 192.168.144.11), the UART cable from the air unit to TELEM1, and that the flight controller is powered.';
+    case 'double-rate':
+      return `Bytes arrive (${raw.bytes} B) but none are MAVLink, and ${raw.matchPct}% of them look like serial data read at twice its baud rate: the SIYI datalink baud is double the flight controller's SERIALn_BAUD (for example 115200 on the remote, 57600 on the board). Set both to the same value.`;
+    case 'not-mavlink':
+      return `Bytes arrive (${raw.bytes} B) but none decode as MAVLink. Most likely the SIYI datalink baud and SERIALn_BAUD differ (the UniFC 6 Pico ships with 57600 on TELEM1), or SERIALn_PROTOCOL is not 2.`;
+    case 'mavlink':
+      return `MAVLink arrives (${raw.frames} frames) but no autopilot heartbeat: only ground stations or other components are on the link.`;
+    default:
+      return 'No heartbeat from an autopilot. Check the LAN cable to the UniRC 7 Pro, the PC address (192.168.144.x), the datalink connection mode (UDP) and baud in the SIYI app, and SERIALn_PROTOCOL/BAUD on the flight controller.';
+  }
 }
 
 /** Bench checks that can be judged without sending any command. */
@@ -163,8 +182,7 @@ export function evaluate(state: BenchState, o: EvaluateOptions): CheckResult[] {
   const add = (id: string, title: string, status: CheckStatus, detail: string) => r.push({ id, title, status, detail });
 
   if (!state.autopilot || state.heartbeats === 0) {
-    add('link', 'Autopilot heartbeat', 'fail',
-      'No heartbeat from an autopilot. Check the LAN cable to the UniRC 7 Pro, the PC address (192.168.144.x), the datalink baud in the SIYI app, and SERIALn_PROTOCOL/BAUD on the flight controller.');
+    add('link', 'Autopilot heartbeat', 'fail', noHeartbeatDetail(o.raw));
     return r;
   }
   const spanS = Math.max(1, ((state.lastHeartbeatMs ?? o.nowMs) - (state.firstHeartbeatMs ?? o.nowMs)) / 1000);

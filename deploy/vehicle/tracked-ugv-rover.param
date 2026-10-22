@@ -5,8 +5,11 @@
 # (left / right), centre = neutral; engine speed held by its own governor; engine stop and
 # actuator power cut by a hardwired E-stop chain that does not depend on this board.
 #
+# Needs ArduPilot Rover firmware. The UniFC 6 Pico ships with ArduCopter (4.6.3 on our unit):
+# flash Rover first, then load this file. Rover stable has no build for this board yet; the bench
+# uses Rover latest 4.8.0-dev (docs/HARDWARE_SIYI.md section 1, decision D-34).
 # Load in Mission Planner (Config > Full Parameter List > Load from file) or QGroundControl.
-# Lines marked CONFIRM depend on the board's UART map or on the vehicle; check before arming.
+# Lines marked CONFIRM depend on the vehicle; measure them before arming.
 
 # --- Vehicle ---------------------------------------------------------------
 FRAME_CLASS,1            # Rover
@@ -38,8 +41,9 @@ ATC_ACCEL_MAX,0.5        # m/s/s
 ATC_DECEL_MAX,1.0        # m/s/s
 
 # --- Telemetry to the SIYI air unit (MAVLink 2) -----------------------------
-SERIAL1_PROTOCOL,2       # CONFIRM: SERIAL1 = TELEM1 on UniFC 6 Pico (check SIYI ArduPilot UART map)
-SERIAL1_BAUD,115         # must match the datalink baud set in the SIYI app (115200)
+SERIAL1_PROTOCOL,2       # SERIAL1 = TELEM1 (SIYI manual 1.3; seen on the bench 2026-10-22)
+SERIAL1_BAUD,115         # factory value is 57 (57600); Datalink 1 baud in the SIYI app must be the same
+BRD_SER1_RTSCTS,0        # flow control off: only TX, RX and GND are wired to the air unit
 SR1_POSITION,2           # Hz
 SR1_EXTRA1,2
 SR1_EXTRA2,2
@@ -47,8 +51,8 @@ SR1_EXT_STAT,1
 SR1_RC_CHAN,1
 
 # --- GNSS / compass ----------------------------------------------------------
-SERIAL3_PROTOCOL,5       # CONFIRM: GPS port number on this board
-GPS_TYPE,1               # auto
+SERIAL3_PROTOCOL,5       # SERIAL3 = GPS1 (SIYI manual 1.3; factory value on the bench)
+GPS1_TYPE,1              # auto (ArduPilot 4.6 renamed GPS_TYPE to GPS1_TYPE)
 COMPASS_USE,1            # mount the GPS/compass mast away from the engine and steel frame
 
 # --- RC from the UniRC 7 Pro (SBUS via the air unit) -----------------------
