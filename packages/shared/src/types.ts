@@ -46,8 +46,14 @@ export type CommandStatus = 'requested' | 'authorized' | 'sent' | 'acknowledged'
 /** How fresh a feed or telemetry stream is (UXUI §7). */
 export type Freshness = 'live' | 'stale' | 'offline';
 
-/** Product integration status, separate from online/offline (UXUI S06). */
+/** Product integration status, separate from online/offline (UXUI S06). Set by an administrator, never by a gateway. */
 export type IntegrationStatus = 'verified' | 'testing' | 'simulated';
+
+/**
+ * Operational mode of one device (ADR-006). Real devices start in SHADOW and only a supervisor
+ * promotes them; the server never promotes on its own. SIMULATION is fixed by the adapter type.
+ */
+export type OperationalMode = 'SIMULATION' | 'SHADOW' | 'LIVE_MANUAL' | 'LIVE_ASSISTED';
 
 export type DeviceKind = 'cctv' | 'ugv' | 'uav';
 
@@ -90,6 +96,8 @@ export interface Device {
   adapterVersion: string;
   firmwareTested: string;
   integration: IntegrationStatus;
+  /** Configured operational mode (ADR-006). Missing on old records: read through `modeOf()`. */
+  mode?: OperationalMode;
   capabilities: string[];
   /** Commands the adapter declares support for (F06). */
   commands: CommandType[];

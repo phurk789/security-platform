@@ -6,7 +6,16 @@ import { defaultAdapters, startGateway, type GatewayHandle } from '@13store/gate
 import { loadConfig, type Config } from '../src/config';
 import { openDb } from '../src/db';
 import { buildApp } from '../src/http';
+import type { Actor } from '../src/platform';
 import { DEMO_GATEWAY_KEY, seed } from '../src/seed';
+
+/**
+ * A signed-in user with a fresh password check, for organisations without a seeded user of that
+ * role (the developer sandbox has no administrator or supervisor).
+ */
+export function testActor(orgId: string, role: Actor['role']): Actor {
+  return { kind: 'user', orgId, siteIds: [], userId: `t-${role}`, name: `Test ${role}`, role, stepUpUntil: Date.now() + 15 * 60_000 };
+}
 
 export interface TestServer {
   url: string;

@@ -24,7 +24,7 @@ import { isTerminal } from '../domain/reducer';
 import { ago, useT, type T } from '../i18n';
 import { useStore } from '../store';
 import { VehicleSpecs } from '../views/CommandCenter';
-import { Badge, CommandBadge, FreshBadge, IntegrationBadge, MissionBadge } from './Badges';
+import { Badge, CommandBadge, FreshBadge, IntegrationBadge, MissionBadge, ModeBadge } from './Badges';
 import { CameraFeed } from './CameraFeed';
 import { LiveMission } from './IncidentPanel';
 import { TelemetryPanel } from './TelemetryPanel';
@@ -76,6 +76,7 @@ export function DevicePanel({ d }: { d: Device }) {
         <div className="row gap">
           <span className="inc-big-id">{d.id}</span>
           <IntegrationBadge i={d.integration} />
+          <ModeBadge d={d} />
           <FreshBadge f={f} age={ago(ageMs(s, d))} />
         </div>
         <h3>{cat ? cat.name : d.model}</h3>

@@ -52,6 +52,12 @@ import {
   describeCameraAction,
   actionCapability,
   isPayloadAction,
+  cameraActionMoves,
+  modeAllowsMotion,
+  modeOf,
+  type OperationalMode,
+  type StreamInfo,
+  type IntegrationStatus,
   VEHICLE_CATALOG,
   PAYLOAD_CATALOG,
   COMPONENT_KINDS,
@@ -112,6 +118,7 @@ import { Notifier, type Outbound } from './notify';
 import type { PushPayload } from './push';
 import type { Config } from './config';
 import { nextNumber, tx, type DB } from './db';
+import { EDGE_STREAM_KEYS, edgeGet, parseEdgeOrigin, vetStream, type EdgeGet } from './edgeOrigins';
 import { hmac, safeEqual, sha256 } from './security';
 
 // ---------------------------------------------------------------------------
@@ -176,6 +183,9 @@ export interface CameraResult {
 
 const INTEGRATION_ACTIONS: Action[] = ['incident.create'];
 
+/** Order of operational modes for promote / demote. SIMULATION sits outside the ladder. */
+const MODE_RANK: Record<OperationalMode, number> = { SIMULATION: -1, SHADOW: 0, LIVE_MANUAL: 1, LIVE_ASSISTED: 2 };
+
 // ---------------------------------------------------------------------------
 // Platform
 // ---------------------------------------------------------------------------
@@ -206,6 +216,8 @@ export class Platform {
   private backupTimer?: NodeJS.Timeout;
   readonly license: License;
   now: () => number = () => Date.now();
+  /** Server-side GET to an edge media server (DNS-checked, no redirects). Tests may replace the transport. */
+  edgeGet: EdgeGet = edgeGet;
 
   constructor(
     readonly db: DB,
@@ -371,7 +383,11 @@ export class Platform {
     this.lastSeq.clear();
     this.lastFresh.clear();
     const rows = this.db.prepare('SELECT org_id, site_id, data FROM devices').all() as { org_id: string; site_id: string; data: string }[];
-    for (const r of rows) this.devices.set((JSON.parse(r.data) as Device).id, { ...JSON.parse(r.data), orgId: r.org_id, siteId: r.site_id });
+    for (const r of rows) {
+      const d = JSON.parse(r.data) as Device;
+      // A restart never raises a mode: a missing or unknown value reads as SHADOW (ADR-006 §5).
+      this.devices.set(d.id, { ...d, mode: modeOf(d), orgId: r.org_id, siteId: r.site_id });
+    }
   }
 
   // ---- helpers -------------------------------------------------------------
@@ -855,13 +871,19 @@ export class Platform {
     }
     const siteId = input.siteId ?? this.defaultSite(a);
     if (!this.inScope(a, a.orgId, siteId)) fail(404, 'not_found', 'Site not found.');
+    // A registered device is real hardware under test. Only an administrator later marks it verified
+    // (PATCH /devices/{id}/integration); a gateway never sets it (capability matrix §8). Simulated
+    // devices come from the demo/sandbox seed only, so a pilot site cannot bypass the mode gate.
+    const integration: IntegrationStatus = 'testing';
     const d: Device = {
       id: input.id,
       kind: input.kind,
       model: input.model ?? 'Unspecified',
       adapterVersion: '—',
       firmwareTested: input.firmwareTested ?? 'not tested',
-      integration: 'testing',
+      integration,
+      // Real devices always start in SHADOW, whoever registers them (ADR-006 §2).
+      mode: modeOf({ integration }),
       capabilities: input.capabilities ?? [],
       commands: [],
       limitations: input.limitations ?? 'Not yet declared by an adapter.',
@@ -874,7 +896,7 @@ export class Platform {
     };
     tx(this.db, () => {
       this.db.prepare('INSERT INTO devices (id, org_id, site_id, data, registered_at) VALUES (?,?,?,?,?)').run(d.id, a.orgId, siteId, JSON.stringify(d), this.now());
-      this.audit(a, 'device.register', d.id);
+      this.audit(a, 'device.register', d.id, 'ok', `${d.kind} ${d.integration}, mode ${d.mode}`);
     });
     this.devices.set(d.id, { ...d, orgId: a.orgId, siteId });
     this.publish({ orgId: a.orgId, siteId, event: { type: 'device', device: d } });
@@ -914,6 +936,168 @@ export class Platform {
       this.audit(a, 'control.release', d.id);
     });
     return this.publicDevice(d);
+  }
+
+  // ---- operational mode (ADR-006, L1 safety gate) ----------------------------
+
+  /**
+   * POST /devices/{id}/mode-transitions. Promotion (SHADOW → LIVE_MANUAL) needs device.mode.promote,
+   * a password check within the step-up window, fresh telemetry and a reason. Demotion to a lower
+   * mode needs device.mode.demote (or the system) and a reason. SIMULATION never changes here, and
+   * LIVE_ASSISTED is not enabled until an automation policy exists.
+   */
+  transitionMode(a: Actor, deviceId: string, input: { to?: unknown; reason?: unknown }) {
+    const to = input.to as OperationalMode;
+    if (typeof to !== 'string' || !Object.hasOwn(MODE_RANK, to)) return fail(400, 'invalid', 'to must be SHADOW, LIVE_MANUAL or LIVE_ASSISTED.');
+    const reason = typeof input.reason === 'string' ? input.reason.trim().slice(0, 500) : '';
+    if (!reason) return fail(400, 'invalid', 'A reason is required (who is on site, which safety checks passed).');
+    const d = this.getDevice(a, deviceId);
+    const from = modeOf(d);
+    const deny = (status: number, code: string, why: string): never => {
+      this.audit(a, 'device.mode_change', d.id, 'denied', `${from} → ${to}: ${why}`);
+      return fail(status, code, why);
+    };
+    if (from === 'SIMULATION' || to === 'SIMULATION') return deny(409, 'mode_locked', `${d.id}: SIMULATION is fixed by the adapter type and cannot be changed here.`);
+    if (from === to) return fail(409, 'conflict', `${d.id} is already ${to}.`);
+    const up = MODE_RANK[to] > MODE_RANK[from];
+    try {
+      this.require(a, up ? 'device.mode.promote' : 'device.mode.demote', d.id);
+    } catch (e) {
+      // Role denials are audited by require(); a missing password check is audited here.
+      if (e instanceof ApiError && e.code === 'step_up_required') this.audit(a, 'device.mode_change', d.id, 'denied', `${from} → ${to}: step-up required`);
+      throw e;
+    }
+    if (up) {
+      if (to === 'LIVE_ASSISTED') return deny(409, 'not_enabled', 'LIVE_ASSISTED needs an approved automation policy (ADR-006) and is not enabled in this release.');
+      const fresh = freshnessAt(this.now(), d);
+      if (fresh !== 'live') return deny(409, 'stale_telemetry', `${d.id} telemetry is ${fresh}. Only a device reporting live data can be promoted.`);
+    }
+    return this.applyMode(a, d, to, reason);
+  }
+
+  /** Safety demotion by the platform itself. Never raises a mode; does nothing below LIVE. */
+  demoteBySystem(deviceId: string, reason: string, name = 'Safety demotion') {
+    const d = this.devices.get(deviceId);
+    if (!d || MODE_RANK[modeOf(d)] <= MODE_RANK.SHADOW) return undefined;
+    return this.applyMode(this.systemActor(d.orgId, 'system', name), d, 'SHADOW', reason);
+  }
+
+  private applyMode(a: Actor, d: Device & { orgId: string; siteId: string }, to: OperationalMode, reason: string) {
+    const from = modeOf(d);
+    const at = this.now();
+    d.mode = to;
+    let auditId = '';
+    tx(this.db, () => {
+      this.saveDevice(d);
+      auditId = this.audit(a, 'device.mode_change', d.id, 'ok', `${from} → ${to}: ${reason}`).id;
+    });
+    const running = to === 'SHADOW' && this.activeMission(d.id)?.status === 'executing';
+    this.publish({
+      orgId: d.orgId,
+      siteId: d.siteId,
+      event: {
+        type: 'notice',
+        tone: MODE_RANK[to] > MODE_RANK[from] ? 'warn' : 'info',
+        text: `${d.id} mode ${from} → ${to} by ${a.name}: ${reason}${running ? ' The running mission was not stopped; stop or pause it if needed.' : ''}`,
+      },
+    });
+    const change = { orgId: d.orgId, siteId: d.siteId, deviceId: d.id, from, to, by: a.name, reason, at, auditId };
+    this.bus.emit('device.mode_changed', change);
+    return { device: this.publicDevice(d), from, to, at, auditId };
+  }
+
+  /** Administrator: integration status (verified / testing). Gateways never set it. */
+  setDeviceIntegration(a: Actor, deviceId: string, input: { integration?: unknown; reason?: unknown }) {
+    this.require(a, 'admin.devices', deviceId);
+    const to = input.integration as IntegrationStatus;
+    if (!['verified', 'testing', 'simulated'].includes(to)) return fail(400, 'invalid', 'integration must be verified, testing or simulated.');
+    const reason = typeof input.reason === 'string' ? input.reason.trim().slice(0, 500) : '';
+    if (!reason) return fail(400, 'invalid', 'A reason is required (test record, HIL report).');
+    const d = this.getDevice(a, deviceId);
+    const from = d.integration;
+    if (from === to) return fail(409, 'conflict', `${d.id} is already ${to}.`);
+    if ((from === 'simulated') !== (to === 'simulated')) {
+      this.audit(a, 'device.integration', d.id, 'denied', `${from} → ${to}: crosses the simulated boundary`);
+      return fail(409, 'mode_locked', 'A simulated adapter and a real device are different devices (ADR-006). Register a new device id instead.');
+    }
+    d.integration = to;
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, 'device.integration', d.id, 'ok', `${from} → ${to}: ${reason}`);
+    });
+    return this.publicDevice(d);
+  }
+
+  // ---- edge media origins (gateway-declared stream URLs) -----------------------
+
+  /** Allowed edge origins for one device's site: the org-wide list plus the site's own. */
+  private edgeOriginsFor(orgId: string, siteId: string): string[] {
+    const rows = this.db.prepare("SELECT origin FROM edge_origins WHERE org_id = ? AND (site_id = '' OR site_id = ?)").all(orgId, siteId) as { origin: string }[];
+    return rows.map((r) => r.origin);
+  }
+
+  listEdgeOrigins(a: Actor) {
+    // Reading needs no password check; changing the list does (admin.edge_origins is a step-up action).
+    this.require(a, 'admin.devices', 'edge-origins', { mutating: false });
+    const rows = this.db.prepare('SELECT site_id, origin, created_by, created_at FROM edge_origins WHERE org_id = ? ORDER BY site_id, origin').all(a.orgId) as {
+      site_id: string;
+      origin: string;
+      created_by: string;
+      created_at: number;
+    }[];
+    return rows
+      .filter((r) => !r.site_id || this.inScope(a, a.orgId, r.site_id))
+      .map((r) => ({ siteId: r.site_id || null, origin: r.origin, createdBy: r.created_by, createdAt: r.created_at }));
+  }
+
+  /**
+   * Replaces the allowed edge origins for one site (siteId) or the whole organisation (no siteId).
+   * Stored stream URLs that are no longer allowed are removed at once; newly allowed ones are taken
+   * from the gateway's next hello.
+   */
+  setEdgeOrigins(a: Actor, input: { siteId?: unknown; origins?: unknown }) {
+    this.require(a, 'admin.edge_origins', 'edge-origins');
+    let siteId = '';
+    if (input.siteId !== undefined && input.siteId !== null && input.siteId !== '') siteId = this.site(a, String(input.siteId)).id;
+    else if (a.siteIds.length) return fail(403, 'forbidden', 'Organisation-wide origins need an administrator for every site.');
+    if (!Array.isArray(input.origins) || input.origins.length > 50) return fail(400, 'invalid', 'origins must be a list of up to 50 origins.');
+    const origins: string[] = [];
+    for (const raw of input.origins) {
+      const r = parseEdgeOrigin(raw);
+      if ('error' in r) {
+        this.audit(a, 'admin.edge_origins', siteId || a.orgId, 'denied', r.error);
+        return fail(400, 'invalid', r.error);
+      }
+      if (!origins.includes(r.origin)) origins.push(r.origin);
+    }
+    const before = (this.db.prepare('SELECT origin FROM edge_origins WHERE org_id = ? AND site_id = ? ORDER BY origin').all(a.orgId, siteId) as { origin: string }[]).map(
+      (r) => r.origin,
+    );
+    tx(this.db, () => {
+      this.db.prepare('DELETE FROM edge_origins WHERE org_id = ? AND site_id = ?').run(a.orgId, siteId);
+      const ins = this.db.prepare('INSERT INTO edge_origins (org_id, site_id, origin, created_by, created_at) VALUES (?,?,?,?,?)');
+      for (const o of origins) ins.run(a.orgId, siteId, o, a.name, this.now());
+      this.audit(a, 'admin.edge_origins', siteId || a.orgId, 'ok', `${siteId ? `site ${siteId}` : 'organisation'}: [${origins.join(', ')}] (was [${before.join(', ')}])`);
+      // Drop stored URLs the new list no longer allows.
+      for (const d of this.devices.values()) {
+        if (d.orgId !== a.orgId || (siteId && d.siteId !== siteId)) continue;
+        const allowed = this.edgeOriginsFor(d.orgId, d.siteId);
+        const st = vetStream(d.stream, allowed).stream;
+        const comps = d.components?.map((c) => (c.stream ? { ...c, stream: vetStream(c.stream, allowed, EDGE_STREAM_KEYS.filter((k) => k !== 'playback')).stream } : c));
+        if (JSON.stringify(st) !== JSON.stringify(d.stream) || JSON.stringify(comps) !== JSON.stringify(d.components)) {
+          d.stream = st;
+          d.components = comps;
+          this.saveDevice(d);
+        }
+      }
+    });
+    return { siteId: siteId || null, origins };
+  }
+
+  /** The device's stream with only URLs its site allows right now (the list may have changed since the hello). */
+  private vettedStream(d: Device & { orgId: string; siteId: string }): StreamInfo {
+    if (d.integration === 'simulated' || !d.stream) return {};
+    return vetStream(d.stream, this.edgeOriginsFor(d.orgId, d.siteId)).stream ?? {};
   }
 
   telemetryHistory(a: Actor, deviceId: string, from: number, to: number) {
@@ -1182,6 +1366,17 @@ export class Platform {
       throw new ApiError(409, code, why);
     };
     if (!d.commands.includes(type)) deny('invalid', `${d.id} adapter does not support ${type}.`);
+    // Mode gate (ADR-006, L1 safety gate): only start and resume set a vehicle moving. Stop and
+    // pause always pass, so a device can be halted in any mode.
+    const mode = modeOf(d);
+    const by = a.kind === 'system' ? 'automation' : 'person';
+    if ((type === 'start' || type === 'resume') && !modeAllowsMotion(mode, by))
+      deny(
+        'mode_not_live',
+        by === 'automation'
+          ? `${d.id} is ${mode}. Automatic ${type} needs LIVE_ASSISTED.`
+          : `${d.id} is in ${mode} mode. A supervisor must promote it to LIVE_MANUAL before ${type}. Stop and pause still work.`,
+      );
     if (d.controlOwner !== a.userId)
       deny(
         'control_held',
@@ -1284,6 +1479,7 @@ export class Platform {
   gatewayHello(orgId: string, siteIds: string[], gatewayId: string, decls: AdapterDeclaration[], geo?: GeoAnchor) {
     const accepted: string[] = [];
     const rejected: { deviceId: string; reason: string }[] = [];
+    const notes: string[] = [];
     const sys = this.systemActor(orgId, 'gateway', gatewayId);
     if (geo && Number.isFinite(geo.originLat) && Number.isFinite(geo.originLon)) this.checkGatewayAnchor(sys, siteIds, gatewayId, geo);
     const orgEnv = (this.db.prepare('SELECT env FROM orgs WHERE id = ?').get(orgId) as { env: string } | undefined)?.env ?? this.cfg.env;
@@ -1297,26 +1493,43 @@ export class Platform {
         rejected.push({ deviceId: decl.deviceId, reason: 'The demo organisation accepts simulated adapters only. Use the developer sandbox or a pilot environment.' });
         continue;
       }
+      // A declaration may only make things stricter. A device registered as simulated takes
+      // commands without a LIVE mode, so a real adapter may not drive it.
+      if (d.integration === 'simulated' && decl.integration !== 'simulated') {
+        rejected.push({ deviceId: decl.deviceId, reason: 'Registered as a simulated device, but a real adapter declared it. Register it as a real device first.' });
+        continue;
+      }
+      // Stream URLs must sit on an edge origin allowed for the device's site (SSRF guard).
+      const allowed = this.edgeOriginsFor(orgId, d.siteId);
+      const st = vetStream(decl.stream, allowed);
+      const comps = sanitizeComponents(decl.components, allowed);
+      const refused = [...st.rejected, ...(comps?.rejected ?? [])];
+      if (refused.length) this.audit(sys, 'gateway.stream_rejected', d.id, 'denied', `${refused.join('; ')}. Allow the origin under edge origins, then reconnect the gateway.`);
+      if (decl.integration !== d.integration) notes.push(`${d.id} declared ${String(decl.integration).slice(0, 20)}, kept ${d.integration}`);
+      const prevGateway = (this.db.prepare('SELECT gateway_id FROM devices WHERE id = ?').get(d.id) as { gateway_id: string | null } | undefined)?.gateway_id;
+      // Everything except the integration status and the mode, which only people set.
       Object.assign(d, {
         model: decl.model,
         adapterVersion: decl.adapterVersion,
         firmwareTested: decl.firmwareTested,
-        integration: decl.integration,
         capabilities: decl.capabilities,
         commands: decl.commands,
         limitations: `${decl.limitations} Link loss: ${decl.linkLossBehavior}`,
         rateMs: decl.rateMs,
         view: decl.view ?? d.view,
-        stream: decl.stream,
+        stream: st.stream,
         mount: sanitizeMount(decl.mount) ?? d.mount,
         catalogId: decl.catalogId && VEHICLE_CATALOG[decl.catalogId] ? decl.catalogId : d.catalogId,
         indoor: sanitizeIndoor(decl.indoor) ?? d.indoor,
         payloads: Array.isArray(decl.payloads) ? decl.payloads.filter((p) => typeof p === 'string' && PAYLOAD_CATALOG[p]) : d.payloads,
-        components: sanitizeComponents(decl.components) ?? d.components,
+        components: comps?.components ?? d.components,
       });
+      d.mode = modeOf(d);
       this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
       this.lastSeq.delete(d.id); // a new connection may restart sequence numbers
       this.saveDevice(d);
+      // The same gateway reconnecting keeps the mode; a different one is a new control path.
+      if (prevGateway && prevGateway !== gatewayId) this.demoteBySystem(d.id, `control path changed: gateway ${prevGateway} → ${gatewayId}`);
       accepted.push(d.id);
     }
     // Anything never delivered before this (re)connect is dropped, never replayed (F09).
@@ -1332,7 +1545,7 @@ export class Platform {
       'gateway.connect',
       gatewayId,
       'ok',
-      `accepted ${accepted.join(', ') || 'none'}${rejected.length ? `; rejected ${rejected.map((r) => r.deviceId).join(', ')}` : ''}`,
+      `accepted ${accepted.join(', ') || 'none'}${rejected.length ? `; rejected ${rejected.map((r) => r.deviceId).join(', ')}` : ''}${notes.length ? `; ignored ${notes.join(', ')}` : ''}`,
     );
     return { accepted, rejected };
   }
@@ -1495,6 +1708,13 @@ export class Platform {
       this.audit(a, 'camera.control', d.id, 'denied', 'another operator holds control');
       return fail(409, 'not_control_owner', `Another operator holds control of ${d.id}. Ask them to hand over control.`);
     }
+    // Moving the camera or switching an actuator on needs a LIVE mode; stops, lights off, photo and record do not.
+    const mode = modeOf(d);
+    const by = a.kind === 'system' ? 'automation' : 'person';
+    if ((action ? cameraActionMoves(action) : true) && !modeAllowsMotion(mode, by)) {
+      this.audit(a, action && isPayloadAction(action) ? 'payload.control' : 'camera.control', d.id, 'denied', `${action ? describeCameraAction(action) : 'point at a place'}: mode ${mode}`);
+      return fail(409, 'mode_not_live', `${d.id} is in ${mode} mode. Camera moves need LIVE_MANUAL; a supervisor promotes the device.`);
+    }
     if (freshnessAt(this.now(), d) === 'offline') return fail(409, 'device_offline', `${d.id} is offline. Camera control is unavailable.`);
     return d;
   }
@@ -1570,7 +1790,8 @@ export class Platform {
     const now = this.now();
     const devices = [...this.devices.values()].filter((d) => d.orgId === orgId && d.siteId === siteId);
     const busy = (id: string) => now - (this.manualCamera.get(id) ?? 0) < MANUAL_CAMERA_HOLD_MS;
-    const pick = pickCamera(devices, inc.pos, this.buildingsOf(siteId), (d) => freshnessAt(now, d) !== 'offline', busy);
+    // Auto-aim is automation: only simulated cameras or LIVE_ASSISTED ones are turned.
+    const pick = pickCamera(devices, inc.pos, this.buildingsOf(siteId), (d) => freshnessAt(now, d) !== 'offline' && modeAllowsMotion(modeOf(d), 'automation'), busy);
     if (!pick) return;
     const d = this.devices.get(pick.device.id)!;
     const r = await this.aimSend(d, pick.aim);
@@ -2171,11 +2392,12 @@ export class Platform {
     const url = `/api/v1/media/${encodeURIComponent(d.id)}/frame.svg?u=${encodeURIComponent(a.userId ?? '')}&exp=${exp}&sig=${sig}`;
     const label = d.integration === 'simulated' ? 'SIMULATED' : 'LIVE';
     // Real device with a stream on the site media server: hand out a short-lived token that the
-    // media server checks with us (POST /api/v1/media/auth) before it serves any video.
-    if (d.integration !== 'simulated' && (d.stream?.whep || d.stream?.hls || d.stream?.whepSub)) {
+    // media server checks with us (POST /api/v1/media/auth) before it serves any video. Only URLs
+    // on an edge origin the site allows today are handed out.
+    const st = this.vettedStream(d);
+    if (st.whep || st.hls || st.whepSub) {
       const token = this.mediaToken(d.orgId, d.id, a.userId ?? '', this.now() + MEDIA_TOKEN_TTL_MS);
       const withToken = (u?: string) => (u ? `${u}${u.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : undefined);
-      const st = d.stream;
       return { url, expiresAt: exp, label, whep: withToken(st.whep), hls: withToken(st.hls), whepSub: withToken(st.whepSub), hlsSub: withToken(st.hlsSub), token };
     }
     return { url, expiresAt: exp, label };
@@ -2206,7 +2428,7 @@ export class Platform {
     const u = this.db.prepare('SELECT org_id FROM users WHERE id = ? AND active = 1').get(userId) as { org_id: string } | undefined;
     if (!u || u.org_id !== d.orgId) return false;
     // The token is for one device: the requested path must be that device's stream path.
-    const st = d.stream ?? {};
+    const st = this.vettedStream(d);
     const paths = [st.whep, st.hls, st.whepSub, st.hlsSub].filter(Boolean).map((s) => streamPath(s!));
     return paths.includes(String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
   }
@@ -2248,9 +2470,10 @@ export class Platform {
       const url = `${pb.base}/list?path=${encodeURIComponent(pb.path)}&start=${encodeURIComponent(new Date(from).toISOString())}&end=${encodeURIComponent(new Date(to).toISOString())}&token=${encodeURIComponent(token)}`;
       let list: { start: string; duration: number }[];
       try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        list = (await r.json()) as { start: string; duration: number }[];
+        const r = await this.edgeGet(url, { timeoutMs: 6000, maxBytes: 4 * 1024 * 1024 });
+        if (r.status < 200 || r.status >= 300) throw new Error(`HTTP ${r.status}`);
+        list = JSON.parse(r.body.toString('utf8')) as { start: string; duration: number }[];
+        if (!Array.isArray(list)) throw new Error('not a list');
       } catch (e) {
         return fail(502, 'error', `The site media server did not answer for recordings (${(e as Error).message}).`);
       }
@@ -2351,11 +2574,9 @@ export class Platform {
       const token = this.mediaToken(d.orgId, d.id, a.userId ?? '', this.now() + MEDIA_TOKEN_TTL_MS);
       const url = `${pb.base}/get?path=${encodeURIComponent(pb.path)}&start=${encodeURIComponent(new Date(start).toISOString())}&duration=${dur}&format=mp4&token=${encodeURIComponent(token)}`;
       try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const ab = await r.arrayBuffer();
-        if (ab.byteLength > 256 * 1024 * 1024) throw new Error('clip larger than 256 MB');
-        bytes = Buffer.from(ab);
+        const r = await this.edgeGet(url, { timeoutMs: 60_000, maxBytes: 256 * 1024 * 1024 });
+        if (r.status < 200 || r.status >= 300) throw new Error(`HTTP ${r.status}`);
+        bytes = r.body;
       } catch (e) {
         return fail(502, 'error', `Could not fetch the recording from the site media server (${(e as Error).message}).`);
       }
@@ -2379,10 +2600,10 @@ export class Platform {
     return ev;
   }
 
-  /** Playback base URL and recording path of a real device with a media-server stream. */
-  private playbackOf(d: Device): { base: string; path: string } | undefined {
-    const st = d.stream;
-    if (d.integration === 'simulated' || !st?.playback) return undefined;
+  /** Playback base URL and recording path of a real device with a media-server stream on an allowed edge origin. */
+  private playbackOf(d: Device & { orgId: string; siteId: string }): { base: string; path: string } | undefined {
+    const st = this.vettedStream(d);
+    if (!st.playback) return undefined;
     const path = streamPath(st.whep ?? st.hls ?? st.whepSub ?? st.hlsSub ?? '');
     if (!path) return undefined;
     return { base: st.playback.replace(/\/+$/, ''), path };
@@ -3323,10 +3544,11 @@ function sanitizeIndoor(v: unknown): Device['indoor'] {
 const COMP_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
 const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
 
-/** Equipment list from a gateway declaration: bounded strings, known kinds and statuses. */
-function sanitizeComponents(v: unknown): DeviceComponent[] | undefined {
+/** Equipment list from a gateway declaration: bounded strings, known kinds and statuses, stream URLs on allowed origins. */
+function sanitizeComponents(v: unknown, allowedOrigins: readonly string[]): { components: DeviceComponent[]; rejected: string[] } | undefined {
   if (!Array.isArray(v)) return undefined;
   const out: DeviceComponent[] = [];
+  const rejected: string[] = [];
   const seen = new Set<string>();
   for (const raw of v.slice(0, 32)) {
     const c = raw as Record<string, unknown>;
@@ -3334,15 +3556,13 @@ function sanitizeComponents(v: unknown): DeviceComponent[] | undefined {
     const name = str(c.name, 80);
     if (!name) continue;
     seen.add(c.id);
-    const st = c.stream as Record<string, unknown> | undefined;
-    const stream =
-      st && typeof st === 'object'
-        ? Object.fromEntries(
-            Object.entries(st)
-              .filter(([k, val]) => ['rtsp', 'whep', 'hls', 'rtspSub', 'whepSub', 'hlsSub'].includes(k) && typeof val === 'string')
-              .map(([k, val]) => [k, (val as string).slice(0, 300)]),
-          )
-        : undefined;
+    const vetted = vetStream(
+      c.stream,
+      allowedOrigins,
+      EDGE_STREAM_KEYS.filter((k) => k !== 'playback'),
+    );
+    rejected.push(...vetted.rejected.map((r) => `${c.id}.${r}`));
+    const stream = vetted.stream;
     out.push({
       id: c.id,
       name,
@@ -3351,10 +3571,10 @@ function sanitizeComponents(v: unknown): DeviceComponent[] | undefined {
       status: COMPONENT_STATUSES.includes(c.status as ComponentStatus) ? (c.status as ComponentStatus) : 'pending',
       detail: str(c.detail, 160),
       facing: ['front', 'rear', 'left', 'right', 'down'].includes(c.facing as string) ? (c.facing as DeviceComponent['facing']) : undefined,
-      stream: stream && Object.keys(stream).length ? (stream as DeviceComponent['stream']) : undefined,
+      stream,
     });
   }
-  return out;
+  return { components: out, rejected };
 }
 
 function sanitizeComponentUpdates(v: unknown[]): ComponentUpdate[] {

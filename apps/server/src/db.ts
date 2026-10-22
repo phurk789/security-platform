@@ -115,7 +115,11 @@ CREATE TABLE IF NOT EXISTS geofences (id TEXT PRIMARY KEY, org_id TEXT NOT NULL,
 CREATE TABLE IF NOT EXISTS patrols (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, site_id TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS device_stats (device_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, at INTEGER NOT NULL, channel_id TEXT NOT NULL, event TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS notifications_org_time ON notifications(org_id, at);`);
+CREATE INDEX IF NOT EXISTS notifications_org_time ON notifications(org_id, at);
+CREATE TABLE IF NOT EXISTS edge_origins (
+  org_id TEXT NOT NULL, site_id TEXT NOT NULL DEFAULT '', origin TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
+  PRIMARY KEY (org_id, site_id, origin)
+);`);
 }
 
 export function tx<T>(db: DB, fn: () => T): T {

@@ -1,5 +1,5 @@
 import { useT } from '../i18n';
-import type { CommandStatus, Freshness, IncidentStatus, IntegrationStatus, MissionStatus } from '@13store/shared';
+import { MODE_LABEL, modeOf, type CommandStatus, type Device, type Freshness, type IncidentStatus, type IntegrationStatus, type MissionStatus } from '@13store/shared';
 
 type Tone = 'cyan' | 'amber' | 'red' | 'green' | 'grey' | 'violet';
 
@@ -78,4 +78,17 @@ export function IntegrationBadge({ i }: { i: IntegrationStatus }) {
   if (i === 'verified') return <Badge tone="green" title={t('Integration tested and verified')}>VERIFIED</Badge>;
   if (i === 'testing') return <Badge tone="amber" title={t('Integration still being tested')}>TESTING</Badge>;
   return <Badge tone="violet" solid title={t('Simulated adapter — not a real integration')}>SIMULATED</Badge>;
+}
+
+/** Operational mode (ADR-006). Simulated devices already carry the SIMULATED badge, so they show none. */
+export function ModeBadge({ d }: { d: Pick<Device, 'integration' | 'mode'> }) {
+  const t = useT();
+  const m = modeOf(d);
+  if (m === 'SIMULATION') return null;
+  const tone: Tone = m === 'SHADOW' ? 'grey' : m === 'LIVE_MANUAL' ? 'red' : 'amber';
+  return (
+    <Badge tone={tone} solid={m !== 'SHADOW'} title={t(MODE_LABEL[m])}>
+      {m.replace('_', ' ')}
+    </Badge>
+  );
 }
