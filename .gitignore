@@ -6,3 +6,7 @@ data
 .DS_Store
 .proxy-ca.crt
 vercel-out
+# Edge laptop: the real site config holds the gateway key; MediaMTX binary and recordings are local.
+deploy/edge/site.json
+deploy/edge/bin
+deploy/edge/recordings
