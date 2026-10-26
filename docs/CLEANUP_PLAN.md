@@ -8,7 +8,7 @@
 **ทำแล้ว:**
 - branch `phase0-cleanup` (PR #1): R-1, S-1, CI-1 · งานจาก VMS ที่ได้มากับ R-1 ครอบคลุมบางส่วนของ H-2 และ H-3 (ดูหมายเหตุในตาราง)
 - branch `ui-quick-wins`: UI-1 (เก็บแถบซ้าย), UI-3, UI-4, UI-5, UI-8 · ที่จอ 1280 px แถบตัวเลขสรุปยังทับแถบเครื่องมือแผนที่ (อยู่ใน UI-6)
-- branch `real-ugv`: .13 เปลี่ยนเป็นโหมด pilot, วิดีโอกล้องบนรถผ่าน `stream` ของรถ, ชุดเครื่องมือ edge บน Windows และคู่มือต่อรถครั้งแรก ([`deploy/edge/FIRST_CONNECTION_TH.md`](../deploy/edge/FIRST_CONNECTION_TH.md))
+- branch `real-ugv`: .13 เปลี่ยนเป็นโหมด pilot, วิดีโอกล้องบนรถผ่าน `stream` ของรถ, ชุดเครื่องมือ edge บน Windows และคู่มือต่อรถครั้งแรก ([`deploy/edge/FIRST_CONNECTION_TH.md`](../deploy/edge/FIRST_CONNECTION_TH.md)), ชุดรัน edge บนรีโมต UniRC 7 Pro (แบบ A, [`deploy/remote/README_TH.md`](../deploy/remote/README_TH.md)) · แนวทาง: ทดสอบ = รีโมต (A), ใช้งานจริง = คอมบนรถ (B, ยังไม่ได้ทำ)
 
 ## ภาพรวมตัวเลข
 

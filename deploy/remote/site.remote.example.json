@@ -1,0 +1,24 @@
+{
+  "gatewayId": "edge-unirc-01",
+  "serverUrl": "ws://192.168.20.13:8090",
+  "key": "gw_pilot_REPLACE_WITH_KEY_FROM_SERVER_LOG",
+  "geo": { "originLat": 13.4367374, "originLon": 101.0275798, "rotationDeg": -28.5 },
+  "devices": [
+    {
+      "type": "mavlink",
+      "deviceId": "UGV-01",
+      "kind": "ugv",
+      "profile": "ardupilot-rover",
+      "model": "Tracked UGV · SIYI UniFC 6 Pico (ArduPilot Rover)",
+      "flightController": "SIYI UniFC 6 Pico",
+      "radio": "SIYI UniRC 7 Pro datalink",
+      "firmwareTested": "ArduRover V4.8.0-dev (9c412baa), bench only 2026-10-22",
+      "link": { "mode": "client", "host": "192.168.144.20", "port": 19856 },
+      "allowRemoteArm": false,
+      "stream": {
+        "rtsp": "rtsp://192.168.144.25:8554/main.264",
+        "whep": "http://REMOTE_IP:8889/ugv-01/whep"
+      }
+    }
+  ]
+}

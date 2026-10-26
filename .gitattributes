@@ -1,0 +1,5 @@
+# Files that run on Linux/Android (Termux on the SIYI remote, the edge PC, Docker) keep LF endings,
+# also in a Windows checkout: bash fails on CRLF.
+*.sh text eol=lf
+deploy/remote/* text eol=lf
+deploy/edge/*.yml text eol=lf

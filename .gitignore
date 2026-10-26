@@ -10,3 +10,5 @@ vercel-out
 deploy/edge/site.json
 deploy/edge/bin
 deploy/edge/recordings
+# Remote kit built by `npm run kit:remote` (copied to the SIYI remote, not committed).
+deploy/remote/dist

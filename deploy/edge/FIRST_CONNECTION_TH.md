@@ -158,6 +158,10 @@ powershell -ExecutionPolicy Bypass -File deploy\edge\Start-Edge.ps1
 | `Start-Edge.ps1` หยุดเพราะ "อีกชุดรันอยู่" | ชุดทดสอบจาก session SIYI (server `127.0.0.1:8080` และ gateway จากโฟลเดอร์ `ระบบVMS`) ยังเปิดอยู่ ปิดตามคำสั่งที่สคริปต์แสดง แล้วรันใหม่ |
 | audit มี `gateway.stream_rejected` | origin ของ `stream.whep` ไม่อยู่ในรายการ (ขั้นที่ 8) |
 
+## ขั้นต่อไป: ย้าย edge ไปรันบนรีโมต (แบบ A)
+
+เมื่อทางโน้ตบุ๊กใช้ได้แล้ว ลองรัน gateway และ MediaMTX บน UniRC 7 Pro เองได้ตาม [`deploy/remote/README_TH.md`](../remote/README_TH.md) (ใช้ key, geo และรถตัวเดียวกัน; ห้ามเปิดสองที่พร้อมกัน)
+
 ## กลับไปเป็นเดโมบน .13
 
 บน .13 (ไม่ต้องลบอะไร ข้อมูลจริงยังอยู่ใน `thermal_pilot-data`):
