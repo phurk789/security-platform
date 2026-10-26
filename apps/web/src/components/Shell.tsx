@@ -8,7 +8,6 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
-  Clock,
   FileText,
   Gamepad2,
   Filter,
@@ -26,7 +25,7 @@ import {
   Send,
   Server,
   SlidersHorizontal,
-  TriangleAlert,
+  Tv,
   Unplug,
   X,
   Zap,
@@ -42,8 +41,9 @@ import { IncidentBadge } from './Badges';
 import { CameraFeed } from './CameraFeed';
 import { SceneSnapshot } from './SceneSnapshot';
 import { webglAvailable } from '../twin/world';
-import { AppearanceToggle, ThemeToggle, useTheme } from './Hud';
+import { AppearanceToggle, ThemeToggle } from './Hud';
 import { SoundToggle } from './SoundEffects';
+import { setWall } from './Wall';
 import { SlaBadge } from './Sla';
 import { LICENSE_LABEL } from '../views/Admin';
 
@@ -55,8 +55,17 @@ export function TopBar() {
   const allLive = Object.values(s.devices)
     .filter((d) => d.kind !== 'cctv')
     .every((d) => freshness(s, d) === 'live');
-  const hud = useTheme() === 'hud';
-  const allowed = navFor(me.role);
+  // One status chip: what kind of data this is (simulation, mixed, live) and whether the
+  // vehicles are reporting. The full explanation is in the tooltip.
+  const envNote =
+    mode === 'standalone'
+      ? t('Offline demo · Runs in this browser only. All data and visuals are simulated.')
+      : s.dataLabel === 'LIVE'
+        ? t('{org} · Pilot environment · Connected', { org: session?.user.orgName })
+        : s.dataLabel === 'MIXED DEMO'
+          ? t('Pilot environment with simulated devices. Each simulated item is labelled.')
+          : t('Demo environment · Simulated devices through the edge gateway. No real vehicles are commanded.');
+  const healthNote = allLive ? t('Systems OK') : t('Telemetry degraded');
   return (
     <header className="topbar">
       <div className="brand">
@@ -65,33 +74,18 @@ export function TopBar() {
         <span className="product">PUBLIC SECURITY TWIN</span>
       </div>
       <div className="top-mid">
-        {hud && (
-          <div className="top-tabs" role="tablist" aria-label={t('Workspace')}>
-            {TOP_TABS.filter((x) => allowed.includes(x.id)).map((x) => (
-              <button key={x.id} role="tab" aria-selected={s.view === x.id} className={s.view === x.id ? 'on' : ''} onClick={() => dispatch({ type: 'setView', view: x.id })}>
-                {t(x.label)}
-              </button>
-            ))}
-          </div>
-        )}
         <SitePicker />
         {s.replay.active ? (
           <span className="mode mode-replay">
             <History size={16} /> REPLAY · {fmtTime(s.replay.at, true)}
           </span>
         ) : (
-          <span
-            className={`mode ${s.dataLabel === 'LIVE' ? 'mode-live' : 'mode-sim'}`}
-            title={mode === 'standalone' ? t('Browser-only simulation. Not connected to a platform server.') : t('{env} environment', { env: session?.meta.env })}
-          >
-            <TriangleAlert size={16} /> {s.dataLabel === 'OFFLINE DEMO' ? 'SIMULATION · OFFLINE' : s.dataLabel}
+          <span className={`mode ${s.dataLabel === 'LIVE' ? 'mode-live' : 'mode-sim'}`} title={`${envNote}\n${healthNote}`}>
+            <span className={`dot${allLive ? '' : ' warn'}`} aria-label={healthNote} /> {s.dataLabel === 'OFFLINE DEMO' ? 'SIMULATION · OFFLINE' : s.dataLabel}
           </span>
         )}
       </div>
       <div className="top-right">
-        <span className={`health ${allLive ? 'ok' : 'warn'}`} title={t('Simulated services health')}>
-          <span className="dot" /> {allLive ? t('Systems OK') : t('Telemetry degraded')}
-        </span>
         {session?.meta.license && session.meta.license.state !== 'valid' && (
           <button
             className={`lic-chip ${session.meta.license.state}`}
@@ -171,14 +165,13 @@ export function TopBar() {
                   </a>
                 </>
               )}
-              <hr />
-              <button onClick={() => dispatch({ type: 'togglePresentation' })}>
-                <Monitor size={14} /> {s.presentation ? t('Presentation mode on') : t('Presentation mode off')}
-              </button>
               {session && (
-                <button onClick={() => session.logout()}>
-                  <LogOut size={14} /> {t('Sign out')}
-                </button>
+                <>
+                  <hr />
+                  <button onClick={() => session.logout()}>
+                    <LogOut size={14} /> {t('Sign out')}
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -187,13 +180,6 @@ export function TopBar() {
     </header>
   );
 }
-
-/** Three workspaces in the Twin HUD top bar: command the site, operate a vehicle, review what happened. */
-const TOP_TABS: { id: View; label: string }[] = [
-  { id: 'overview', label: 'Command' },
-  { id: 'command', label: 'Operate' },
-  { id: 'evidence', label: 'Review' },
-];
 
 const NAV: { id: View; label: string; short?: string; Icon: typeof House }[] = [
   { id: 'overview', label: 'Overview', Icon: House },
@@ -303,16 +289,6 @@ export function Kpis() {
   const active = s.missions.filter((m) => ['approved', 'assigned', 'executing', 'paused'].includes(m.status)).length;
   return (
     <div className="kpis">
-      <div className="kpi kpi-clock" title={t('Scenario time at the site')}>
-        <Clock size={20} />
-        <div>
-          <small>
-            <span className="site">{SITE.name} · </span>
-            {fmtDate(s.now)}
-          </small>
-          <b>{fmtTime(s.now)}</b>
-        </div>
-      </div>
       <div className="kpi">
         <Bell size={20} className="amber" />
         <div>
@@ -505,21 +481,13 @@ export function Footer() {
   const [open, setOpen] = useState(false);
   const me = currentUser(s);
   const cut = !!s.linkCut['UGV-01'];
-  const allowed = can(me.role, 'demo.control');
+  // Everything a presenter uses lives in this one menu, shown only in a demo environment and
+  // only to roles that may run the demo. The environment itself is shown by the top-bar chip.
+  const presenter = demoEnv && can(me.role, 'demo.control');
   return (
     <footer className="footer">
-      <span>
-        <span className={`dot ${s.dataLabel === 'LIVE' ? 'ok' : ''}`} />{' '}
-        {mode === 'standalone'
-          ? t('Offline demo · Runs in this browser only. All data and visuals are simulated.')
-          : s.dataLabel === 'LIVE'
-            ? t('{org} · Pilot environment · Connected', { org: session?.user.orgName })
-            : s.dataLabel === 'MIXED DEMO'
-              ? t('Pilot environment with simulated devices. Each simulated item is labelled.')
-              : t('Demo environment · Simulated devices through the edge gateway. No real vehicles are commanded.')}
-      </span>
       <div className="foot-right">
-        {demoEnv && (
+        {presenter && (
           <div className="demo">
             <button className="btn-ghost small" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
               <SlidersHorizontal size={14} /> {t('Demo controls')}
@@ -527,21 +495,21 @@ export function Footer() {
             {open && (
               <div className="pop demo-pop">
                 <p className="pop-h">{t('Presenter controls')}</p>
-                <button disabled={!allowed} onClick={() => dispatch({ type: 'demoInjectAlert' })}>
+                <button onClick={() => dispatch({ type: 'demoInjectAlert' })}>
                   <Bell size={14} /> {t('Inject duplicate gate alert')}
                 </button>
-                <button disabled={!allowed} onClick={() => dispatch({ type: 'demoInjectDetection', kind: 'person' })}>
+                <button onClick={() => dispatch({ type: 'demoInjectDetection', kind: 'person' })}>
                   <ScanEye size={14} /> {t('AI detection: person at the gate')}
                 </button>
-                <button disabled={!allowed} onClick={() => dispatch({ type: 'demoInjectDetection', kind: 'thermal_hotspot' })}>
+                <button onClick={() => dispatch({ type: 'demoInjectDetection', kind: 'thermal_hotspot' })}>
                   <Flame size={14} /> {t('AI detection: thermal hotspot')}
                 </button>
                 {cut ? (
-                  <button disabled={!allowed} onClick={() => dispatch({ type: 'demoRestoreLink', deviceId: 'UGV-01' })}>
+                  <button onClick={() => dispatch({ type: 'demoRestoreLink', deviceId: 'UGV-01' })}>
                     <Plug size={14} /> {t('Restore UGV-01 network')}
                   </button>
                 ) : (
-                  <button disabled={!allowed} onClick={() => dispatch({ type: 'demoCutLink', deviceId: 'UGV-01' })}>
+                  <button onClick={() => dispatch({ type: 'demoCutLink', deviceId: 'UGV-01' })}>
                     <Unplug size={14} /> {t('Cut UGV-01 network')}
                   </button>
                 )}
@@ -562,7 +530,17 @@ export function Footer() {
                 >
                   <Monitor size={14} /> {t('Booth script (B)')}
                 </button>
-                {!allowed && <small className="muted">{t('This role cannot use demo controls.')}</small>}
+                <button onClick={() => dispatch({ type: 'togglePresentation' })}>
+                  <Monitor size={14} /> {s.presentation ? t('Presentation mode on') : t('Presentation mode off')}
+                </button>
+                <button
+                  onClick={() => {
+                    setOpen(false);
+                    setWall(true);
+                  }}
+                >
+                  <Tv size={14} /> {t('Wall display (exit: B, then W)')}
+                </button>
               </div>
             )}
           </div>

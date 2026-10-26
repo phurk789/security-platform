@@ -176,6 +176,5 @@
 :root[data-theme='light'] .mm-dev.k-cctv { fill: #5b6b80; }
 :root[data-theme='light'] .mm-dev.sel, :root[data-theme='light'] .mm-inc.sel { stroke: #0f1b2d; }
 :root[data-theme='light'] .t3-poi { background: rgba(255, 255, 255, 0.92); }
-:root[data-theme='light'] .top-tabs button.on { color: #fff; }
 :root[data-theme='light'] .map-search input { color: var(--text); }
 :root[data-theme='light'] .so-chart rect { opacity: 0.7; }

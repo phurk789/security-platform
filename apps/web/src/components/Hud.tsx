@@ -140,7 +140,8 @@ export function ThemeToggle() {
 export function FleetPanel() {
   const { s } = useStore();
   const t = useT();
-  const [video, setVideo] = useState(true);
+  // Off by default: only the selected vehicle's card plays video (one stream instead of one per card).
+  const [video, setVideo] = useState(false);
   const [filter, setFilter] = useState<'all' | 'ugv' | 'uav' | 'online'>('all');
   const all = Object.values(s.devices)
     .filter((d) => d.kind === 'ugv' || d.kind === 'uav')
@@ -157,7 +158,7 @@ export function FleetPanel() {
             {live}/{fleet.length} LIVE
           </small>
         </h2>
-        <button className={`hud-chip${video ? ' on' : ''}`} onClick={() => setVideo((v) => !v)} aria-pressed={video}>
+        <button className={`hud-chip${video ? ' on' : ''}`} onClick={() => setVideo((v) => !v)} aria-pressed={video} title={t('Show video on every card. Off: only the selected vehicle.')}>
           {t('Video')}
         </button>
       </div>
@@ -170,7 +171,7 @@ export function FleetPanel() {
       </div>
       <div className="hud-fleet-list">
         {fleet.map((d) => (
-          <FleetCard key={d.id} d={d} video={video} />
+          <FleetCard key={d.id} d={d} video={video || s.selectedDeviceId === d.id} />
         ))}
         {!fleet.length && <p className="empty">{all.length ? t('No vehicles match the filter.') : t('No vehicles registered.')}</p>}
       </div>

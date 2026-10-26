@@ -16,7 +16,9 @@ export function initialState(): AppState {
     view: 'overview',
     mapMode: '3d',
     layers: { ...DEFAULT_LAYERS },
-    selectedIncidentId: 'INC-024',
+    // Nothing is selected at start: the queue shows what is new, and the right panel shows the
+    // site overview until the operator picks an incident (the booth script selects INC-024).
+    selectedIncidentId: null,
     selectedDeviceId: null,
     selectedBuildingId: null,
     indoorView: null,

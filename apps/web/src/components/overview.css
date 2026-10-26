@@ -12,6 +12,7 @@
 .so-big { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 4px 16px 6px; }
 .so-big b { display: block; font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; }
 .so-big small { color: var(--text-3); font-size: 0.72rem; }
+.so-big b.warn { color: var(--amber); }
 .so-chart { display: block; width: calc(100% - 32px); height: 72px; margin: 2px 16px 0; }
 .so-chart .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; }
 .so-chart rect { fill: var(--cyan); opacity: 0.55; }

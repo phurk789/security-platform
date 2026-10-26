@@ -58,10 +58,8 @@ function upsert<T extends { id: string }>(list: T[], item: T) {
 }
 
 function fromSnapshot(prev: AppState, snap: Snapshot, user: SessionUser, offset: number): AppState {
-  const selected =
-    prev.selectedIncidentId && snap.incidents.some((i) => i.id === prev.selectedIncidentId)
-      ? prev.selectedIncidentId
-      : (snap.incidents.find((i) => i.status === 'new')?.id ?? snap.incidents[0]?.id ?? null);
+  // Keep the operator's selection while it still exists; never pick one for them.
+  const selected = prev.selectedIncidentId && snap.incidents.some((i) => i.id === prev.selectedIncidentId) ? prev.selectedIncidentId : null;
   return {
     ...prev,
     now: Date.now() + offset,
