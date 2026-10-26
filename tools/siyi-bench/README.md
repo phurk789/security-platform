@@ -41,12 +41,12 @@ test ใน [`test/guard.test.ts`](test/guard.test.ts) ยืนยันกฎ�
 ## 1. ต่อ PC เข้ากับ UniRC 7 Pro
 
 1. เสียบสาย LAN จาก PC เข้า port **LAN** ของ UniRC 7 Pro
-2. ตั้ง IP แบบ static บนการ์ด LAN ของ PC เป็น `192.168.144.50`, mask `255.255.255.0` และไม่ต้องใส่ gateway
-   - ห้ามใช้ `.11`, `.12`, `.20` หรือ `.25` เพราะ link ใช้อยู่แล้ว
+2. ตั้ง IP แบบ static บนการ์ด LAN ของ PC เป็น `192.168.144.100`, mask `255.255.255.0` และไม่ต้องใส่ gateway
+   - ห้ามใช้เลขที่ SIYI สงวนไว้ (คู่มือ A8 mini §4.6): `.11` air unit, `.12` ground unit, `.20` รีโมต, `.25` กล้อง gimbal, `.26` กล้อง IP67 ตัวที่สอง, `.50` ตัวแปลง HDMI, `.60` กล้อง AI
    - บน Windows ใช้ PowerShell แบบ Administrator (เปลี่ยน `Ethernet` เป็นชื่อการ์ดจริงจาก `Get-NetAdapter`):
 
 ```powershell
-New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.144.50 -PrefixLength 24
+New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.144.100 -PrefixLength 24
 ```
 
 3. ตรวจว่าเห็นรีโมต:

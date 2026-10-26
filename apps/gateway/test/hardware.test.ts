@@ -49,11 +49,13 @@ describe('SIYI SDK codec', () => {
 function fakeCamera(opts: { silent?: () => boolean } = {}) {
   const sock = dgram.createSocket('udp4');
   const got: number[] = [];
+  const frames: { cmd: number; data: Buffer }[] = [];
   let yaw = 12.3;
   sock.on('message', (msg, r) => {
     if (opts.silent?.()) return;
     for (const f of decode(msg)) {
       got.push(f.cmd);
+      frames.push({ cmd: f.cmd, data: f.data });
       const reply = (cmd: number, data: Buffer | number[]) => sock.send(encode(cmd, data, f.seq, false), r.port, r.address);
       if (f.cmd === CMD.GIMBAL_ATTITUDE) {
         const d = Buffer.alloc(12);
@@ -74,8 +76,8 @@ function fakeCamera(opts: { silent?: () => boolean } = {}) {
       else if (f.cmd === CMD.GIMBAL_SPEED || f.cmd === CMD.CENTER || f.cmd === CMD.MANUAL_ZOOM) reply(f.cmd, [1]);
     }
   });
-  return new Promise<{ port: number; got: number[]; close: () => void }>((resolve) =>
-    sock.bind(0, '127.0.0.1', () => resolve({ port: (sock.address() as { port: number }).port, got, close: () => sock.close() })),
+  return new Promise<{ port: number; got: number[]; frames: { cmd: number; data: Buffer }[]; close: () => void }>((resolve) =>
+    sock.bind(0, '127.0.0.1', () => resolve({ port: (sock.address() as { port: number }).port, got, frames, close: () => sock.close() })),
   );
 }
 
@@ -110,6 +112,32 @@ describe('SIYI camera adapter', () => {
     a.onCamera('r3', { action: 'center' });
     expect(got.camera.find((c) => c.requestId === 'r3')).toMatchObject({ ok: false, confirmed: false });
   }, 15_000);
+
+  // Platform: + = right. The fake camera reports yaw +12.3 and stores the raw angle it is sent.
+  // A8 mini on the bench (2026-10-26): speed +60 turned it right, but it reports right as negative
+  // and an absolute +30 went left, so speed and angles need separate signs.
+  it.each([
+    { name: 'A8 mini (speed +1, angle −1)', cfg: { yawSpeedSign: 1, yawAngleSign: -1 } as const, speed: 60, raw: -300, shown: -12.3 },
+    { name: 'legacy yawSign −1 (both)', cfg: { yawSign: -1 } as const, speed: -60, raw: -300, shown: -12.3 },
+    { name: 'default (no sign set)', cfg: {}, speed: 60, raw: 300, shown: 12.3 },
+  ])('applies yaw signs: $name', async ({ cfg, speed, raw, shown }) => {
+    const cam = await fakeCamera();
+    const a = new SiyiCameraAdapter({ deviceId: 'CAM-A8', host: '127.0.0.1', port: cam.port, pos: { x: 0, y: 0 }, ...cfg });
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), cam.close);
+    const lastYaw = () => (got.telemetry.at(-1) as { gimbal?: { yaw: number } } | undefined)?.gimbal?.yaw;
+    await until(() => lastYaw() !== undefined);
+    expect(lastYaw()).toBe(shown);
+
+    a.onCamera('pan', { action: 'gimbal_speed', yaw: 60, pitch: 0 }); // "pan right"
+    a.onCamera('aim', { action: 'gimbal_angle', yaw: 30, pitch: 0 }); // "30° right"
+    await until(() => ['pan', 'aim'].every((id) => got.camera.some((c) => c.requestId === id)));
+    expect(cam.frames.find((f) => f.cmd === CMD.GIMBAL_SPEED)?.data.readInt8(0)).toBe(speed);
+    expect(cam.frames.find((f) => f.cmd === CMD.SET_ATTITUDE)?.data.readInt16LE(0)).toBe(raw);
+    // The camera now reports the raw angle back; the platform must show 30° right again.
+    await until(() => lastYaw() === 30);
+  }, 10_000);
 });
 
 // ---------------------------------------------------------------------------

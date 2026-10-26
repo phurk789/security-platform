@@ -18,15 +18,24 @@ export interface SiyiCameraConfig {
   /** Firmware version you have tested this adapter against (shown in Devices). */
   firmwareTested?: string;
   /**
-   * Platform convention: positive yaw = turn right (clockwise seen from above). Set −1 if the
-   * camera turns the other way on "pan right" (check on hardware; can differ by mounting).
+   * Platform convention: positive yaw = turn right (clockwise seen from above). SIYI models differ,
+   * and one camera can use different signs for different SDK messages, so there are two settings:
+   * - `yawSpeedSign`: speed commands (`gimbal_speed`, SDK 0x07).
+   * - `yawAngleSign`: the attitude the camera reports (0x0D) and absolute angle commands
+   *   (`gimbal_angle`, 0x0E).
+   * Measured on an A8 mini (gimbal firmware 0.4.10, hanging mount, 2026-10-26): speed +1, angle −1.
+   * Check on hardware (HARDWARE_SIYI.md test 11). `yawSign` is the older single setting and is the
+   * default for both when they are not set.
    */
   yawSign?: 1 | -1;
+  yawSpeedSign?: 1 | -1;
+  yawAngleSign?: 1 | -1;
   /** Where the gimbal's centre points, lens height and field of view (for pointing at alerts). */
   mount?: CameraMount;
 }
 
 const STALE_MS = 3000;
+const sign = (v: number | undefined): 1 | -1 => (v === -1 ? -1 : 1);
 
 export class SiyiCameraAdapter implements Adapter {
   readonly declaration: AdapterDeclaration;
@@ -42,8 +51,11 @@ export class SiyiCameraAdapter implements Adapter {
   private pending = new Map<number, { requestId: string; timer: ReturnType<typeof setTimeout>; done: (r: Omit<GwCameraResult, 't' | 'deviceId' | 'requestId'>) => void }>();
   private host: string;
   private port: number;
-  private get yawSign() {
-    return this.cfg.yawSign === -1 ? -1 : 1;
+  private get yawSpeedSign() {
+    return sign(this.cfg.yawSpeedSign ?? this.cfg.yawSign);
+  }
+  private get yawAngleSign() {
+    return sign(this.cfg.yawAngleSign ?? this.cfg.yawSign);
   }
   private reply(r: GwCameraResult) {
     const { t: _t, deviceId: _d, ...rest } = r;
@@ -146,7 +158,7 @@ export class SiyiCameraAdapter implements Adapter {
       case CMD.GIMBAL_ATTITUDE: {
         const a = parseAttitude(f.data);
         if (a) {
-          Object.assign(this.gimbal, { yaw: a.yaw * this.yawSign, pitch: a.pitch, roll: a.roll });
+          Object.assign(this.gimbal, { yaw: a.yaw * this.yawAngleSign, pitch: a.pitch, roll: a.roll });
           this.comps.set('gimbal', { status: 'ok', detail: 'Attitude streaming' });
         }
         break;
@@ -204,11 +216,11 @@ export class SiyiCameraAdapter implements Adapter {
     switch (a.action) {
       case 'gimbal_speed':
         cmd = CMD.GIMBAL_SPEED;
-        frame = req.gimbalSpeed(a.yaw * this.yawSign, a.pitch, this.nextSeq());
+        frame = req.gimbalSpeed(a.yaw * this.yawSpeedSign, a.pitch, this.nextSeq());
         break;
       case 'gimbal_angle':
         cmd = CMD.SET_ATTITUDE;
-        frame = req.setAttitude(a.yaw * this.yawSign, a.pitch, this.nextSeq());
+        frame = req.setAttitude(a.yaw * this.yawAngleSign, a.pitch, this.nextSeq());
         break;
       case 'center':
         cmd = CMD.CENTER;

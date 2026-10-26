@@ -44,7 +44,10 @@ export type DeviceConfig =
       pos: { x: number; y: number };
       stream?: StreamInfo;
       firmwareTested?: string;
+      /** Yaw sign conventions, see SiyiCameraConfig (A8 mini: yawSpeedSign 1, yawAngleSign -1). */
       yawSign?: 1 | -1;
+      yawSpeedSign?: 1 | -1;
+      yawAngleSign?: 1 | -1;
       /** Bearing of the gimbal's centre position, lens height, field of view: lets the platform point it at alerts. */
       mount?: CameraMount;
     }
@@ -151,6 +154,8 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           stream: d.stream,
           firmwareTested: d.firmwareTested,
           yawSign: d.yawSign,
+          yawSpeedSign: d.yawSpeedSign,
+          yawAngleSign: d.yawAngleSign,
           mount: d.mount,
         }),
       );
