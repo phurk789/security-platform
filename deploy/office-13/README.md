@@ -105,9 +105,9 @@ docker compose -f C:\Server\thermal\compose.yaml down        # stop (keeps the d
 
 ## Known limits
 
-- No screen yet for the edge media origins or for promoting a device from SHADOW to
-  LIVE_MANUAL: use `deploy/edge/Set-EdgeOrigin.ps1` for the first; the second is an API call
-  for a supervisor after the hardware checklist in `docs/HARDWARE_SIYI.md`.
+- Edge media origins are set in Administration → Allowed video sources (or with
+  `deploy/edge/Set-EdgeOrigin.ps1`). Promoting a device from SHADOW to LIVE_MANUAL has no screen
+  yet: it is an API call for a supervisor after the hardware checklist in `docs/HARDWARE_SIYI.md`.
 - Plain HTTP on the LAN: sign-in, the console and WHEP video work; Web Push in the field app and
   this computer's camera need HTTPS. A pilot beyond the office needs TLS (`docs/SECURITY.md`).
 - Docker Desktop starts only when `phurk` signs in, and the server has no auto sign-in. After a

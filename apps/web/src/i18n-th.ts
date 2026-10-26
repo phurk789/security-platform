@@ -424,6 +424,18 @@ export const TH: Record<string, string> = {
   'Edge gateway': 'Edge Gateway',
   'Create key': 'สร้างคีย์',
   'Edge gateways and devices': 'Edge Gateway และอุปกรณ์',
+  'Allowed video sources': 'แหล่งวิดีโอที่อนุญาต',
+  'Gateways may only send browsers to media servers on this list: scheme, address and port, for example the edge PC running MediaMTX. Loopback addresses (localhost, 127.x) are refused. A gateway picks up a change when it reconnects.':
+    'Gateway ส่งเบราว์เซอร์ไปดูวิดีโอได้เฉพาะ media server ที่อยู่ในรายการนี้ (scheme, ที่อยู่ และพอร์ต เช่น เครื่อง edge ที่รัน MediaMTX) ระบบไม่รับที่อยู่ loopback (localhost, 127.x) และ gateway จะใช้รายการใหม่เมื่อเชื่อมต่อใหม่',
+  'Nothing allowed yet: real cameras and vehicles show no video.': 'ยังไม่ได้อนุญาตแหล่งใด: กล้องและรถจริงจะยังไม่มีภาพ',
+  'Site {id}': 'พื้นที่ {id}',
+  'Whole organisation': 'ทั้งองค์กร',
+  'Remove {origin}': 'ลบ {origin}',
+  '{origin} removed.': 'ลบ {origin} แล้ว',
+  'Enter an address such as http://192.168.10.50:8889 (a full video link works too).': 'ใส่ที่อยู่ เช่น http://192.168.10.50:8889 (วางลิงก์วิดีโอเต็มก็ได้)',
+  '{origin} allowed. Restart the gateway so it declares its video again.': 'อนุญาต {origin} แล้ว รีสตาร์ท gateway เพื่อให้ส่งข้อมูลวิดีโออีกครั้ง',
+  'Video source address': 'ที่อยู่แหล่งวิดีโอ',
+  Allow: 'อนุญาต',
   'No edge gateway connected.': 'ไม่มี Edge Gateway เชื่อมต่อ',
   'no devices accepted': 'ไม่มีอุปกรณ์ที่ผ่านการลงทะเบียน',
   'Register a device before its adapter connects. Until an adapter declares capabilities, the device has no commands.':

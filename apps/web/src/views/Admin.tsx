@@ -17,6 +17,7 @@ import {
   Trash2,
   Upload,
   UserPlus,
+  Video,
 } from 'lucide-react';
 import {
   GEOFENCE_KIND_LABEL,
@@ -75,6 +76,24 @@ export const LICENSE_LABEL: Record<LicenseStatus['state'], string> = {
 };
 const LIMIT_LABEL = { sites: 'Sites', devices: 'Devices', users: 'Users' } as const;
 
+interface EdgeOrigin {
+  siteId: string | null;
+  origin: string;
+}
+
+/**
+ * The origin (scheme, host, port) of what the administrator typed, so a pasted WHEP URL such as
+ * http://192.168.10.50:8889/ugv-01/whep works too. The server checks the rest (loopback, metadata).
+ */
+export function edgeOriginOf(input: string): string | null {
+  try {
+    const u = new URL(input.trim());
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 export function AdminPage() {
   const { session } = useStore();
   const t = useT();
@@ -116,9 +135,12 @@ function Admin() {
   const [nu, setNu] = useState({ username: '', name: '', role: 'dispatcher' as Role, password: '' });
   const [nk, setNk] = useState({ label: '', kind: 'integration' as 'integration' | 'gateway' });
   const [nd, setNd] = useState({ id: '', kind: 'ugv' as 'ugv' | 'uav' | 'cctv', model: '' });
+  const [origins, setOrigins] = useState<EdgeOrigin[]>([]);
+  const [no, setNo] = useState('');
+  const orgOrigins = origins.filter((o) => !o.siteId).map((o) => o.origin);
 
   const load = useCallback(async () => {
-    const [u, k, g, b, a, l, st] = await Promise.all([
+    const [u, k, g, b, a, l, st, eo] = await Promise.all([
       api.get<UserAdminView[]>('/admin/users'),
       api.get<ApiKeyView[]>('/admin/keys'),
       api.get<{ gatewayId: string; devices: string[] }[]>('/admin/gateways'),
@@ -126,10 +148,12 @@ function Admin() {
       api.get<{ ok: boolean; count: number; brokenAt?: number }>('/audit/verify'),
       api.get<LicenseStatus>('/license'),
       api.get<OrgSettings>('/admin/settings'),
+      api.get<EdgeOrigin[]>('/admin/edge-origins'),
     ]);
     setUsers(u);
     setKeys(k);
     setGws(g);
+    setOrigins(eo);
     setBackups(b);
     setAudit(a);
     setLic(l);
@@ -359,6 +383,58 @@ function Admin() {
             <input id="nd-model" placeholder={t('Model')} value={nd.model} onChange={(e) => setNd({ ...nd, model: e.target.value })} />
             <button className="btn-primary" disabled={!nd.id}>
               <Plus size={16} /> {t('Register')}
+            </button>
+          </form>
+        </section>
+
+        <section className="card">
+          <h3>
+            <Video size={16} /> {t('Allowed video sources')}
+          </h3>
+          <p className="fine">
+            {t(
+              'Gateways may only send browsers to media servers on this list: scheme, address and port, for example the edge PC running MediaMTX. Loopback addresses (localhost, 127.x) are refused. A gateway picks up a change when it reconnects.',
+            )}
+          </p>
+          {origins.length === 0 && <p className="muted">{t('Nothing allowed yet: real cameras and vehicles show no video.')}</p>}
+          <ul className="list">
+            {origins.map((o) => (
+              <li key={`${o.siteId ?? ''}|${o.origin}`}>
+                <span className="mono">{o.origin}</span>
+                <span className="row gap-s">
+                  <small className="muted">{o.siteId ? t('Site {id}', { id: o.siteId }) : t('Whole organisation')}</small>
+                  {!o.siteId && (
+                    <button
+                      className="icon-btn"
+                      title={t('Remove')}
+                      aria-label={t('Remove {origin}', { origin: o.origin })}
+                      onClick={() => act(() => api.put('/admin/edge-origins', { origins: orgOrigins.filter((x) => x !== o.origin) }), t('{origin} removed.', { origin: o.origin }))}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const origin = edgeOriginOf(no);
+              if (!origin) {
+                setMsg({ tone: 'warn', text: t('Enter an address such as http://192.168.10.50:8889 (a full video link works too).') });
+                return;
+              }
+              act(
+                () => api.put('/admin/edge-origins', { origins: [...new Set([...orgOrigins, origin])] }),
+                t('{origin} allowed. Restart the gateway so it declares its video again.', { origin }),
+              ).then(() => setNo(''));
+            }}
+          >
+            <input id="eo-origin" placeholder="http://192.168.10.50:8889" value={no} onChange={(e) => setNo(e.target.value)} aria-label={t('Video source address')} />
+            <button className="btn-primary" disabled={!no.trim()}>
+              <Plus size={16} /> {t('Allow')}
             </button>
           </form>
         </section>

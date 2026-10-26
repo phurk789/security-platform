@@ -111,11 +111,14 @@ notepad deploy\edge\site.json
 
 ## 8. อนุญาตแหล่งวิดีโอ (ครั้งเดียวต่อ IP)
 
+หน้าเว็บ (admin) → **แหล่งวิดีโอที่อนุญาต** → ใส่ `http://LAPTOP_IP:8889` (วางลิงก์ `stream.whep` ทั้งเส้นก็ได้) → `อนุญาต`
+ถ้าระบบขอรหัสผ่านซ้ำให้ใส่รหัส admin ถ้า IP ของโน้ตบุ๊กเปลี่ยน ให้เพิ่ม IP ใหม่และแก้ `site.json`
+
+ทางสำรองจากโน้ตบุ๊ก (ผลเหมือนกัน):
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File deploy\edge\Set-EdgeOrigin.ps1 -Origin http://LAPTOP_IP:8889
 ```
-
-ระบบจะถามรหัสผ่าน admin (พิมพ์เอง) ถ้า IP ของโน้ตบุ๊กเปลี่ยน ให้รันใหม่ด้วย IP ใหม่และแก้ `site.json`
 
 ## 9. เปิด edge
 
