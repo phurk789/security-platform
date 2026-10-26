@@ -1,0 +1,26 @@
+# thermalplatform on the office test server 192.168.20.13 — demo mode on port 8090.
+# Kept apart from the VMS stack (8080) and LCOT: own project name, network and data volume.
+# The image is built on the server (see README.md here); compose never builds or pulls.
+#
+# The simulated gateway runs inside the server (EMBED_GATEWAY=1, the demo default). The separate
+# edge-gateway container from the root docker-compose.yml is left out: in image 406d410 the
+# standalone gateway bundle crashes on start ('Dynamic require of "events" is not supported').
+# The apps/gateway build now has the createRequire banner; images built after that fix can run
+# a separate gateway again.
+name: thermal
+
+services:
+  server:
+    image: thermal-platform:${THERMAL_TAG:?set THERMAL_TAG in .env}
+    pull_policy: never
+    environment:
+      ENV_MODE: demo
+      EMBED_GATEWAY: "1"
+    ports:
+      - "8090:8080"
+    volumes:
+      - thermal-data:/data
+    restart: unless-stopped
+
+volumes:
+  thermal-data:
