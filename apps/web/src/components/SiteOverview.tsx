@@ -7,7 +7,6 @@ import { BUILDINGS, SITE, siteVariant, type AppState, type Device } from '@13sto
 import { freshness, isReady } from '../domain/policy';
 import { useT } from '../i18n';
 import { useStore } from '../store';
-import { Badge } from './Badges';
 import './overview.css';
 
 const OPEN = (st: string) => !['closed', 'duplicate', 'dismissed'].includes(st);
@@ -60,7 +59,6 @@ export function SiteOverview() {
       <aside className="panel so-card">
         <div className="panel-head">
           <h2>{t('Site status')}</h2>
-          <Badge tone={s.dataLabel === 'LIVE' ? 'green' : 'violet'}>{s.dataLabel === 'OFFLINE DEMO' ? 'SIMULATION' : s.dataLabel}</Badge>
         </div>
         <dl className="so-rows">
           <div>
@@ -119,8 +117,8 @@ export function SiteOverview() {
             <small>{t('Peak')}</small>
           </div>
           <div>
-            <b>{open.length}</b>
-            <small>{t('Alerts')}</small>
+            <b className={weak.length ? 'warn' : ''}>{weak.length}</b>
+            <small>{t('Weak links')}</small>
           </div>
         </div>
         <LinkChart series={series} />

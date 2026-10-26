@@ -235,13 +235,6 @@ h2 {
   gap: 8px;
   color: var(--text-2);
 }
-.health {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
-  color: var(--text-2);
-}
 .dot {
   width: 8px;
   height: 8px;
@@ -249,7 +242,8 @@ h2 {
   background: var(--green);
   display: inline-block;
 }
-.health.warn .dot {
+/* The status chip's dot is the health of the vehicles' telemetry. */
+.mode .dot.warn {
   background: var(--amber);
 }
 .user {
@@ -398,10 +392,8 @@ h2 {
   background: var(--bg-2);
   border-top: 1px solid var(--line);
 }
-.footer .dot {
-  margin-right: 6px;
-}
 .foot-right {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -1855,17 +1847,9 @@ table.compact th {
 }
 
 /* ---------- responsive ---------- */
-@media (max-width: 1700px) {
-  .health {
-    display: none;
-  }
-}
 @media (max-width: 1500px) {
   .overview {
     grid-template-columns: 270px minmax(0, 1fr) 340px;
-  }
-  .clock {
-    display: none;
   }
   .inc-card {
     grid-template-columns: 64px 1fr;
@@ -1876,7 +1860,7 @@ table.compact th {
   }
 }
 @media (max-width: 1200px) {
-  .health,
+  .clock,
   .product,
   .divider {
     display: none;
@@ -3100,34 +3084,7 @@ html:lang(th) .meta dt {
   border-color: rgba(248, 113, 113, 0.5);
 }
 
-/* ---------- top bar workspace tabs (Twin HUD) ---------- */
-.top-tabs {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 999px;
-  background: var(--panel);
-  border: 1px solid var(--line-2);
-  flex: none;
-}
-.top-tabs button {
-  background: none;
-  border: 0;
-  padding: 6px 16px;
-  border-radius: 999px;
-  color: var(--text-2);
-  font-weight: 600;
-  font-size: 0.84rem;
-  letter-spacing: 0.04em;
-}
-.top-tabs button.on {
-  background: var(--cyan);
-  color: #04121d;
-}
-.kpi-clock b {
-  font-variant-numeric: tabular-nums;
-}
-/* Under 1800 px the search collapses to its icon until focused; the clock chip is a HUD feature. */
+/* Under 1800 px the search collapses to its icon until focused. */
 @media (max-width: 1799px) {
   .map-search {
     min-width: 0;
@@ -3143,14 +3100,7 @@ html:lang(th) .meta dt {
     width: 170px;
   }
 }
-.theme-classic .kpi-clock {
-  display: none;
-}
 @media (max-width: 1500px) {
-  .top-tabs button {
-    padding: 5px 11px;
-    font-size: 0.78rem;
-  }
   .theme-hud .top-mid .site-select {
     display: none;
   }
@@ -3232,8 +3182,7 @@ html:lang(th) .meta dt {
 .app.wall .theme-toggle,
 .app.wall .appearance-toggle,
 .app.wall .lang-toggle,
-.app.wall .user,
-.app.wall .health {
+.app.wall .user {
   display: none !important;
 }
 .app.wall .main {
