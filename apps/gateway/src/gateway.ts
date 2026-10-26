@@ -1,9 +1,15 @@
 // Edge Gateway: runs adapters on site and keeps one authenticated WebSocket to the server.
 // Telemetry and events are dropped (not buffered) while the server link is down; adapters
 // keep running, so devices keep their own safety behaviour regardless of the server.
+// Each adapter's command ledger lives in `<dataDir>/ledger/` so dedupe survives a restart.
 import WebSocket from 'ws';
 import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type GeoAnchor } from '@13store/shared';
+import { CommandLedger, ledgerFile, type LedgerOptions } from './ledger';
 import { consoleLogger, type Adapter, type AdapterContext, type Logger } from './sdk';
+
+/** Messages dropped because the server link was down, by type. */
+export type DroppedCounts = Record<Exclude<GatewayToServer['t'], 'hello'>, number>;
+const noDrops = (): DroppedCounts => ({ telemetry: 0, cmd: 0, event: 0, camera_result: 0 });
 
 export interface GatewayOptions {
   /** ws:// or wss:// base URL of the platform server, e.g. ws://localhost:8080 */
@@ -18,6 +24,14 @@ export interface GatewayOptions {
   now?: () => number;
   /** Reconnect backoff. Defaults: 250 ms doubling up to 5 s. */
   backoff?: { initialMs: number; maxMs: number };
+  /**
+   * Directory for state that must survive a restart: one command ledger per device in
+   * `<dataDir>/ledger/<deviceId>.json`. Omit to keep ledgers in memory only (tests, the embedded
+   * simulator). Real vehicles need it: see docs/ADAPTER_CONTRACT.md §7.
+   */
+  dataDir?: string;
+  /** Ledger retention tuning. Defaults suit the 10 s command TTL. */
+  ledger?: Pick<LedgerOptions, 'retainMs' | 'maxEntries' | 'clockSkewMs'>;
 }
 
 export interface GatewayHandle {
@@ -25,6 +39,8 @@ export interface GatewayHandle {
   readonly connected: boolean;
   /** Device ids the server accepted in its last `welcome`. */
   readonly accepted: ReadonlySet<string>;
+  /** Messages dropped (never buffered) because the server link was down, since start. */
+  readonly dropped: Readonly<DroppedCounts>;
   stop(): Promise<void>;
 }
 
@@ -38,11 +54,34 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
   let stopped = false;
   let delay = backoff.initialMs;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  const dropped = noDrops(); // since start
+  let outage = noDrops(); // since the link last went down
+  let offlineSince = now();
+  let everConnected = false;
 
   const send = (msg: GatewayToServer) => {
-    if (ws?.readyState !== WebSocket.OPEN) return; // offline: drop, never buffer
+    if (ws?.readyState !== WebSocket.OPEN) {
+      // Offline: drop, never buffer. The server judges freshness by when a sample arrives, so a
+      // sample replayed after reconnect would look live. Count it so the outage is visible.
+      if (msg.t !== 'hello') {
+        dropped[msg.t]++;
+        outage[msg.t]++;
+      }
+      return;
+    }
     if (msg.t !== 'hello' && 'deviceId' in msg && !accepted.has(msg.deviceId)) return;
     ws.send(JSON.stringify(msg));
+  };
+
+  const reportOutage = () => {
+    const lost = (Object.entries(outage) as [keyof DroppedCounts, number][]).filter(([, n]) => n > 0);
+    outage = noDrops();
+    if (!lost.length) return;
+    const when = everConnected ? `during ${((now() - offlineSince) / 1000).toFixed(1)} s offline` : 'before the first connection';
+    const line = `dropped ${when} (not buffered): ${lost.map(([t, n]) => `${n} ${t}`).join(', ')}`;
+    // Lost command updates and events mean the server shows timed out / misses an event: worth a warning.
+    if (lost.some(([t]) => t !== 'telemetry')) log.warn(line);
+    else log.info(line);
   };
 
   const ctxFor = (a: Adapter): AdapterContext => {
@@ -50,6 +89,7 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
     return {
       now,
       log,
+      ledger: new CommandLedger({ ...opts.ledger, file: opts.dataDir ? ledgerFile(opts.dataDir, deviceId) : undefined, deviceId, now, log }),
       telemetry: (t) => send({ t: 'telemetry', deviceId, ...t }),
       commandUpdate: (u) => {
         if (!accepted.has(deviceId)) return;
@@ -107,10 +147,14 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
       headers: { Authorization: `Bearer ${opts.key}` },
     });
     ws = sock;
+    let opened = false;
     sock.on('open', () => {
+      opened = true;
       delay = backoff.initialMs;
       accepted = new Set();
       log.info(`connected to ${opts.serverUrl} as ${opts.gatewayId}`);
+      reportOutage();
+      everConnected = true;
       sock.send(
         JSON.stringify({
           t: 'hello',
@@ -127,6 +171,8 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
       if (ws === sock) ws = null;
       accepted = new Set();
       if (stopped) return;
+      // A link that was up starts an outage; a failed reconnect attempt only extends it.
+      if (opened) offlineSince = now();
       if (code === 4401 || code === 1008) log.error('server refused the gateway credential');
       retry = setTimeout(connect, delay);
       delay = Math.min(backoff.maxMs, delay * 2);
@@ -141,6 +187,9 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
     },
     get accepted() {
       return accepted;
+    },
+    get dropped() {
+      return { ...dropped };
     },
     async stop() {
       stopped = true;

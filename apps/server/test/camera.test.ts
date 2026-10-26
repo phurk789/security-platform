@@ -3,7 +3,7 @@ import WebSocket from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BUILDINGS, GATEWAY_PROTOCOL, aimAt, lineOfSight } from '@13store/shared';
 import { SANDBOX_GATEWAY_KEY } from '../src/seed';
-import { Client, startServer, waitFor, type TestServer } from './helpers';
+import { Client, startServer, testActor, waitFor, type TestServer } from './helpers';
 
 let srv: TestServer;
 let alex: Client;
@@ -142,6 +142,8 @@ describe('real camera through a gateway (developer sandbox)', () => {
   let gw: WebSocket;
   let answer = true;
   beforeAll(async () => {
+    // The edge media server's origin is allowed for the sandbox before the gateway declares it.
+    srv.built.platform.setEdgeOrigins(testActor('org-sandbox', 'admin'), { origins: ['https://edge.example:8889'] });
     gw = new WebSocket(`${srv.wsUrl}/api/v1/gateway`, { headers: { authorization: `Bearer ${SANDBOX_GATEWAY_KEY}` } });
     await new Promise((r) => gw.on('open', r));
     const welcome = new Promise<any>((r) => gw.once('message', (m) => r(JSON.parse(String(m)))));
@@ -197,6 +199,8 @@ describe('real camera through a gateway (developer sandbox)', () => {
         gw.send(JSON.stringify({ t: 'camera_result', requestId: m.requestId, deviceId: m.deviceId, ok: true, confirmed: true, detail: `camera got ${m.action}` }));
     });
     await waitFor(async () => (await devop.get('/devices/SBX-ROVER-01')).body.gimbal?.yaw === 12.5);
+    // A real device starts in SHADOW; camera moves need a supervisor's promotion (device-mode.test.ts).
+    srv.built.platform.transitionMode(testActor('org-sandbox', 'supervisor'), 'SBX-ROVER-01', { to: 'LIVE_MANUAL', reason: 'Bench test, camera only' });
   });
   afterAll(async () => {
     if (!gw || gw.readyState === WebSocket.CLOSED) return;

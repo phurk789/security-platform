@@ -7,6 +7,10 @@ ZR10, ZT6, A8 mini) and a **SIYI UniRC 7 Pro** handheld ground station to the pl
 > and tested against protocol-accurate simulators (`apps/gateway/test/hardware.test.ts`).
 > They have **not yet been run on the physical devices**. Devices connect with integration status
 > **TESTING** until the hardware checklist below passes and the result is recorded.
+>
+> **Bench, 2026-10-22:** the MAVLink path UniFC 6 Pico → air unit → UniRC 7 Pro → PC works:
+> heartbeat at 1 Hz and a full parameter read with the read-only probe in `tools/siyi-bench`.
+> Setup sections 1 and 2 below reflect what that test needed.
 
 ## How it fits together
 
@@ -95,18 +99,56 @@ telemetry shows the effect (moving after start; speed 0 after pause/stop). Camer
 
 ### 1. Flight controller (UniFC 6 Pico)
 
-Wire a TELEM UART to the SIYI air unit's datalink port.
+**Firmware.** The board ships with **ArduCopter** (ours reported `ArduCopter V4.6.3 (92b0cd78)`,
+board `SIYI-UniFC-6-PICO`). That is a SIYI build: the official ArduPilot servers have no Copter
+build for this board. A ground vehicle needs **ArduPilot Rover** (decision D-34):
+
+| Use               | Firmware                                                       | Source                                                                                                                                                                                                                  |
+| ----------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bench tests (now) | `ArduRover V4.8.0-dev`, built 2026-10-21, ArduPilot `9c412baa` | `firmware.ardupilot.org/Rover/latest/SIYI-UniFC-6-PICO/ardurover.apj`. A development build, and the only official Rover build for this board: Rover `stable` and `beta` had none on 2026-10-22                          |
+| Launch event      | Rover **stable** for the UniFC 6 Pico                          | Requested from SIYI. If none arrives in time, pin one dated `latest` build, run the full hardware checklist on it, and do not change it before the event                                                                 |
+
+`latest` is rebuilt every day, so the file downloaded later may differ from the one above. Our
+unit was flashed on 2026-10-22 and prints `ArduRover V4.8.0-dev (9c412baa)`, `ChibiOS: 9aebaf4a`;
+its factory Copter parameters are kept in
+`deploy/vehicle/factory/unifc6pico-arducopter-4.6.3-factory.param`. After
+flashing, record the version the board prints at boot. The bench probe keeps it in the report under
+`statusText` (for example `ArduRover V4.8.0-dev (xxxxxxxx)`).
+
+To flash: Mission Planner, USB only, not connected → Setup → Install Firmware → **Load custom
+firmware** → `ardurover.apj`. The Rover button there only offers `stable`, which has no build for
+this board. Use the `.apj`, not `ardurover_with_bl.hex`, which also rewrites the bootloader.
+Changing the vehicle type resets every parameter and calibration: load
+`deploy/vehicle/tracked-ugv-rover.param`, then redo accelerometer, compass and radio calibration.
+Step-by-step bench runbook (Thai): [`tools/siyi-bench/FLASH_ROVER.md`](../tools/siyi-bench/FLASH_ROVER.md).
+
+**Wiring.**
+
+| Air unit                                       | UniFC 6 Pico | Notes                                                                                                                                                                       |
+| ---------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| UART 1 / Datalink 1 (GH1.25 3-pin: TX, RX, GND) | TELEM1 (6-pin) | Needs an adapter cable (SIYI sells one; the Pico box has a TELEM1 adapter). Cross TX↔RX, join GND, **leave 5 V unconnected**: the air unit has its own XT30 supply. |
+| S.Bus out (GH1.25 2-pin)                        | RC IN (3-pin)  | Also needs an adapter. RC IN takes S.Bus or PPM with no serial setting.                                                                                             |
+| —                                              | GPS1         | GNSS + compass module                                                                                                                                                       |
+
+Pin orders are only in the interface diagrams of the two manuals; check both before making a cable.
+
+ArduPilot port map (UniFC 6 Pico manual §1.3, confirmed on the bench): `SERIAL1` = TELEM1,
+`SERIAL2` = TELEM2, `SERIAL3` = GPS1, `SERIAL4` = GPS2, `SERIAL5` = the port labelled SERIAL5,
+`SERIAL6` = USB2. Only TELEM1 and TELEM2 have RTS/CTS.
 
 **ArduPilot (Rover / Copter)**
 
-| Parameter                       | Value                                       | Why                                                                    |
-| ------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------- |
-| `SERIALn_PROTOCOL`              | `2` (MAVLink 2)                             | on the UART wired to the air unit                                      |
-| `SERIALn_BAUD`                  | `115`                                       | must match the UniRC datalink baud (115200 by default in the SIYI app) |
-| `FS_GCS_ENABLE`                 | `1`                                         | act when the ground station link is lost                               |
-| `FS_ACTION` (Rover)             | `2` Hold                                    | stop in place on link loss (Rover)                                     |
-| `FS_GCS_ENABLE` action (Copter) | RTL or Land per site plan                   |                                                                        |
-| `SRn_*` stream rates            | ≥ 1 Hz for position, extended status, extra | the adapter also requests 1 Hz with SET_MESSAGE_INTERVAL               |
+| Parameter                       | Value                                       | Why                                                                                         |
+| ------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `SERIAL1_PROTOCOL`              | `2` (MAVLink 2)                             | TELEM1, wired to the air unit                                                               |
+| `SERIAL1_BAUD`                  | `115`                                       | factory value is `57` (57600). Whatever you choose, Datalink 1 baud on the remote must match |
+| `BRD_SER1_RTSCTS`               | `0`                                         | only TX, RX and GND are wired, so turn flow control off rather than leave it on auto-detect |
+| `FS_GCS_ENABLE`                 | `1`                                         | act when the ground station link is lost (factory value is `0`)                             |
+| `FS_ACTION` (Rover)             | `2` Hold                                    | stop in place on link loss (Rover)                                                          |
+| `FS_GCS_ENABLE` action (Copter) | RTL or Land per site plan                   |                                                                                             |
+| `MAV2_*` stream rates           | ≥ 1 Hz for position, extended status, extra | `SR1_*` before ArduPilot 4.7. The adapter also requests 1 Hz with SET_MESSAGE_INTERVAL      |
+| `MAV2_OPTIONS`                  | `4` (bit 2, Ignore Streamrate)              | without it, UniGCS on the remote overwrote `MAV2_*` with 3/10/5/2/2 Hz on the bench. Only `REQUEST_DATA_STREAM` is ignored; the gateway's `SET_MESSAGE_INTERVAL` still works |
+| `ARMING_SKIPCHK`                | `0`                                         | skip no pre-arm check (4.7 replaced `ARMING_CHECK`; the bits are inverted)                  |
 
 **PX4**: set `MAV_n_CONFIG` to the TELEM port, `NAV_DLL_ACT` (data-link loss action) per the
 site safety plan, and check `COM_DL_LOSS_T`.
@@ -115,7 +157,15 @@ Arm, mode-switch and kill switches stay on the UniRC 7 Pro channels as usual.
 
 ### 2. UniRC 7 Pro
 
-- In the SIYI app, set the datalink baud to match the flight controller (115200).
+- In UniGCS on the remote, open the datalink settings and set **Datalink 1 connection mode =
+  UDP**. UDP mode runs a server at `192.168.144.20:19856` (UniRC 7 manual §6.3) that devices on
+  the remote's LAN port or Wi-Fi can reach. **UART mode sends nothing to the LAN**: it feeds the
+  remote's internal serial port (`/dev/ttyHS3`) for apps running on the remote. Bluetooth and
+  Type-C are the other modes.
+- Set **Datalink 1 baud** to the flight controller's `SERIAL1_BAUD`: 57600 from the factory,
+  115200 with our parameter file. Change both together. If they differ, bytes still reach the
+  PC but no MAVLink decodes.
+- The PC's own UDP port must not be 19856, or it clashes with the server.
 - Plug the edge PC into the **LAN** port. Give the PC a static address on `192.168.144.0/24`
   (for example `192.168.144.50`), not one already used by the link (`.11`, `.12`, `.20`, `.25`…).
 - Check from the PC: `ping 192.168.144.25` (camera). QGroundControl on the PC with a UDP link to
@@ -123,6 +173,14 @@ Arm, mode-switch and kill switches stay on the UniRC 7 Pro channels as usual.
   gateway, or use different ports.
 - Don't run UniGCS video and the platform video at full bitrate at the same time; it shares the
   image link bandwidth (SIYI guidance).
+
+**Checking the link one layer at a time** (the order used on the bench):
+
+| Step                                                       | Pass when                     | If not                                                                                    |
+| ---------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------- |
+| `ping 192.168.144.20` and `.12`                            | replies in 1–2 ms             | LAN cable, PC address                                                                     |
+| `ping 192.168.144.11` (air unit)                           | replies in ~20 ms (radio hop) | air unit power (XT30), binding                                                            |
+| `npx tsx tools/siyi-bench/probe.ts` (from `platform/`)     | autopilot heartbeat PASS      | the probe says which: no data at all, or bytes that are not MAVLink (baud mismatch)      |
 
 ### 3. Register on the platform
 
@@ -141,6 +199,10 @@ cd deploy/edge && docker compose up -d                                 # gateway
 ```
 
 Without Docker: `GATEWAY_CONFIG=deploy/edge/site.json npm start -w @13store/gateway`.
+
+The gateway keeps its command ledgers (once-only execution across restarts) in the `gateway-data`
+volume, or in `GATEWAY_DATA_DIR` without Docker (default `./data/gateway`). Keep it: `docker compose down -v`
+deletes it. See [ADAPTER_CONTRACT.md §7](ADAPTER_CONTRACT.md).
 
 `site.json` fields: `geo` (origin latitude/longitude of the site grid and rotation), and per
 device `type` (`mavlink` / `siyi-camera` / `simulated`), `deviceId`, `profile`

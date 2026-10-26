@@ -62,6 +62,31 @@ export function actionCapability(a: CameraAction): string {
 /** Loudspeaker, searchlight and warning light act on people at the scene: a separate permission. */
 export const isPayloadAction = (a: CameraAction) => a.action === 'spotlight' || a.action === 'beacon' || a.action === 'announce';
 
+/**
+ * Does this request move the camera or switch an actuator on? Those need a LIVE mode on a real
+ * device (ADR-006). Stops (pan/tilt 0,0, zoom stop), switching a light off, photo and record do
+ * not: a SHADOW device may still be stopped and may still be observed.
+ */
+export function cameraActionMoves(a: CameraAction): boolean {
+  switch (a.action) {
+    case 'gimbal_speed':
+      return a.yaw !== 0 || a.pitch !== 0;
+    case 'zoom':
+      return a.dir !== 0;
+    case 'gimbal_angle':
+    case 'center':
+    case 'zoom_to':
+    case 'announce':
+      return true;
+    case 'spotlight':
+    case 'beacon':
+      return a.on;
+    case 'photo':
+    case 'record':
+      return false;
+  }
+}
+
 /** Server → gateway. */
 export type SrvCamera = { t: 'camera'; requestId: string; deviceId: string } & CameraAction;
 

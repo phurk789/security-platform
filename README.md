@@ -91,6 +91,7 @@ npm run dev                          # server on :8080 with the embedded simulat
 npm run dev -w @13store/web          # command centre on :5173 (proxies /api)
 npm run dev -w @13store/field        # field app on :5174
 npx tsc -b && npx vitest run         # typecheck and all tests
+npm run build && npm run smoke       # start the built server and gateway once (CI does this too)
 ```
 
 Tests cover the PRD §11 acceptance checks end to end against the real server and gateway:

@@ -61,8 +61,22 @@ export interface Config {
   vapidSubject?: string;
 }
 
+const ENV_MODES: readonly EnvMode[] = ['demo', 'pilot'];
+
+/**
+ * ENV_MODE decides whether demo users with the published password are seeded and whether
+ * MEDIA_SECRET is required, so an unknown value (a typo, "production") must stop the server
+ * instead of quietly running as demo. Unset means demo.
+ */
+export function parseEnvMode(raw: string | undefined): EnvMode {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (v === '') return 'demo';
+  if ((ENV_MODES as readonly string[]).includes(v)) return v as EnvMode;
+  throw new Error(`ENV_MODE must be "demo" or "pilot" (got "${raw}")`);
+}
+
 export function loadConfig(over: Partial<Config> = {}): Config {
-  const env = (process.env.ENV_MODE as EnvMode) || 'demo';
+  const env = parseEnvMode(process.env.ENV_MODE);
   const dataDir = resolve(process.env.DATA_DIR || './data');
   const cfg: Config = {
     port: Number(process.env.PORT || 8080),
@@ -96,6 +110,7 @@ export function loadConfig(over: Partial<Config> = {}): Config {
     vapidSubject: process.env.VAPID_SUBJECT || undefined,
     ...over,
   };
+  if (!ENV_MODES.includes(cfg.env)) throw new Error(`env must be "demo" or "pilot" (got "${cfg.env}")`);
   if (cfg.env === 'pilot' && !cfg.mediaSecret) throw new Error('MEDIA_SECRET must be set in pilot mode');
   return cfg;
 }

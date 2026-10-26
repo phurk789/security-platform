@@ -5,8 +5,13 @@
 # (left / right), centre = neutral; engine speed held by its own governor; engine stop and
 # actuator power cut by a hardwired E-stop chain that does not depend on this board.
 #
+# Needs ArduPilot Rover firmware. The UniFC 6 Pico ships with ArduCopter (4.6.3 on our unit):
+# flash Rover first, then load this file. Rover stable has no build for this board yet; the bench
+# uses Rover latest 4.8.0-dev (docs/HARDWARE_SIYI.md section 1, decision D-34).
+# Names follow ArduPilot 4.7 and later (MAVn_*, ARMING_SKIPCHK, GPS1_TYPE). Checked on the bench
+# against ArduRover V4.8.0-dev (9c412baa) on 2026-10-22.
 # Load in Mission Planner (Config > Full Parameter List > Load from file) or QGroundControl.
-# Lines marked CONFIRM depend on the board's UART map or on the vehicle; check before arming.
+# Lines marked CONFIRM depend on the vehicle; measure them before arming.
 
 # --- Vehicle ---------------------------------------------------------------
 FRAME_CLASS,1            # Rover
@@ -38,17 +43,24 @@ ATC_ACCEL_MAX,0.5        # m/s/s
 ATC_DECEL_MAX,1.0        # m/s/s
 
 # --- Telemetry to the SIYI air unit (MAVLink 2) -----------------------------
-SERIAL1_PROTOCOL,2       # CONFIRM: SERIAL1 = TELEM1 on UniFC 6 Pico (check SIYI ArduPilot UART map)
-SERIAL1_BAUD,115         # must match the datalink baud set in the SIYI app (115200)
-SR1_POSITION,2           # Hz
-SR1_EXTRA1,2
-SR1_EXTRA2,2
-SR1_EXT_STAT,1
-SR1_RC_CHAN,1
+SERIAL1_PROTOCOL,2       # SERIAL1 = TELEM1 (SIYI manual 1.3; seen on the bench 2026-10-22)
+SERIAL1_BAUD,115         # factory value is 57 (57600); Datalink 1 baud in the SIYI app must be the same
+BRD_SER1_RTSCTS,0        # flow control off: only TX, RX and GND are wired to the air unit
+# Stream rates for TELEM1. ArduPilot 4.7 renamed SRn_* to MAV(n+1)_*: SR1_* is now MAV2_*
+# (MAV1 = USB, the first MAVLink port; MAV2 = SERIAL1).
+MAV2_POSITION,2          # Hz
+MAV2_EXTRA1,2
+MAV2_EXTRA2,2
+MAV2_EXT_STAT,1
+MAV2_RC_CHAN,1
+# MAV2_OPTIONS bit 2 (Ignore Streamrate): a GCS on the link (UniGCS on the remote) can no longer
+# overwrite the rates above with REQUEST_DATA_STREAM. SET_MESSAGE_INTERVAL, which the platform
+# gateway uses, still works (GCS_Common.cpp at 9c412baa).
+MAV2_OPTIONS,4
 
 # --- GNSS / compass ----------------------------------------------------------
-SERIAL3_PROTOCOL,5       # CONFIRM: GPS port number on this board
-GPS_TYPE,1               # auto
+SERIAL3_PROTOCOL,5       # SERIAL3 = GPS1 (SIYI manual 1.3; factory value on the bench)
+GPS1_TYPE,1              # auto (ArduPilot 4.6 renamed GPS_TYPE to GPS1_TYPE)
 COMPASS_USE,1            # mount the GPS/compass mast away from the engine and steel frame
 
 # --- RC from the UniRC 7 Pro (SBUS via the air unit) -----------------------
@@ -74,5 +86,5 @@ FS_CRASH_CHECK,2         # Hold and disarm if stuck or crashed
 FS_EKF_ACTION,1          # Hold on bad position estimate
 
 # --- Arming ----------------------------------------------------------------------
-ARMING_CHECK,1           # all pre-arm checks
+ARMING_SKIPCHK,0         # skip no pre-arm check (4.7 replaced ARMING_CHECK, and inverted the bits)
 ARMING_REQUIRE,1         # outputs stay at TRIM until armed

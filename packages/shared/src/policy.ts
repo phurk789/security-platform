@@ -2,7 +2,7 @@
 import { BUILDINGS, atBuilding, insideDemoArea } from './site';
 import { routeViolations, type Geofence } from './routing';
 import { floorPlan, inNoGo, routeCrossesWalls } from './indoor';
-import type { Device, Freshness, Mission, Role } from './types';
+import type { Device, Freshness, Mission, OperationalMode, Role } from './types';
 
 /** Telemetry older than this is stale (PRD §9: 5 s default for the demo vehicle). */
 export const STALE_AFTER_MS = 5_000;
@@ -52,6 +52,12 @@ export type Action =
   | 'site.manage'
   | 'patrol.manage'
   | 'device.service'
+  /** SHADOW → LIVE_MANUAL (ADR-006). Supervisor, with step-up and a reason. */
+  | 'device.mode.promote'
+  /** LIVE_* → SHADOW. Supervisor or device administrator (the system may always demote). */
+  | 'device.mode.demote'
+  /** Edge media origins that gateway-declared stream URLs must match (SSRF guard). */
+  | 'admin.edge_origins'
   | 'demo.control';
 
 const DISPATCH: Action[] = [
@@ -79,7 +85,17 @@ const DISPATCH: Action[] = [
  */
 export const MATRIX: Record<Role, Action[]> = {
   dispatcher: DISPATCH,
-  supervisor: [...DISPATCH, 'mission.approve', 'control.handover', 'evidence.export', 'audit.view', 'site.geofences', 'patrol.manage'],
+  supervisor: [
+    ...DISPATCH,
+    'mission.approve',
+    'control.handover',
+    'evidence.export',
+    'audit.view',
+    'site.geofences',
+    'patrol.manage',
+    'device.mode.promote',
+    'device.mode.demote',
+  ],
   operator: ['mission.accept', 'device.command', 'media.view', 'camera.control', 'payload.control', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'],
   responder: ['incident.create', 'field.update', 'evidence.view', 'evidence.add'],
   auditor: ['evidence.view', 'evidence.export', 'report.view', 'audit.view'],
@@ -93,6 +109,8 @@ export const MATRIX: Record<Role, Action[]> = {
     'site.geofences',
     'site.manage',
     'device.service',
+    'device.mode.demote',
+    'admin.edge_origins',
     'audit.view',
     'demo.control',
   ],
@@ -109,11 +127,44 @@ export const STEP_UP_ACTIONS: Action[] = [
   'admin.privacy',
   'patrol.manage',
   'site.manage',
+  'device.mode.promote',
+  'admin.edge_origins',
 ];
 
 export function can(role: Role, action: Action): boolean {
   return MATRIX[role].includes(action);
 }
+
+// ---------------------------------------------------------------------------
+// Operational mode (ADR-006, ADR-015 L1 safety gate)
+// ---------------------------------------------------------------------------
+
+/**
+ * The mode a device is actually in. Simulated adapters are always SIMULATION; a real device
+ * without a stored LIVE mode (new, old record, unknown value) is SHADOW. Never raises a mode.
+ */
+export function modeOf(d: Pick<Device, 'integration' | 'mode'>): OperationalMode {
+  if (d.integration === 'simulated') return 'SIMULATION';
+  return d.mode === 'LIVE_MANUAL' || d.mode === 'LIVE_ASSISTED' ? d.mode : 'SHADOW';
+}
+
+/**
+ * May a request that moves or switches on something reach this device? Stop, pause and hold are
+ * never asked here: they pass in every mode. SIMULATION only drives a simulator, so it passes.
+ * A person needs LIVE_MANUAL (or LIVE_ASSISTED); automation (auto-aim, scheduled starts) needs LIVE_ASSISTED.
+ */
+export function modeAllowsMotion(mode: OperationalMode, by: 'person' | 'automation'): boolean {
+  if (mode === 'SIMULATION') return true;
+  if (by === 'automation') return mode === 'LIVE_ASSISTED';
+  return mode === 'LIVE_MANUAL' || mode === 'LIVE_ASSISTED';
+}
+
+export const MODE_LABEL: Record<OperationalMode, string> = {
+  SIMULATION: 'Simulation — commands drive a simulator',
+  SHADOW: 'Shadow — real data, no commands to the device',
+  LIVE_MANUAL: 'Live manual — a person may command the device',
+  LIVE_ASSISTED: 'Live assisted — automation allowed by policy',
+};
 
 export const ROLE_LABEL: Record<Role, string> = {
   dispatcher: 'Dispatcher',

@@ -19,9 +19,33 @@ jobs:
       - run: npm run build -w @13store/field
       - run: npm run build -w @13store/server
       - run: npm run build -w @13store/gateway
+      # Run the built files once: the unit tests only run the TypeScript sources.
+      - run: npm run smoke
   docker:
     runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t ps-twin:ci .
+      - name: Smoke-run the image (server healthy, separate gateway registers)
+        run: |
+          docker network create smoke
+          docker run -d --name smoke-server --network smoke -e ENV_MODE=demo -e EMBED_GATEWAY=0 ps-twin:ci
+          healthy=''
+          for i in $(seq 1 45); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' smoke-server)" = healthy ]; then healthy=1; break; fi
+            sleep 2
+          done
+          docker run -d --name smoke-gateway --network smoke \
+            -e SERVER_URL=ws://smoke-server:8080 -e GATEWAY_KEY=gw_demo_local_key -e GATEWAY_ID=edge-civic-01 \
+            ps-twin:ci node apps/gateway/dist/index.js
+          registered=''
+          for i in $(seq 1 30); do
+            if docker logs smoke-gateway 2>&1 | grep -q 'registered [0-9]* device'; then registered=1; break; fi
+            sleep 1
+          done
+          echo '--- server log'; docker logs smoke-server 2>&1 | tail -20
+          echo '--- gateway log'; docker logs smoke-gateway 2>&1 | tail -20
+          docker rm -f smoke-server smoke-gateway >/dev/null
+          test -n "$healthy" || { echo 'server never became healthy'; exit 1; }
+          test -n "$registered" || { echo 'gateway never registered its devices'; exit 1; }

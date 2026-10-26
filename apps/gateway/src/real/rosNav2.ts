@@ -38,6 +38,7 @@ export class RosNav2Adapter implements Adapter {
   private comps: ComponentTracker;
   private ctx!: AdapterContext;
   private ws?: WebSocket;
+  /** Replaced by the gateway's (persistent) ledger in start(). */
   private ledger = new CommandLedger();
   private timers: ReturnType<typeof setInterval>[] = [];
   private reconnect?: ReturnType<typeof setTimeout>;
@@ -101,6 +102,7 @@ export class RosNav2Adapter implements Adapter {
 
   start(ctx: AdapterContext) {
     this.ctx = ctx;
+    this.ledger = ctx.ledger;
     this.stopped = false;
     this.connect();
     this.timers.push(setInterval(() => this.tick(), 250));

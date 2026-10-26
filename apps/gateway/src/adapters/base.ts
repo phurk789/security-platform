@@ -60,6 +60,7 @@ export function declarationFrom(d: Device, rateMs = d.rateMs): AdapterDeclaratio
 export abstract class SimDevice implements Adapter {
   readonly declaration: AdapterDeclaration;
   protected ctx!: AdapterContext;
+  /** Replaced by the gateway's (persistent) ledger in start(). */
   protected ledger = new CommandLedger();
   protected linkCut: boolean;
   protected seq = 0;
@@ -83,6 +84,7 @@ export abstract class SimDevice implements Adapter {
 
   start(ctx: AdapterContext) {
     this.ctx = ctx;
+    this.ledger = ctx.ledger;
     this.lastTick = ctx.now();
     this.ticker = setInterval(() => this.tick(), this.declaration.rateMs);
   }

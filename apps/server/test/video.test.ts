@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_DETECTION_RULES, GATEWAY_PROTOCOL } from '@13store/shared';
 import { matchRule, sanitizeDetection, validateRules } from '../src/detections';
 import { DEMO_ALERT_KEY, SANDBOX_GATEWAY_KEY } from '../src/seed';
-import { Client, startServer, waitFor, type TestServer } from './helpers';
+import { Client, startServer, testActor, waitFor, type TestServer } from './helpers';
 
 let srv: TestServer;
 let alex: Client;
@@ -259,6 +259,17 @@ describe('recordings', () => {
 
   it('real cameras answer from the site media server playback API with the viewer token checked by the platform', async () => {
     const pb = await fakePlayback(srv.url);
+    // Loopback is never an allowed edge origin, so the gateway declares a site host name and the
+    // test routes only the transport to the fake server (allowlist checks still run).
+    const port = new URL(pb.url).port;
+    const edgePb = `http://pb.edge.test:${port}`;
+    const toFake = (u: string) => u.replace(edgePb, pb.url);
+    srv.built.platform.setEdgeOrigins(testActor('org-sandbox', 'admin'), { origins: ['https://edge.example:8889', edgePb] });
+    const realGet = srv.built.platform.edgeGet;
+    srv.built.platform.edgeGet = async (u, o) => {
+      const r = await fetch(toFake(u), { signal: AbortSignal.timeout(o.timeoutMs), redirect: 'error' });
+      return { status: r.status, body: Buffer.from(await r.arrayBuffer()) };
+    };
     const devop = await Client.login(srv.url, 'devop');
     const ws = new WebSocket(`${srv.wsUrl}/api/v1/gateway`, { headers: { authorization: `Bearer ${SANDBOX_GATEWAY_KEY}` } });
     await new Promise((r) => ws.on('open', r));
@@ -279,7 +290,7 @@ describe('recordings', () => {
             rateMs: 1000,
             limitations: '',
             linkLossBehavior: '',
-            stream: { whep: 'https://edge.example:8889/cam-ptz-01/whep', playback: pb.url },
+            stream: { whep: 'https://edge.example:8889/cam-ptz-01/whep', playback: edgePb },
           },
         ],
       }),
@@ -296,11 +307,11 @@ describe('recordings', () => {
       expect(pb.hits[0]).toMatch(/^\/list\?path=cam-ptz-01&start=.*&token=/);
       const clip = await devop.post('/media/SBX-ROVER-01/clip', { start: now - 120_000, duration: 20 });
       expect(clip.body.label).toBe('RECORDED');
-      expect(clip.body.url).toMatch(new RegExp(`^${pb.url}/get\\?path=cam-ptz-01&start=.*&duration=20&format=mp4&token=`));
+      expect(clip.body.url).toMatch(new RegExp(`^${edgePb}/get\\?path=cam-ptz-01&start=.*&duration=20&format=mp4&token=`));
       // The platform-issued token is for this device only: MediaMTX asks and is told no for another path.
-      const bad = await fetch(clip.body.url.replace('path=cam-ptz-01', 'path=other-cam'));
+      const bad = await fetch(toFake(clip.body.url).replace('path=cam-ptz-01', 'path=other-cam'));
       expect(bad.status).toBe(401);
-      expect((await fetch(clip.body.url)).status).toBe(200);
+      expect((await fetch(toFake(clip.body.url))).status).toBe(200);
       // Save a clip: the platform fetches the MP4 from the media server and stores it with a checksum.
       const dev = await Client.login(srv.url, 'dev');
       const inc = (await dev.post('/incidents', { title: 'Sandbox clip', place: 'Lot' })).body;
@@ -310,6 +321,7 @@ describe('recordings', () => {
       expect(ev.body).toMatchObject({ kind: 'clip', mime: 'video/mp4', simulated: false, size: 12 + 2048 });
       expect((srv.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'evidence.clip' AND org_id = 'org-sandbox'").get() as { n: number }).n).toBe(1);
     } finally {
+      srv.built.platform.edgeGet = realGet;
       ws.close();
       pb.close();
     }

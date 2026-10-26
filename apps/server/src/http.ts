@@ -358,6 +358,9 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   });
   app.post('/api/v1/devices', async (req: Req) => p.registerDevice(A(req), body(req) as any));
   app.post('/api/v1/devices/:id/handover', async (req: Req) => p.handover(A(req), req.params.id, String(body(req).toUserId ?? '')));
+  // Operational mode (ADR-006): promote needs a supervisor and step-up; demote a supervisor or admin.
+  app.post('/api/v1/devices/:id/mode-transitions', async (req: Req) => p.transitionMode(A(req), req.params.id, body(req)));
+  app.patch('/api/v1/devices/:id/integration', async (req: Req) => p.setDeviceIntegration(A(req), req.params.id, body(req)));
   app.post('/api/v1/devices/:id/service', async (req: Req) => p.recordService(A(req), req.params.id, String(body(req).note ?? '')));
   app.patch('/api/v1/devices/:id/stats', async (req: Req) => p.updateDeviceStats(A(req), req.params.id, body(req) as any));
   app.post('/api/v1/devices/:id/release', async (req: Req) => p.release(A(req), req.params.id));
@@ -419,6 +422,9 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     p.require(A(req), 'admin.devices', 'gateways', { mutating: false });
     return hub.connected(A(req).orgId);
   });
+  // Edge media origins that gateway-declared stream URLs must match (per site, or the whole org).
+  app.get('/api/v1/admin/edge-origins', async (req) => p.listEdgeOrigins(A(req)));
+  app.put('/api/v1/admin/edge-origins', async (req: Req) => p.setEdgeOrigins(A(req), body(req)));
   app.get('/api/v1/admin/settings', async (req) => p.orgSettings(A(req)));
   app.patch('/api/v1/admin/settings', async (req: Req) => p.updateOrgSettings(A(req), body(req) as any));
   app.post('/api/v1/admin/notifications/test', async (req: Req) => p.testChannel(A(req), String(body(req).channelId ?? '')));
