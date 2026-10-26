@@ -207,7 +207,9 @@ deletes it. See [ADAPTER_CONTRACT.md §7](ADAPTER_CONTRACT.md).
 `site.json` fields: `geo` (origin latitude/longitude of the site grid and rotation), and per
 device `type` (`mavlink` / `siyi-camera` / `simulated`), `deviceId`, `profile`
 (`ardupilot-rover`, `ardupilot-copter`, `px4-rover`, `px4-multicopter`), `link`, `pos` for a
-fixed camera, `stream.whep` for the browser video URL, and `yawSign: -1` if "pan right" turns
+fixed camera, `stream.whep` for the browser video URL (also on a `mavlink` vehicle, for the
+onboard camera's video; that is video only, gimbal control needs a `siyi-camera` device), and
+`yawSign: -1` if "pan right" turns
 the camera left (SIYI yaw sign can differ by model and mounting; check it in test 11).
 
 ### 5. Catalogue vehicles (D50 / D100 / D200) and the 4-in-1 module

@@ -24,6 +24,7 @@ import {
   type GeoAnchor,
   type Point,
   type SrvCommand,
+  type StreamInfo,
 } from '@13store/shared';
 import { CommandLedger, admitCommand, type Adapter, type AdapterContext } from '../sdk';
 
@@ -59,6 +60,13 @@ export interface MavlinkVehicleConfig {
    * (site metres), turned by `yawDeg` (degrees clockwise from site east).
    */
   indoor?: { buildingId: string; level: number; origin: { x: number; y: number }; yawDeg?: number };
+  /**
+   * Onboard camera video served by the site media server (MediaMTX pulls the camera's RTSP).
+   * Declared on the vehicle so the console shows it on the unit card and in the command centre.
+   * Video only: the adapter does not talk to the camera, so its part stays "pending" until a
+   * person checks the picture.
+   */
+  stream?: StreamInfo;
 }
 
 /** UniRC 7 / 7 Pro datalink UDP server (SIYI manual: QGroundControl "server address"). */
@@ -187,6 +195,9 @@ export class MavlinkVehicleAdapter implements Adapter {
       ...(cfg.payload && PAYLOAD_CATALOG[cfg.payload.module]
         ? [{ id: 'payload', name: PAYLOAD_CATALOG[cfg.payload.module].name, kind: 'payload' as const, status: 'pending' as const, detail: 'Relay outputs not yet exercised' }]
         : []),
+      ...(cfg.stream
+        ? [{ id: 'cam', name: 'Onboard camera (video only)', kind: 'camera' as const, status: 'pending' as const, detail: `Video through the site media server from ${cfg.stream.rtsp ?? 'the camera'}; check the picture in the console`, stream: cfg.stream }]
+        : []),
     ]);
     this.declaration = {
       deviceId: cfg.deviceId,
@@ -204,7 +215,9 @@ export class MavlinkVehicleAdapter implements Adapter {
             : ['camera', 'ground_patrol', 'waypoints']),
         ...(cfg.payload?.spotlightRelay !== undefined ? ['spotlight'] : []),
         ...(cfg.payload?.beaconRelay !== undefined ? ['beacon'] : []),
+        ...(cfg.stream ? ['video'] : []),
       ],
+      stream: cfg.stream,
       catalogId: cfg.catalogId && VEHICLE_CATALOG[cfg.catalogId] ? cfg.catalogId : undefined,
       indoor: cfg.indoor ? { buildingId: cfg.indoor.buildingId, level: cfg.indoor.level, positioning: 'slam' } : undefined,
       payloads: cfg.payload && PAYLOAD_CATALOG[cfg.payload.module] ? [cfg.payload.module] : undefined,

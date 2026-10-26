@@ -31,6 +31,8 @@ export type DeviceConfig =
       payload?: { module: 'loudhailer-4in1'; spotlightRelay?: number; beaconRelay?: number };
       /** Indoor vehicle: ArduPilot external navigation (LOCAL_POSITION_NED) instead of GPS. */
       indoor?: { buildingId: string; level: number; origin: { x: number; y: number }; yawDeg?: number };
+      /** Onboard camera video through the site media server (shown on the vehicle). Video only: gimbal control needs a siyi-camera device. */
+      stream?: StreamInfo;
     }
   | ({ type: 'ros2-nav2' } & RosNav2Config)
   | {
@@ -126,6 +128,9 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           catalogId: d.catalogId,
           payload: d.payload,
           indoor: d.indoor,
+          flightController: d.flightController,
+          radio: d.radio,
+          stream: d.stream,
         }),
       );
     else if (d.type === 'ros2-nav2') out.push(new RosNav2Adapter(d));
