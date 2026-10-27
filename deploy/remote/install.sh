@@ -16,8 +16,14 @@ arch="$(uname -m)"
 if [ "$arch" != "aarch64" ]; then echo "This kit needs aarch64 (64-bit ARM); this device is $arch."; exit 1; fi
 
 echo "--- packages (Node.js LTS, curl, tar, procps)"
-pkg update -y
-pkg install -y nodejs-lts curl tar procps
+# upgrade, not just update: a new Node.js needs the current libc++, otherwise it fails with
+# 'CANNOT LINK EXECUTABLE "node": cannot locate symbol ...' (seen on a UniRC 7 Pro, 2026-10-27).
+pkg upgrade -y
+pkg install -y libc++ nodejs-lts curl tar procps
+if ! node --version >/dev/null 2>&1; then
+  echo "node does not start. Run: pkg upgrade -y && pkg install -y libc++ nodejs-lts   then this script again."
+  exit 1
+fi
 major="$(node -p 'process.versions.node.split(".")[0]')"
 if [ "$major" -lt 22 ]; then echo "Node $(node --version) is too old; need 22 or newer."; exit 1; fi
 echo "Node $(node --version)"
