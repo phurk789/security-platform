@@ -212,12 +212,13 @@ describe('live driving a simulated UGV end to end', () => {
       send(0, 0);
       await sleep(100);
       const t = setInterval(() => send(1, 0), 100);
+      // Wait for real distance, not just speed: the simulated GNSS fix is noisy and lags the vehicle.
+      const moved = () => Math.hypot(live().pos.x - from.x, live().pos.y - from.y);
       try {
-        await waitFor(() => live().speed > 1, 8000);
+        await waitFor(() => live().speed > 1 && moved() > 3, 12_000);
       } finally {
         clearInterval(t);
       }
-      expect(Math.hypot(live().pos.x - from.x, live().pos.y - from.y)).toBeGreaterThan(0.5);
       expect(live().components?.find((c) => c.id === 'drive')?.detail).toMatch(/Driving from the console/);
       expect((await op.post(`/devices/${ugv.id}/drive`, { action: 'stop' })).status).toBe(200);
       await waitFor(() => live().speed === 0, 8000);
