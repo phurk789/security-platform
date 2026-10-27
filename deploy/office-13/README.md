@@ -19,9 +19,12 @@ projects' files.
 
 ```
 C:\Server\thermal\
-  compose.yaml          this folder's compose.yaml (image only, never builds or pulls)
+  compose.yaml          this folder's compose.yaml (server: our image, never built or pulled by compose;
+                        media: bluenviron/mediamtx:1.9.3, pulled once)
+  mediamtx.yml          this folder's mediamtx.yml (the platform's media server, ports 18554/18889/18189)
   .env                  THERMAL_TAG=<git short sha>, THERMAL_DATA_VOLUME=<volume>
-  .env.server           ENV_MODE, MEDIA_SECRET, TRUST_PROXY, CSP_CONNECT_SRC (made on the server, not in git)
+  .env.server           ENV_MODE, MEDIA_SECRET, TRUST_PROXY, CSP_CONNECT_SRC, MEDIA_INGEST_URL,
+                        MEDIA_PUBLIC_URL (made on the server, not in git)
   .env.server.demo      ENV_MODE=demo, ready for a switch back
   .docker\config.json   {}  — empty Docker config for builds over SSH (see below)
   src-<tag>\            the code of that commit (one fresh folder per deploy)
@@ -38,9 +41,40 @@ Read them with `docker logs thermal-server-1 2>&1 | Select-String "admin passwor
 and store them; the log is gone once the container is re-created, and there is no reset tool yet.
 
 **Pilot settings in `.env.server`:** `TRUST_PROXY=0` (no proxy in front), and
-`CSP_CONNECT_SRC=https: wss: http:` so the console may fetch video from the edge laptop's
-MediaMTX over plain http on the LAN. Narrow it to the laptop's exact origin
-(`https: wss: http://<ip>:8889`) once that address is fixed, and drop `http:` with TLS.
+`CSP_CONNECT_SRC=https: wss: http:` so the console may fetch video from an edge's own MediaMTX
+(pull mode) over plain http on the LAN. Once every edge pushes into the media service (below),
+drop `http:`: the media service's address is added to the policy automatically.
+
+## Pushed video (media service)
+
+Edge gateways whose `site.json` says `"stream": { "rtsp": "…", "push": true }` push the camera into
+the `media` service here; browsers watch from it. No edge needs a reachable address, and no
+"Allowed video sources" entry is needed for it (the server's own media server is always allowed,
+also in the console's Content-Security-Policy).
+
+| Port (host = container) | What |
+| --- | --- |
+| 18554/tcp | RTSP: gateways publish (`pub:<token>`, a credential the server gives each gateway on connect) |
+| 18889/tcp | WebRTC signalling (WHEP): browsers, with the console's 60-second token |
+| 18189/udp, 18189/tcp | WebRTC media (TCP when UDP is blocked) |
+
+LCOT's MediaMTX uses 8554/8889/8189; these do not clash. To switch it on (once):
+
+```powershell
+cd C:\Server\thermal
+# copy mediamtx.yml and compose.yaml from deploy/office-13 of the deployed commit
+Copy-Item src-$tag\deploy\office-13\mediamtx.yml, src-$tag\deploy\office-13\compose.yaml . -Force
+Add-Content -Encoding ascii .env.server "MEDIA_INGEST_URL=rtsp://192.168.20.13:18554"
+Add-Content -Encoding ascii .env.server "MEDIA_PUBLIC_URL=http://192.168.20.13:18889"
+docker pull bluenviron/mediamtx:1.9.3
+docker compose up -d
+docker compose logs --tail 20 media     # "listener opened on :18554 (TCP)" and ":18889"
+```
+
+Every publish and every viewer is checked with the server (`POST /api/v1/media/auth`): a gateway
+may publish only its own device's path (`ugv-01` for `UGV-01`) while it is connected. To switch
+pushed video off, remove the two `MEDIA_*` lines and run `docker compose up -d` (gateways then
+log "the server gave no video publish address" and video stays off until they use pull mode).
 
 ## Deploy a new version
 

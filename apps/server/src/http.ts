@@ -603,9 +603,11 @@ function orgEnv(db: DB, orgId: string): 'demo' | 'sandbox' | 'pilot' {
 export type { Role };
 
 /** Content-Security-Policy for the hosted console and field app. Scripts only from this origin;
- *  video and WebSockets to this origin plus the configured media servers (default: any https/wss). */
-export function cspHeader(cfg: Pick<Config, 'cspConnectSrc'>) {
-  const remote = cfg.cspConnectSrc.length ? cfg.cspConnectSrc.join(' ') : 'https: wss:';
+ *  video and WebSockets to this origin plus the configured media servers (default: any https/wss).
+ *  The platform's own media server (MEDIA_PUBLIC_URL) is always allowed, also over plain http. */
+export function cspHeader(cfg: Pick<Config, 'cspConnectSrc'> & Partial<Pick<Config, 'mediaPublicUrl'>>) {
+  const base = cfg.cspConnectSrc.length ? cfg.cspConnectSrc : ['https:', 'wss:'];
+  const remote = [...base, ...(cfg.mediaPublicUrl && !base.includes(cfg.mediaPublicUrl) ? [cfg.mediaPublicUrl] : [])].join(' ');
   return [
     "default-src 'self'",
     "script-src 'self'",

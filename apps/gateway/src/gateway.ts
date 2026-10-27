@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type GeoAnchor } from '@13store/shared';
 import { CommandLedger, ledgerFile, type LedgerOptions } from './ledger';
 import { consoleLogger, type Adapter, type AdapterContext, type Logger } from './sdk';
+import { VideoPusher, type Pusher, type VideoPushOptions } from './videoPush';
 
 /** Messages dropped because the server link was down, by type. */
 export type DroppedCounts = Record<Exclude<GatewayToServer['t'], 'hello'>, number>;
@@ -32,6 +33,10 @@ export interface GatewayOptions {
   dataDir?: string;
   /** Ledger retention tuning. Defaults suit the 10 s command TTL. */
   ledger?: Pick<LedgerOptions, 'retainMs' | 'maxEntries' | 'clockSkewMs'>;
+  /** ffmpeg used to push video for devices declaring `stream.push` (default `ffmpeg` on PATH). */
+  ffmpegPath?: string;
+  /** Replaces the ffmpeg pusher (tests). */
+  createPusher?: (o: VideoPushOptions) => Pusher;
 }
 
 export interface GatewayHandle {
@@ -58,6 +63,34 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
   let outage = noDrops(); // since the link last went down
   let offlineSince = now();
   let everConnected = false;
+  /** Video pushes by device id. They outlive server reconnects: each welcome only refreshes the credential. */
+  const pushers = new Map<string, Pusher>();
+  const createPusher = opts.createPusher ?? ((o: VideoPushOptions) => new VideoPusher(o));
+
+  const updatePushes = (accepted: string[], media: { deviceId: string; publish: string }[]) => {
+    for (const m of media) {
+      const a = byId.get(m.deviceId);
+      const source = a?.declaration.stream?.push ? a.declaration.stream.rtsp : undefined;
+      if (!a || !source || !accepted.includes(m.deviceId)) {
+        log.warn(`server sent a video publish address for ${m.deviceId}, which has no camera to push here; ignored`);
+        continue;
+      }
+      const p = pushers.get(m.deviceId);
+      if (p) p.setTarget(m.publish);
+      else pushers.set(m.deviceId, createPusher({ deviceId: m.deviceId, source, target: m.publish, ffmpeg: opts.ffmpegPath, log, onState: (s) => a.onMediaState?.(s) }));
+    }
+    for (const a of opts.adapters) {
+      const id = a.declaration.deviceId;
+      if (!a.declaration.stream?.push) continue;
+      if (!accepted.includes(id)) {
+        // No longer this gateway's device: stop publishing it.
+        pushers.get(id)?.stop();
+        pushers.delete(id);
+      } else if (!media.some((m) => m.deviceId === id)) {
+        log.warn(`${id}: the server gave no video publish address (it has no media server for pushed video); video stays off`);
+      }
+    }
+  };
 
   const send = (msg: GatewayToServer) => {
     if (ws?.readyState !== WebSocket.OPEN) {
@@ -114,6 +147,7 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
         accepted = new Set(msg.accepted);
         for (const r of msg.rejected) log.warn(`server rejected ${r.deviceId}: ${r.reason}`);
         log.info(`registered ${msg.accepted.length} device(s)`);
+        updatePushes(msg.accepted, msg.media ?? []);
         return;
       case 'command': {
         const a = byId.get(msg.deviceId);
@@ -194,6 +228,8 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
     async stop() {
       stopped = true;
       if (retry) clearTimeout(retry);
+      for (const p of pushers.values()) p.stop();
+      pushers.clear();
       for (const a of opts.adapters) a.stop();
       const s = ws;
       ws = null;

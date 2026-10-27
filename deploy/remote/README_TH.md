@@ -1,11 +1,14 @@
 # รัน edge บนรีโมต SIYI UniRC 7 Pro (แบบ A, สำหรับทดสอบ)
 
-ย้าย gateway และ MediaMTX จากโน้ตบุ๊กไปรันบนรีโมตเอง (รีโมตเป็น Android ใช้ Termux) รีโมตจะต่อออกไปหา server เอง เหมือนแบบ DJI ไม่ต้องมีโน้ตบุ๊กคั่น
+ย้าย gateway จากโน้ตบุ๊กไปรันบนรีโมตเอง (รีโมตเป็น Android ใช้ Termux) รีโมตต่อออกไปหา server เอง และ**ส่งภาพกล้องเข้า media server บน .13** เหมือน DJI Dock ไม่ต้องมีโน้ตบุ๊กคั่น และไม่ต้องรู้ IP ของรีโมต
 
 ```
-FC → air unit → วิทยุ SIYI → UniRC 7 Pro [Termux: gateway + MediaMTX] ──Wi-Fi ออฟฟิศ──► 192.168.20.13:8090
-                                                                     └──WebRTC──► เบราว์เซอร์ใน Wi-Fi เดียวกัน
+FC → air unit → วิทยุ SIYI → UniRC 7 Pro [Termux: gateway + ffmpeg] ──Wi-Fi ออฟฟิศ──► 192.168.20.13:8090  (ข้อมูลรถ)
+กล้อง (.25) ──────────────────────────────────┘                     └──RTSP──────► 192.168.20.13:18554 (ภาพ)
+เบราว์เซอร์ ◄──WebRTC── 192.168.20.13:18889
 ```
+
+> **แบบเดิม (pull):** MediaMTX รันบนรีโมตและเบราว์เซอร์ดึงภาพจากรีโมตตรงๆ ยังใช้ได้ถ้าใน `site.json` ใช้ `stream.whep` แทน `stream.push` (ต้องทำข้อ 2 ส่วน REMOTE_IP และข้อ 5) ใช้เมื่อ .13 ยังไม่ได้เปิด media server
 
 > **ทำหลังจากต่อผ่านโน้ตบุ๊กได้แล้ว** ([`deploy/edge/FIRST_CONNECTION_TH.md`](../edge/FIRST_CONNECTION_TH.md)) จะได้รู้ว่าถ้าไม่ผ่าน ปัญหาอยู่ที่การย้ายมารีโมต ไม่ใช่ที่รถ
 > ถ้ามาทางรีโมตเลยโดยไม่มีโน้ตบุ๊ก ให้ใช้ `probe.sh` (ข้อ 3.5) แยกปัญหาฝั่งรถออกก่อนเปิด gateway
@@ -30,13 +33,13 @@ npm run kit:remote
 
 ## 2. ต่อ Wi-Fi ออฟฟิศบนรีโมต 🧪
 
-- ต่อ Wi-Fi ที่ไปถึง `192.168.20.13` ได้ (วงเดียวกับโน้ตบุ๊ก) วิทยุ SIYI ใช้งานต่อได้ตามปกติ
-- จด **IP ของรีโมตฝั่ง Wi-Fi**: Settings → Wi-Fi → แตะชื่อเครือข่าย → IP address (ต่อไปเรียกว่า `REMOTE_IP`)
-- ควรจอง IP นี้ไว้ที่ router (DHCP reservation) เพราะ IP นี้อยู่ใน config และในรายการแหล่งวิดีโอที่ server อนุญาต
+- ต่อ Wi-Fi ที่ไปถึง `192.168.20.13` ได้ วิทยุ SIYI ใช้งานต่อได้ตามปกติ
+- แบบส่งภาพเข้า .13 (ค่าเริ่มต้น) **ไม่ต้องจด IP ของรีโมต**
+- แบบเดิม (pull) เท่านั้น: จด **IP ของรีโมตฝั่ง Wi-Fi** (Settings → Wi-Fi → แตะชื่อเครือข่าย → IP address ต่อไปเรียกว่า `REMOTE_IP`) และควรจองไว้ที่ router
 
 ## 3. ติดตั้งใน Termux
 
-ต้องมีเน็ต: จะดาวน์โหลด Node.js และ MediaMTX v1.9.3 (18.5 MB จาก GitHub ทางการ ตรวจขนาดไฟล์ก่อนติดตั้ง)
+ต้องมีเน็ต: จะดาวน์โหลด Node.js, ffmpeg (ส่งภาพ) และ MediaMTX v1.9.3 (สำหรับแบบเดิม 18.5 MB จาก GitHub ทางการ ตรวจขนาดไฟล์ก่อนติดตั้ง)
 
 ```bash
 termux-setup-storage                      # อนุญาตให้ Termux อ่าน Download
@@ -45,6 +48,17 @@ bash ~/edge-kit/install.sh
 ```
 
 ไฟล์จะอยู่ใน `~/edge` (ไฟล์ที่อยู่ใน Download รันตรงๆ ไม่ได้ ต้องก๊อปเข้า Termux ก่อน)
+
+## 3.1 ปุ่มบนหน้าจอโฮม (ไม่ต้องพิมพ์คำสั่ง)
+
+`install.sh` สร้างปุ่มไว้ 4 ปุ่ม: **1 เริ่ม Edge**, **2 หยุด Edge**, **3 สถานะ Edge**, **4 ตรวจลิงก์รถ**
+
+1. ติดตั้งแอป **Termux:Widget** จาก**แหล่งเดียวกับ Termux** (F-Droid คู่ F-Droid หรือ GitHub คู่ GitHub ถ้าคนละแหล่งจะติดตั้งไม่ได้หรือกดแล้วไม่ทำงาน)
+2. กดค้างที่หน้าจอโฮม → **Widgets** → **Termux:Widget** → ลากมาวาง
+3. แตะปุ่มในวิดเจ็ต: จะเปิดหน้าต่าง Termux รันงานนั้น แล้วรอให้กด Enter ก่อนปิด
+4. ถ้ากดแล้วไม่มีอะไรเกิดขึ้น: Settings → Apps → Termux → **Display over other apps** → อนุญาต
+
+ทุกปุ่มเรียกสคริปต์เดียวกับที่พิมพ์เอง (`start.sh`, `stop.sh`, `status.sh`, `probe.sh`) รัน `install.sh` ใหม่เมื่อไหร่ ปุ่มจะถูกสร้างใหม่ตามชุดล่าสุด
 
 ## 3.5 ตรวจลิงก์กับรถ (อ่านอย่างเดียว)
 
@@ -69,23 +83,20 @@ bash ~/edge-kit/install.sh
 cp ~/edge/site.matek-ugv.example.json ~/edge/site.json
 ```
 
-แล้วแก้:
+แล้วแก้ใน `site.json` แค่ 2 ค่า:
 
-```bash
-nano ~/edge/site.json
-nano ~/edge/mediamtx.android.yml
-```
+| แก้ | ค่า |
+|---|---|
+| `key` | gateway key จาก server (ถ้าพิมพ์ยาก ใช้วิธี `read -rep "key: " K` แล้วสั่ง node ตามที่ใช้วันที่ 27 ต.ค.) |
+| `geo` | จุดอ้างอิงแผนที่ที่ตั้งจาก GPS (ยังไม่มีก็ใช้ค่าในไฟล์ไปก่อน) |
 
-| ไฟล์ | แก้ | ค่า |
-|---|---|---|
-| `site.json` | `key` | gateway key ตัวเดียวกับใน `site.json` ของโน้ตบุ๊ก |
-| `site.json` | `geo` | ค่าเดียวกับโน้ตบุ๊ก (จุดอ้างอิงที่ตั้งจาก GPS ในคู่มือโน้ตบุ๊กขั้นที่ 6) |
-| `site.json` | `stream.whep` | `http://REMOTE_IP:8889/ugv-01/whep` |
-| `mediamtx.android.yml` | `webrtcAdditionalHosts` | `[REMOTE_IP]` |
+ภาพกล้องตั้งไว้แล้วเป็น `"stream": { "rtsp": "rtsp://192.168.144.25:8554/main.264", "push": true }` คือให้ gateway ส่งภาพเข้า .13 server จะบอก gateway เองว่าส่งไปที่ไหน และบอกเบราว์เซอร์ว่าดูภาพที่ไหน **ไม่ต้องใส่ IP รีโมต และไม่ต้องทำข้อ 5**
 
-ถ้าในคู่มือโน้ตบุ๊กเปลี่ยน path กล้องหรือชื่อรถไว้ ให้แก้ให้ตรงกันที่นี่ด้วย
+ถ้ากล้องอยู่ที่ IP หรือ path อื่น ให้แก้ `stream.rtsp` ให้ตรง กล้องต้องส่งเป็น **H.264** (ถ้าเป็น H.265 gateway จะเตือนใน log และหน้าเว็บขึ้นเตือนที่ชิ้นส่วนกล้อง)
 
-## 5. อนุญาตแหล่งวิดีโอของรีโมต (ครั้งเดียวต่อ IP)
+**แบบเดิม (pull) เท่านั้น:** ใช้ `"whep": "http://REMOTE_IP:8889/ugv-01/whep"` แทน `"push": true` แก้ `webrtcAdditionalHosts: [REMOTE_IP]` ใน `nano ~/edge/mediamtx.android.yml` แล้วทำข้อ 5
+
+## 5. อนุญาตแหล่งวิดีโอของรีโมต (แบบเดิม pull เท่านั้น ครั้งเดียวต่อ IP)
 
 หน้าเว็บ (admin) → **แหล่งวิดีโอที่อนุญาต** → ใส่ `http://REMOTE_IP:8889` → `อนุญาต`
 (หรือจากโน้ตบุ๊ก: `deploy\edge\Set-EdgeOrigin.ps1 -Origin http://REMOTE_IP:8889`)
@@ -117,7 +128,7 @@ nano ~/edge/mediamtx.android.yml
 
 | ตรวจ 🧪 | ผ่านเมื่อ |
 |---|---|
-| ภาพจากกล้อง | เบราว์เซอร์ในเครื่องอื่นบน Wi-Fi เดียวกันเห็นภาพสด |
+| ภาพจากกล้อง | หน้าต่าง gateway ขึ้น `video pushed to rtsp://pub:***@192.168.20.13:18554/ugv-01 (h264)` และเบราว์เซอร์เห็นภาพสด (ดูได้จากทุกเครื่องที่ถึง .13 ไม่ต้องอยู่ Wi-Fi เดียวกับรีโมต) |
 | พักจอรีโมต 2 นาที | รถยังไม่ขึ้น STALE บนหน้าจอ (Android ไม่ปิด Termux) |
 | รีโมตเปิดทุกอย่างพร้อมกัน 15 นาที | ไม่ร้อนจนเตือน, UniGCS และการบังคับด้วยมือยังลื่น |
 
@@ -150,6 +161,10 @@ rm -rf ~/edge-kit && cp -r ~/storage/downloads/edge-kit ~/edge-kit && bash ~/edg
 | MediaMTX หยุดทันทีด้วย error อื่น | ดู `~/edge/logs/mediamtx.log` แล้วรันแค่ gateway บนรีโมตก่อน (ดูภาพผ่านโน้ตบุ๊กไปพลาง) |
 | gateway ไม่ได้ heartbeat จากรถ | datalink ใน UniGCS ต้องเป็น UDP; ปิด datalink ของ UniGCS; 🧪 ลองเปลี่ยน `link.host` ใน `site.json` จาก `192.168.144.20` เป็น `127.0.0.1` |
 | รถหลุดเป็น STALE เมื่อพักจอ | Battery → Unrestricted, ไม่ปัด Termux ทิ้ง, ดูว่ามีแจ้งเตือน "wake lock held" ของ Termux |
+| `ffmpeg is not installed` / ชิ้นส่วนกล้องขึ้น `ffmpeg not found` | รัน `install.sh` ใหม่ หรือ `apt install -y ffmpeg` |
+| gateway ขึ้น `the server gave no video publish address` | .13 ยังไม่ได้เปิด media server (`MEDIA_INGEST_URL` / `MEDIA_PUBLIC_URL` ใน `.env.server` และบริการ `media` ใน compose) ใช้แบบเดิม (pull) ไปก่อน |
+| gateway ขึ้น `video push stopped: ... 401 Unauthorized` | key ของ gateway ถูกยกเลิก หรือรถถูก gateway ตัวอื่นรับไป ตรวจว่ามี gateway รันอยู่ตัวเดียว |
+| gateway ขึ้น `video push stopped: ... Connection refused` / `timed out` | ถ้าเป็นที่กล้อง (`192.168.144.25`): กล้องยังบูตไม่เสร็จหรือ IP ผิด ถ้าเป็นที่ `192.168.20.13:18554`: บริการ `media` บน .13 ไม่ได้รัน gateway ลองใหม่เองทุก 2–30 วินาที |
 | ภาพจอดำ / เว็บขึ้น "เซิร์ฟเวอร์วิดีโอขัดข้อง (400)" | กล้องยังส่ง H.265 (`mediamtx.log` ขึ้น `track (H265)` และ `doesn't contain any supported codec`): ตั้ง main stream เป็น H.264 ในเมนูกล้องของ UniGCS ถ้าหาเมนูไม่เจอ สั่งผ่าน SDK ของกล้อง (คำสั่ง `0x21`) แล้วปิดเปิดรถ กล้องในโดม (รหัส 75…) ใช้ค่าใหม่หลังรีบูต |
 | UniGCS ค้าง "parameter loading" | การเชื่อมต่อใน UniGCS ต้องเป็น UDPCL `192.168.144.20:19856` เมื่อ Datalink 1 = UDP และต้องไม่มี gateway รันอยู่ |
 | UniGCS กดเปลี่ยนโหมดไม่ไป | gateway รันอยู่ด้วย: หยุด gateway หรือใช้สวิตช์โหมดบนตัวรีโมตแทน |

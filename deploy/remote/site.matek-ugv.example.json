@@ -17,7 +17,7 @@
       "allowRemoteArm": false,
       "stream": {
         "rtsp": "rtsp://192.168.144.25:8554/main.264",
-        "whep": "http://REMOTE_IP:8889/ugv-01/whep"
+        "push": true
       }
     }
   ]

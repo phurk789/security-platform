@@ -22,6 +22,7 @@ import {
   isTerminalCommand,
   type Action,
   type AdapterDeclaration,
+  type MediaPublish,
   type Assignment,
   type AuditEvent,
   type Command,
@@ -165,6 +166,16 @@ export interface BusMessage {
 /** Transport to edge gateways, implemented by the gateway hub. */
 export interface GatewayLink {
   send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera): boolean;
+  /** Gateways connected right now and the devices each holds. */
+  connected?(orgId: string): { gatewayId: string; devices: string[] }[];
+}
+
+/** A gateway's credential to publish one device's video into the platform's media server. */
+export const MEDIA_PUBLISH_TTL_MS = 7 * 24 * 3600_000;
+
+/** Path of a device's pushed stream on the platform's media server: UGV-01 → ugv-01. */
+export function pushPath(deviceId: string) {
+  return deviceId.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
 }
 
 /** How long to wait for the gateway to answer a camera request. */
@@ -1033,7 +1044,50 @@ export class Platform {
   /** Allowed edge origins for one device's site: the org-wide list plus the site's own. */
   private edgeOriginsFor(orgId: string, siteId: string): string[] {
     const rows = this.db.prepare("SELECT origin FROM edge_origins WHERE org_id = ? AND (site_id = '' OR site_id = ?)").all(orgId, siteId) as { origin: string }[];
-    return rows.map((r) => r.origin);
+    // The platform's own media server (pushed video) is always allowed: the server set those URLs, not a gateway.
+    return [...rows.map((r) => r.origin), ...(this.cfg.mediaPublicUrl ? [this.cfg.mediaPublicUrl] : [])];
+  }
+
+  /** Push mode on this server: the platform runs a media server that gateways publish into. */
+  private get pushEnabled() {
+    return !!(this.cfg.mediaIngestUrl && this.cfg.mediaPublicUrl);
+  }
+
+  /**
+   * A declared stream with `push` becomes a stream on the platform's media server: the server, not
+   * the gateway, decides the browser address. Without a media server the push flag is dropped.
+   */
+  private pushedStream<T extends { push?: boolean; whep?: string } | undefined>(st: T, deviceId: string): T {
+    if (!st || typeof st !== 'object' || st.push !== true) return st;
+    const { push: _push, whep: _whep, ...rest } = st;
+    if (!this.pushEnabled) return rest as T;
+    return { ...rest, whep: `${this.cfg.mediaPublicUrl}/${pushPath(deviceId)}/whep` } as T;
+  }
+
+  private publishToken(orgId: string, deviceId: string, gatewayId: string, exp: number) {
+    const body = Buffer.from(`${deviceId}|${gatewayId}|${exp}`).toString('base64url');
+    return `p1.${body}.${hmac(this.cfg.mediaSecret, `pub|${orgId}|${body}`)}`;
+  }
+
+  /** Where a gateway publishes one device's video: rtsp://pub:<token>@ingest-host:port/<path>. */
+  private publishUrl(orgId: string, deviceId: string, gatewayId: string) {
+    const u = new URL(this.cfg.mediaIngestUrl!);
+    return `${u.protocol}//pub:${this.publishToken(orgId, deviceId, gatewayId, this.now() + MEDIA_PUBLISH_TTL_MS)}@${u.host}/${pushPath(deviceId)}`;
+  }
+
+  /** May this credential publish to this path? Only the gateway that holds the device, while it is connected. */
+  private mayPublish(token: string, path: string): boolean {
+    const [ver, body, sig] = token.split('.');
+    if (ver !== 'p1' || !body || !sig) return false;
+    const [deviceId, gatewayId, expStr] = Buffer.from(body, 'base64url').toString().split('|');
+    if (!(Number(expStr) > this.now())) return false;
+    const d = this.devices.get(deviceId);
+    if (!d || !safeEqual(sig, hmac(this.cfg.mediaSecret, `pub|${d.orgId}|${body}`))) return false;
+    if (path !== pushPath(d.id)) return false;
+    const holder = (this.db.prepare('SELECT gateway_id FROM devices WHERE id = ?').get(d.id) as { gateway_id: string | null } | undefined)?.gateway_id;
+    if (holder !== gatewayId) return false;
+    const live = this.gateways.connected?.(d.orgId);
+    return !live || live.some((g) => g.gatewayId === gatewayId && g.devices.includes(d.id));
   }
 
   listEdgeOrigins(a: Actor) {
@@ -1479,6 +1533,7 @@ export class Platform {
   gatewayHello(orgId: string, siteIds: string[], gatewayId: string, decls: AdapterDeclaration[], geo?: GeoAnchor) {
     const accepted: string[] = [];
     const rejected: { deviceId: string; reason: string }[] = [];
+    const media: MediaPublish[] = [];
     const notes: string[] = [];
     const sys = this.systemActor(orgId, 'gateway', gatewayId);
     if (geo && Number.isFinite(geo.originLat) && Number.isFinite(geo.originLon)) this.checkGatewayAnchor(sys, siteIds, gatewayId, geo);
@@ -1499,10 +1554,15 @@ export class Platform {
         rejected.push({ deviceId: decl.deviceId, reason: 'Registered as a simulated device, but a real adapter declared it. Register it as a real device first.' });
         continue;
       }
+      // Push mode: the server sets the browser address of a pushed stream (on its own media server).
+      const declStream = this.pushedStream(decl.stream, d.id);
+      const declComps = Array.isArray(decl.components)
+        ? decl.components.map((c) => (c && typeof c === 'object' && c.stream ? { ...c, stream: this.pushedStream(c.stream, d.id) } : c))
+        : decl.components;
       // Stream URLs must sit on an edge origin allowed for the device's site (SSRF guard).
       const allowed = this.edgeOriginsFor(orgId, d.siteId);
-      const st = vetStream(decl.stream, allowed);
-      const comps = sanitizeComponents(decl.components, allowed);
+      const st = vetStream(declStream, allowed);
+      const comps = sanitizeComponents(declComps, allowed);
       const refused = [...st.rejected, ...(comps?.rejected ?? [])];
       if (refused.length) this.audit(sys, 'gateway.stream_rejected', d.id, 'denied', `${refused.join('; ')}. Allow the origin under edge origins, then reconnect the gateway.`);
       if (decl.integration !== d.integration) notes.push(`${d.id} declared ${String(decl.integration).slice(0, 20)}, kept ${d.integration}`);
@@ -1531,6 +1591,10 @@ export class Platform {
       // The same gateway reconnecting keeps the mode; a different one is a new control path.
       if (prevGateway && prevGateway !== gatewayId) this.demoteBySystem(d.id, `control path changed: gateway ${prevGateway} → ${gatewayId}`);
       accepted.push(d.id);
+      if (decl.stream?.push === true) {
+        if (this.pushEnabled) media.push({ deviceId: d.id, publish: this.publishUrl(orgId, d.id, gatewayId) });
+        else this.audit(sys, 'gateway.stream_rejected', d.id, 'denied', 'The gateway wants to push video, but this server has no media server for it (set MEDIA_INGEST_URL and MEDIA_PUBLIC_URL).');
+      }
     }
     // Anything never delivered before this (re)connect is dropped, never replayed (F09).
     for (const id of accepted) this.expireUndelivered(id, 'Not delivered before the gateway reconnected. Not replayed.');
@@ -1547,7 +1611,7 @@ export class Platform {
       'ok',
       `accepted ${accepted.join(', ') || 'none'}${rejected.length ? `; rejected ${rejected.map((r) => r.deviceId).join(', ')}` : ''}${notes.length ? `; ignored ${notes.join(', ')}` : ''}`,
     );
-    return { accepted, rejected };
+    return { accepted, rejected, media };
   }
 
   gatewayClosed(orgId: string, gatewayId: string) {
@@ -2414,8 +2478,10 @@ export class Platform {
    * issued to a user who is still active in the device's organisation.
    */
   mediaAuth(req: { action?: string; path?: string; query?: string; token?: string; password?: string }): boolean {
-    if (req.action !== 'read' && req.action !== 'playback') return false;
     const q = new URLSearchParams(String(req.query ?? ''));
+    // A gateway pushing a device's camera into the platform's media server (RTSP basic auth: pub / token).
+    if (req.action === 'publish') return this.pushEnabled && this.mayPublish(String(req.password || q.get('token') || ''), String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
+    if (req.action !== 'read' && req.action !== 'playback') return false;
     const token = q.get('token') || req.token || req.password || '';
     const [b64, sig] = token.split('.');
     if (!b64 || !sig) return false;

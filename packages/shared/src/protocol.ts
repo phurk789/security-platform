@@ -298,6 +298,17 @@ export interface SrvWelcome {
   /** Device ids this gateway is registered for. Unknown devices are ignored. */
   accepted: string[];
   rejected: { deviceId: string; reason: string }[];
+  /**
+   * Push mode: where each accepted device that declared `stream.push` publishes its camera
+   * (RTSP URL with a publish credential). Missing when the server has no media server for pushes.
+   */
+  media?: MediaPublish[];
+}
+
+export interface MediaPublish {
+  deviceId: string;
+  /** e.g. rtsp://pub:<token>@media.site:18554/ugv-01 — the credential is valid only while this gateway holds the device. */
+  publish: string;
 }
 
 export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera;

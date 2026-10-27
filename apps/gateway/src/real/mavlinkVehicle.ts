@@ -27,6 +27,7 @@ import {
   type StreamInfo,
 } from '@13store/shared';
 import { CommandLedger, admitCommand, type Adapter, type AdapterContext } from '../sdk';
+import type { PushState } from '../videoPush';
 
 export type VehicleProfile = 'ardupilot-rover' | 'ardupilot-copter' | 'px4-rover' | 'px4-multicopter';
 
@@ -196,7 +197,18 @@ export class MavlinkVehicleAdapter implements Adapter {
         ? [{ id: 'payload', name: PAYLOAD_CATALOG[cfg.payload.module].name, kind: 'payload' as const, status: 'pending' as const, detail: 'Relay outputs not yet exercised' }]
         : []),
       ...(cfg.stream
-        ? [{ id: 'cam', name: 'Onboard camera (video only)', kind: 'camera' as const, status: 'pending' as const, detail: `Video through the site media server from ${cfg.stream.rtsp ?? 'the camera'}; check the picture in the console`, stream: cfg.stream }]
+        ? [
+            {
+              id: 'cam',
+              name: 'Onboard camera (video only)',
+              kind: 'camera' as const,
+              status: 'pending' as const,
+              detail: cfg.stream.push
+                ? `Waiting to push ${cfg.stream.rtsp ?? 'the camera'} to the platform media server`
+                : `Video through the site media server from ${cfg.stream.rtsp ?? 'the camera'}; check the picture in the console`,
+              stream: cfg.stream,
+            },
+          ]
         : []),
     ]);
     this.declaration = {
@@ -266,6 +278,15 @@ export class MavlinkVehicleAdapter implements Adapter {
 
   onDemo() {
     /* real vehicle: presenter controls never touch it */
+  }
+
+  /** Pushed video: shown on the camera part (rides along with the next telemetry sample). */
+  onMediaState(s: PushState) {
+    const hevc = s.codec === 'hevc';
+    this.comps.set('cam', {
+      status: s.status === 'pushing' ? (hevc ? 'warn' : 'ok') : s.status === 'missing' ? 'fault' : s.status === 'stopped' ? 'offline' : 'warn',
+      detail: s.status === 'pushing' && hevc ? 'Pushing H.265, which browsers cannot play: set the camera main stream to H.264' : s.detail,
+    });
   }
 
   // ---- transport -----------------------------------------------------------------

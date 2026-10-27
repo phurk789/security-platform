@@ -13,6 +13,7 @@
 
 import type { AdapterDeclaration, CameraAction, GwCameraResult, GwCommandUpdate, GwDeviceEvent, GwTelemetry, SrvCommand, SrvDemo } from '@13store/shared';
 import type { CommandLedger } from './ledger';
+import type { PushState } from './videoPush';
 
 export {
   CommandLedger,
@@ -78,6 +79,11 @@ export interface Adapter {
   onDemo(action: SrvDemo['action'], target?: SrvDemo['target']): void;
   /** Camera control, for adapters that declare the 'gimbal' / 'zoom' / 'photo' capabilities. */
   onCamera?(requestId: string, action: CameraAction): void;
+  /**
+   * Push mode (`stream.push` in the declaration): the gateway pushes `stream.rtsp` to the platform
+   * media server and reports how it goes here, e.g. to show it on the device's camera component.
+   */
+  onMediaState?(state: PushState): void;
 }
 
 /**
