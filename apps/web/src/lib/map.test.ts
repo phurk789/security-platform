@@ -78,9 +78,20 @@ describe('basemaps', () => {
   it('offers OSM, Esri imagery, a satellite provider, satellite + labels and a terrain map, without keys', () => {
     expect(BASEMAPS.map((b) => b.id)).toEqual(expect.arrayContaining(['osm', 'esri-imagery', 's2cloudless', 'esri-imagery-labels', 'esri-topo']));
     for (const b of BASEMAPS) {
-      expect(b.attribution.length).toBeGreaterThan(10);
-      expect(b.tiles.every((u) => u.startsWith('https://') && !/key=|token=|google/i.test(u))).toBe(true);
+      expect(b.attribution.length).toBeGreaterThan(5);
+      expect(b.tiles.every((u) => u.startsWith('https://') && !/key=|token=|session=/i.test(u))).toBe(true);
     }
+  });
+
+  it('offers Google tiles the LCOT way (mt0–mt3, satellite / hybrid / terrain), never as the default', () => {
+    const g = (id: string) => BASEMAPS.find((b) => b.id === id)!;
+    expect(g('google-sat').tiles).toEqual(['mt0', 'mt1', 'mt2', 'mt3'].map((s) => `https://${s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}`));
+    expect(g('google-hybrid').tiles[0]).toContain('lyrs=y&');
+    expect(g('google-terrain').tiles[0]).toContain('lyrs=p&');
+    expect(g('google-terrain').maxzoom).toBe(20);
+    expect(['google-sat', 'google-hybrid', 'google-terrain'].every((id) => g(id).attribution === '© Google')).toBe(true);
+    expect(DEFAULT_BASEMAP).not.toMatch(/google/);
+    expect(getInitialBasemap()).toBe(DEFAULT_BASEMAP);
   });
 
   it('adds every basemap once under everything else, shows one, and keeps the choice across pages', () => {
@@ -105,17 +116,17 @@ describe('basemaps', () => {
   });
 
   it('adds the basemaps the server offers (Google) to the list, and drops them when the server stops offering them', () => {
-    const google = { id: 'google-hybrid', label: 'Google satellite + labels', tiles: ['https://console.example/api/v1/basemaps/google-hybrid/tiles/{z}/{x}/{y}'], attribution: '', maxzoom: 22, provider: 'google' as const };
-    store.set(BASEMAP_STORAGE_KEY, 'google-hybrid');
+    const google = { id: 'google-api-hybrid', label: 'Google satellite + labels (official API)', tiles: ['https://console.example/api/v1/basemaps/google-api-hybrid/tiles/{z}/{x}/{y}'], attribution: '', maxzoom: 22, provider: 'google' as const };
+    store.set(BASEMAP_STORAGE_KEY, 'google-api-hybrid');
     expect(getInitialBasemap()).toBe(DEFAULT_BASEMAP); // not offered (yet): the default
     registerBasemaps([google, { ...google, id: 'osm', label: 'clash' }]);
-    expect(basemaps().map((b) => b.id)).toEqual([...BASEMAPS.map((b) => b.id), 'google-hybrid']); // a clashing id is ignored
-    expect(getInitialBasemap()).toBe('google-hybrid');
+    expect(basemaps().map((b) => b.id)).toEqual([...BASEMAPS.map((b) => b.id), 'google-api-hybrid']); // a clashing id is ignored
+    expect(getInitialBasemap()).toBe('google-api-hybrid');
     const m = new FakeMap();
     ensureSlots(m as never);
     addBasemapLayers(m as never, getInitialBasemap());
-    expect(currentBasemap(m as never)).toBe('google-hybrid');
-    expect((m.sources.get(basemapLayerId('google-hybrid'))!.spec as { tiles: string[] }).tiles[0]).toMatch(/\/api\/v1\/basemaps\/google-hybrid\/tiles\//);
+    expect(currentBasemap(m as never)).toBe('google-api-hybrid');
+    expect((m.sources.get(basemapLayerId('google-api-hybrid'))!.spec as { tiles: string[] }).tiles[0]).toMatch(/\/api\/v1\/basemaps\/google-api-hybrid\/tiles\//);
     registerBasemaps([]);
     expect(getInitialBasemap()).toBe(DEFAULT_BASEMAP);
   });

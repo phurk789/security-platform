@@ -21,9 +21,9 @@ interface StyleSpec {
 
 /** Google map styles offered (createSession bodies). Hybrid = satellite + roadmap labels, no overlay. */
 export const GOOGLE_STYLES: Record<string, StyleSpec> = {
-  'google-satellite': { label: 'Google satellite', body: { mapType: 'satellite' } },
-  'google-hybrid': { label: 'Google satellite + labels', body: { mapType: 'satellite', layerTypes: ['layerRoadmap'], overlay: false } },
-  'google-roadmap': { label: 'Google Maps (roads)', body: { mapType: 'roadmap' } },
+  'google-api-satellite': { label: 'Google satellite (official API)', body: { mapType: 'satellite' } },
+  'google-api-hybrid': { label: 'Google satellite + labels (official API)', body: { mapType: 'satellite', layerTypes: ['layerRoadmap'], overlay: false } },
+  'google-api-roadmap': { label: 'Google Maps roads (official API)', body: { mapType: 'roadmap' } },
 };
 
 /** Renew a session this long before Google says it expires (sessions last about two weeks). */

@@ -55,15 +55,16 @@ on the server (see below).
 | Esri World Imagery, Imagery + labels, World Topo | Free with the attribution shown. Commercial production use needs Esri's terms (ArcGIS Location Platform account). |
 | Sentinel-2 cloudless 2016 (EOX) | CC BY 4.0 with attribution. Later years (2018+) are CC BY-NC-SA: do not switch the layer without checking. |
 | OpenStreetMap (tile.openstreetmap.org) | Light use only, attribution required ([tile usage policy](https://operations.osmfoundation.org/policies/tiles/)). Production: own tile server or a provider. |
-| Google (satellite, satellite + labels, roads) | Official **Map Tiles API** only, through the server (below). Billed by Google per tile request beyond a free monthly allowance; needs the attribution the console shows. Unofficial tile URLs (`mt*.google.com`, `khms*`) are never used: they break Google's terms and can be blocked at any time. The drawn twin's photorealistic option (`VITE_GOOGLE_MAPS_API_KEY`) remains for the offline demo build only. |
+| Google "· Google" entries (satellite, satellite + labels, terrain) | Google's XYZ tiles straight from `mt0–mt3.google.com/vt/lyrs=s\|y\|p`, the way LCOT does it: no key, `© Google` attribution. **Not an API Google licenses for this use**: Google can throttle or block it at any time, and a customer audit may flag it. Kept by the owner's decision (27 Oct 2026); never the default basemap. For a delivered system switch to the official entries below. |
+| Google "(official API)" entries | **Map Tiles API** through the server (below). Billed by Google per tile request beyond a free monthly allowance; needs the attribution the console shows. The drawn twin's photorealistic option (`VITE_GOOGLE_MAPS_API_KEY`) remains for the offline demo build only. |
 
 ## Google basemaps (server-proxied)
 
 Off until the server has a key. With `GOOGLE_MAPS_API_KEY` set, the basemap picker also offers
-**Google satellite**, **Google satellite + labels** and **Google Maps (roads)** (Thai labels).
+**Google satellite**, **satellite + labels** and **roads**, marked "(official API)" (Thai labels).
 
 ```
-browser ──/api/v1/basemaps/google-hybrid/tiles/{z}/{x}/{y} + session token──► platform server
+browser ──/api/v1/basemaps/google-api-hybrid/tiles/{z}/{x}/{y} + session token──► platform server
 platform server ──createSession (cached ~2 weeks) / 2dtiles + API key──► tile.googleapis.com
 browser ◄── /api/v1/basemaps/:id/attribution (viewport copyright) ── shown as "Google Maps · ©…"
 ```

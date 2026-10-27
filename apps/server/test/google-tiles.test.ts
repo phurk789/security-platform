@@ -57,14 +57,14 @@ describe('Google basemaps (Map Tiles API via the server)', () => {
   it('lists the Google basemaps with tile paths on this server, and no key', async () => {
     const r = await user.get('/basemaps');
     expect(r.status).toBe(200);
-    expect(r.body.map((b: { id: string }) => b.id)).toEqual(['google-satellite', 'google-hybrid', 'google-roadmap']);
-    expect(r.body[0].tiles).toEqual(['/api/v1/basemaps/google-satellite/tiles/{z}/{x}/{y}']);
+    expect(r.body.map((b: { id: string }) => b.id)).toEqual(['google-api-satellite', 'google-api-hybrid', 'google-api-roadmap']);
+    expect(r.body[0].tiles).toEqual(['/api/v1/basemaps/google-api-satellite/tiles/{z}/{x}/{y}']);
     expect(JSON.stringify(r.body)).not.toContain(KEY);
   });
 
   it('serves tiles to signed-in users with one shared session, passing Google cache rules on and the key never', async () => {
     for (const xyz of ['17/102319/60598', '17/102320/60598', '17/102319/60599']) {
-      const r = await tile(`google-satellite/tiles/${xyz}`);
+      const r = await tile(`google-api-satellite/tiles/${xyz}`);
       expect(r.status).toBe(200);
       expect(r.headers.get('content-type')).toBe('image/png');
       expect(r.headers.get('cache-control')).toBe('private, max-age=86400');
@@ -75,16 +75,16 @@ describe('Google basemaps (Map Tiles API via the server)', () => {
     expect(g.st.sessions[0]).toMatchObject({ mapType: 'satellite', language: 'th', region: 'TH' });
     expect(g.st.keysSeen.has(KEY)).toBe(true); // the server, not the browser, holds the key
     // Hybrid is satellite with the roadmap labels layer.
-    expect((await tile('google-hybrid/tiles/10/797/473')).status).toBe(200);
+    expect((await tile('google-api-hybrid/tiles/10/797/473')).status).toBe(200);
     expect(g.st.sessions.at(-1)).toMatchObject({ mapType: 'satellite', layerTypes: ['layerRoadmap'], overlay: false });
   });
 
   it('refuses anonymous requests, unknown basemaps and tiles outside the pyramid', async () => {
-    expect((await tile('google-satellite/tiles/1/0/0', '')).status).toBe(401);
+    expect((await tile('google-api-satellite/tiles/1/0/0', '')).status).toBe(401);
     expect((await tile('mt1-google/tiles/1/0/0')).status).toBe(404);
-    expect((await tile('google-satellite/tiles/2/4/0')).status).toBe(400);
-    expect((await tile('google-satellite/tiles/23/0/0')).status).toBe(400);
-    expect((await tile('google-satellite/tiles/1/0/..%2F..')).status).toBe(400);
+    expect((await tile('google-api-satellite/tiles/2/4/0')).status).toBe(400);
+    expect((await tile('google-api-satellite/tiles/23/0/0')).status).toBe(400);
+    expect((await tile('google-api-satellite/tiles/1/0/..%2F..')).status).toBe(400);
     expect(tileXYZ('3', '7', '7')).toEqual({ z: 3, x: 7, y: 7 });
     expect(tileXYZ('3', '8', '0')).toBeUndefined();
     expect(tileXYZ('-1', '0', '0')).toBeUndefined();
@@ -93,20 +93,20 @@ describe('Google basemaps (Map Tiles API via the server)', () => {
   it('renews a session Google rejects, and answers 502 when Google is down', async () => {
     const before = g.st.sessions.length;
     g.st.rejectSession = 'S1';
-    expect((await tile('google-satellite/tiles/5/25/14')).status).toBe(200);
+    expect((await tile('google-api-satellite/tiles/5/25/14')).status).toBe(200);
     expect(g.st.sessions.length).toBe(before + 1);
     g.st.down = true;
     try {
-      expect((await tile('google-satellite/tiles/5/25/15')).status).toBe(502);
+      expect((await tile('google-api-satellite/tiles/5/25/15')).status).toBe(502);
     } finally {
       g.st.down = false;
     }
   });
 
   it('gives the copyright line for what is on screen', async () => {
-    const r = await user.get('/basemaps/google-hybrid/attribution?zoom=17&north=13.44&south=13.43&east=101.04&west=101.02');
+    const r = await user.get('/basemaps/google-api-hybrid/attribution?zoom=17&north=13.44&south=13.43&east=101.04&west=101.02');
     expect(r.body).toEqual({ copyright: 'Imagery ©2026 Airbus, Map data ©2026 Google' });
-    expect((await user.get('/basemaps/google-hybrid/attribution?zoom=17')).status).toBe(400);
+    expect((await user.get('/basemaps/google-api-hybrid/attribution?zoom=17')).status).toBe(400);
   });
 });
 
@@ -120,6 +120,6 @@ describe('Google basemaps without a key', () => {
   it('offers none and serves none', async () => {
     const u = await Client.login(srv.url, 'alex');
     expect((await u.get('/basemaps')).body).toEqual([]);
-    expect((await fetch(`${srv.url}/api/v1/basemaps/google-satellite/tiles/1/0/0`, { headers: { authorization: `Bearer ${u.token}` } })).status).toBe(404);
+    expect((await fetch(`${srv.url}/api/v1/basemaps/google-api-satellite/tiles/1/0/0`, { headers: { authorization: `Bearer ${u.token}` } })).status).toBe(404);
   });
 });

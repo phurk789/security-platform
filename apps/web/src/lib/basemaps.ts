@@ -4,9 +4,13 @@
 //
 // Licensing (see docs/MAPS.md): every built-in provider is used with its attribution, without keys.
 // OpenStreetMap's own tile servers are for light use only; Esri's are free with attribution but
-// commercial production use needs Esri's terms (ArcGIS Location Platform). Google basemaps come
-// only from the server (official Map Tiles API, key on the server, GOOGLE_MAPS_API_KEY) and are
-// registered at runtime with registerBasemaps(); unofficial Google tile URLs are never used.
+// commercial production use needs Esri's terms (ArcGIS Location Platform).
+// Google comes two ways:
+//  - "· Google" entries: Google's XYZ tiles straight from mt0–mt3.google.com, as LCOT does. No key,
+//    but not an API Google licenses for this: Google may block it at any time. Kept by the owner's
+//    decision (27 Oct 2026); never the default.
+//  - "(official API)" entries: the Map Tiles API through our server (GOOGLE_MAPS_API_KEY on the
+//    server), registered at runtime with registerBasemaps().
 import type { RasterSourceSpecification } from 'maplibre-gl';
 import { addLayerTo, type LayerHost } from './layerOrder';
 
@@ -23,6 +27,10 @@ export interface Basemap {
 }
 
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+/** Google's tile hosts (several, so the browser loads tiles in parallel). */
+const GOOGLE_SUBS = ['mt0', 'mt1', 'mt2', 'mt3'];
+/** Google XYZ tiles: lyrs s = satellite, y = satellite + labels (hybrid), p = terrain. */
+const googleTiles = (lyrs: string) => GOOGLE_SUBS.map((s) => `https://${s}.google.com/vt/lyrs=${lyrs}&x={x}&y={y}&z={z}`);
 const ESRI_IMAGERY_ATTR = 'Powered by <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a> · Esri, Maxar, Earthstar Geographics, and the GIS User Community';
 
 /** Basemaps every console has (no keys, straight from the providers). */
@@ -68,6 +76,9 @@ export const BASEMAPS: readonly Basemap[] = [
     attribution: 'Powered by <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a> · Esri, HERE, Garmin, Intermap, USGS, FAO, NPS, © OpenStreetMap contributors, and the GIS User Community',
     maxzoom: 19,
   },
+  { id: 'google-sat', label: 'Satellite · Google', tiles: googleTiles('s'), attribution: '© Google', maxzoom: 21 },
+  { id: 'google-hybrid', label: 'Satellite + labels · Google', tiles: googleTiles('y'), attribution: '© Google', maxzoom: 21 },
+  { id: 'google-terrain', label: 'Terrain · Google', tiles: googleTiles('p'), attribution: '© Google', maxzoom: 20 },
 ];
 
 export const DEFAULT_BASEMAP = 'esri-imagery';
