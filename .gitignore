@@ -1,6 +1,7 @@
 node_modules
 dist
 dist-single
+dist-android
 data
 *.tsbuildinfo
 .DS_Store
