@@ -24,14 +24,15 @@ echo "Node $(node --version)"
 
 echo "--- files into $EDGE"
 mkdir -p "$EDGE/bin" "$EDGE/data" "$EDGE/logs"
-cp "$KIT/edge-gateway.mjs" "$KIT/mediamtx.android.yml" "$KIT/start.sh" "$KIT/stop.sh" "$KIT/status.sh" "$EDGE/"
+cp "$KIT/edge-gateway.mjs" "$KIT/siyi-probe.mjs" "$KIT/mediamtx.android.yml" "$KIT/start.sh" "$KIT/stop.sh" "$KIT/status.sh" "$KIT/probe.sh" "$EDGE/"
+cp "$KIT/site.remote.example.json" "$KIT/site.matek-ugv.example.json" "$EDGE/"
 [ -f "$KIT/VERSION" ] && cp "$KIT/VERSION" "$EDGE/"
 if [ -f "$EDGE/site.json" ]; then
   echo "keeping the existing $EDGE/site.json"
 else
   cp "$KIT/site.remote.example.json" "$EDGE/site.json"
 fi
-chmod +x "$EDGE/start.sh" "$EDGE/stop.sh" "$EDGE/status.sh"
+chmod +x "$EDGE/start.sh" "$EDGE/stop.sh" "$EDGE/status.sh" "$EDGE/probe.sh"
 
 echo "--- MediaMTX $MTX_VERSION (linux arm64)"
 if [ -x "$EDGE/bin/mediamtx" ]; then
@@ -47,6 +48,8 @@ fi
 
 echo
 echo "Installed. Next (guide: README_TH.md):"
+echo "  0. $EDGE/probe.sh                  read-only link check (vehicle on, gateway stopped)"
+echo "     Matek H743-WING vehicle: cp $EDGE/site.matek-ugv.example.json $EDGE/site.json"
 echo "  1. nano $EDGE/site.json            key, geo, REMOTE_IP"
 echo "  2. nano $EDGE/mediamtx.android.yml REMOTE_IP"
 echo "  3. $EDGE/start.sh"

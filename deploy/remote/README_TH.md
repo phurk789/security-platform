@@ -8,6 +8,7 @@ FC → air unit → วิทยุ SIYI → UniRC 7 Pro [Termux: gateway + Medi
 ```
 
 > **ทำหลังจากต่อผ่านโน้ตบุ๊กได้แล้ว** ([`deploy/edge/FIRST_CONNECTION_TH.md`](../edge/FIRST_CONNECTION_TH.md)) จะได้รู้ว่าถ้าไม่ผ่าน ปัญหาอยู่ที่การย้ายมารีโมต ไม่ใช่ที่รถ
+> ถ้ามาทางรีโมตเลยโดยไม่มีโน้ตบุ๊ก ให้ใช้ `probe.sh` (ข้อ 3.5) แยกปัญหาฝั่งรถออกก่อนเปิด gateway
 > **ยังไม่เคยทดสอบบนรีโมตจริง** ข้อที่มี 🧪 คือสิ่งที่ยังไม่รู้ว่าจะผ่าน ถ้าไม่ผ่านให้กลับไปใช้โน้ตบุ๊ก (ข้อ 10)
 
 กฎเดิมทุกข้อยังใช้: รถอยู่ `SHADOW` (ดูอย่างเดียว) และ **gateway ได้ทีละตัว** ห้ามเปิดของโน้ตบุ๊กกับของรีโมตพร้อมกัน
@@ -45,7 +46,28 @@ bash ~/edge-kit/install.sh
 
 ไฟล์จะอยู่ใน `~/edge` (ไฟล์ที่อยู่ใน Download รันตรงๆ ไม่ได้ ต้องก๊อปเข้า Termux ก่อน)
 
+## 3.5 ตรวจลิงก์กับรถ (อ่านอย่างเดียว)
+
+เปิดรถ (กล้องห้อยหัวลง) ใน UniGCS ตั้ง Datalink 1 = UDP และ baud ให้ตรงกับพอร์ตของบอร์ดที่ต่อกับ air unit แล้วปิดการต่อ datalink ของ UniGCS จากนั้น:
+
+```bash
+~/edge/probe.sh
+```
+
+- ต้องได้ **Autopilot heartbeat PASS** และ **Disarmed PASS** ก่อนไปขั้นต่อไป
+- รายงานอยู่ใน `~/edge/reports/` (มี firmware ที่บอร์ดแสดง)
+- ถ้าขึ้น "No data at all" ให้ลอง `~/edge/probe.sh --host 127.0.0.1` ถ้าผ่าน ให้แก้ `link.host` ใน `site.json` เป็น `127.0.0.1` ด้วย
+- probe ไม่เทียบไฟล์ param (ไฟล์ในโปรเจกต์ทำไว้สำหรับ UniFC 6 Pico) ถ้าจะเทียบ ใช้ `--params <ไฟล์>`
+
 ## 4. แก้ config บนรีโมต
+
+รถ Matek H743-WING (ชุดทดสอบ 27 ต.ค.) ให้เริ่มจากไฟล์ตัวอย่างของคันนี้ก่อน:
+
+```bash
+cp ~/edge/site.matek-ugv.example.json ~/edge/site.json
+```
+
+แล้วแก้:
 
 ```bash
 nano ~/edge/site.json
