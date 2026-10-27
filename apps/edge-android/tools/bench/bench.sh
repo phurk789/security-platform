@@ -116,7 +116,7 @@ test_() {
   local auth=(-H "authorization: Bearer $token" -H 'content-type: application/json')
   age() { curl -sS "${auth[@]}" $API/devices/UGV-01 | python3 -c 'import json,sys,time; print(round(time.time()-json.load(sys.stdin)["lastSeen"]/1000,1))'; }
   curl -sS "${auth[@]}" -d '{"id":"UGV-01","kind":"ugv","model":"Bench rover (fake MAVLink)"}' $API/devices >/dev/null
-  code="$(curl -fsS "${auth[@]}" -d '{"label":"Emulator bench","gatewayId":"edge-emu-01","devices":[{"type":"mavlink","deviceId":"UGV-01","kind":"ugv","profile":"ardupilot-rover","model":"Bench rover","link":{"mode":"client","host":"10.0.2.2","port":19856},"allowRemoteArm":false,"stream":{"rtsp":"rtsp://10.0.2.2:8554/main.264","push":true}}]}' $API/admin/pairing-codes | python3 -c 'import json,sys; print(json.load(sys.stdin)["code"])')"
+  code="$(curl -fsS "${auth[@]}" -d '{"label":"Emulator bench","gatewayId":"edge-emu-01","devices":[{"type":"mavlink","deviceId":"UGV-01","kind":"ugv","profile":"ardupilot-rover","model":"Bench rover","link":{"mode":"client","host":"10.0.2.2","port":19856},"allowRemoteArm":false,"teleop":true,"stream":{"rtsp":"rtsp://10.0.2.2:8554/main.264","push":true}}]}' $API/admin/pairing-codes | python3 -c 'import json,sys; print(json.load(sys.stdin)["code"])')"
   "$ADB" install -r -g "$APK" | tail -1
   "$ADB" shell pm clear com.store13.edge >/dev/null # unpaired, as on a new remote
   "$ADB" shell am start -W -a android.intent.action.VIEW -d "'psedge://pair?server=http%3A%2F%2F10.0.2.2%3A8099&code=$code'" com.store13.edge >/dev/null

@@ -6,7 +6,7 @@ import { REMOTE_DEFAULTS, formatCode, loopbackOrigin, pairingQr, readDeviceList,
 const GEO = { originLat: 13.4367374, originLon: 101.0275798, rotationDeg: -28.5 };
 
 describe('Pair an edge remote (Admin card)', () => {
-  it('builds the UniRC 7 Pro device list the gateway accepts, with the camera pushed', () => {
+  it('builds the UniRC 7 Pro device list the gateway accepts, with the camera pushed and console driving on', () => {
     const devices = remoteDevices({ ...REMOTE_DEFAULTS, vehicleId: ' ugv-01 ' });
     expect(() => parseSiteConfig({ geo: GEO, devices })).not.toThrow();
     expect(devices[0]).toMatchObject({
@@ -15,6 +15,7 @@ describe('Pair an edge remote (Admin card)', () => {
       profile: 'ardupilot-rover',
       link: { mode: 'client', host: '192.168.144.20', port: 19856 },
       allowRemoteArm: false,
+      teleop: true,
       stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', push: true },
     });
   });

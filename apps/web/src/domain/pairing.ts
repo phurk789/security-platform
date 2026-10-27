@@ -38,6 +38,9 @@ export function remoteDevices(f: RemoteForm): Record<string, unknown>[] {
       radio: 'SIYI UniRC 7 Pro datalink',
       link: { mode: 'client', ...UNIRC_DATALINK },
       allowRemoteArm: false,
+      // Driving from the console (RC override, dead-man, gateway caps). Still gated by the platform: a supervisor
+      // promotes the vehicle to LIVE_MANUAL and an operator starts the drive.
+      teleop: true,
       ...(camera ? { stream: { rtsp: camera, push: true } } : {}),
     },
   ];
