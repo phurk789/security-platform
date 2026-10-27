@@ -5,7 +5,7 @@ import { useStore } from './store';
 import { useT } from './i18n';
 import { RightPanel } from './components/IncidentPanel';
 import { BottomTimeline, Footer, IncidentQueue, Kpis, SideNav, Toasts, TopBar } from './components/Shell';
-import { TwinMap } from './components/TwinMap';
+import { MainMap } from './components/MainMap';
 import { FleetPanel, useTheme, useWide } from './components/Hud';
 import { DevicesPage, EvidencePage, IncidentsPage, MissionsPage, ReportsPage } from './views/Pages';
 import { AdminPage } from './views/Admin';
@@ -64,7 +64,7 @@ function Overview() {
         <div className="center">
           {replayBar}
           <Kpis />
-          <TwinMap />
+          <MainMap />
         </div>
         <div className="hud-left">
           <FleetPanel />
@@ -98,7 +98,7 @@ function Overview() {
       <div className="center">
         {replayBar}
         <Kpis />
-        <TwinMap />
+        <MainMap />
       </div>
       <div className="ov-right">
         <RightPanel />

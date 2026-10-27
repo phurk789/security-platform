@@ -86,7 +86,11 @@ export interface GwTelemetry {
   seq: number;
   /** Time measured at the device/adapter. */
   sourceTime: number;
-  pos: Point;
+  /**
+   * Position on the site grid. Missing when the device has no position fix (GNSS without a 3D fix):
+   * the sample still proves the device is alive; the server keeps the last position and sets `noFix`.
+   */
+  pos?: Point;
   alt?: number;
   accuracyM: number;
   battery?: number;
@@ -473,6 +477,10 @@ export type ConsoleEvent =
       temperatureC?: number;
       gimbal?: GimbalState;
       stats?: DeviceStats;
+      /** The device reports no position fix: `pos` is the last known one (or the registered default). */
+      noFix?: boolean;
+      /** Equipment status, sent when it changed (flight mode, GNSS fix, camera push…). */
+      components?: DeviceComponent[];
     }
   | { type: 'geofence'; geofence: Geofence; deleted?: boolean }
   | { type: 'site'; site: SiteInfo }

@@ -1176,4 +1176,19 @@ export const TH: Record<string, string> = {
   '{id} works inside {b} only (level {n}, LiDAR SLAM) and cannot reach this alert. The floor patrol checks the building; send an outdoor vehicle to the alert.':
     '{id} ทำงานได้เฉพาะภายใน{b} (ชั้น {n}, ระบุตำแหน่งด้วย LiDAR SLAM) และไปถึงจุดเกิดเหตุนี้ไม่ได้ เส้นทางลาดตระเวนชั้นใช้ตรวจภายในอาคาร ให้ส่งยานพาหนะกลางแจ้งไปที่จุดเกิดเหตุแทน',
   'Watch inside {b} · level {n}': 'ดูภายใน{b} · ชั้น {n}',
+  // Real map (MapLibre)
+  Basemap: 'แผนที่ฐาน',
+  'Satellite (Esri World Imagery)': 'ภาพดาวเทียม (Esri World Imagery)',
+  'Satellite + labels': 'ภาพดาวเทียม + ชื่อสถานที่',
+  'Satellite (Sentinel-2 cloudless, 10 m)': 'ภาพดาวเทียม Sentinel-2 (ละเอียด 10 m)',
+  'Terrain (Esri World Topo)': 'ภูมิประเทศ (Esri World Topo)',
+  'The map needs WebGL 2. Use a current Chrome, Edge or Firefox with graphics acceleration on.':
+    'แผนที่ต้องใช้ WebGL 2 ใช้ Chrome, Edge หรือ Firefox รุ่นใหม่ และเปิดการเร่งกราฟิก',
+  'The map lost its graphics context. Reload the page.': 'แผนที่หยุดแสดงผลเพราะกราฟิกขัดข้อง โหลดหน้าใหม่',
+  'Live map of {site}': 'แผนที่สดของ {site}',
+  'Vehicle trails (10 min)': 'เส้นทางที่รถวิ่ง (10 นาที)',
+  'Sample site plan (placeholder buildings)': 'ผังไซต์ตัวอย่าง (อาคารสมมติ)',
+  'Show the whole site': 'แสดงทั้งไซต์',
+  'no GNSS fix: not shown on the map': 'ยังไม่มีพิกัด GNSS จึงไม่แสดงบนแผนที่',
+  'Loading map…': 'กำลังโหลดแผนที่…',
 };

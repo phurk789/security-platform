@@ -900,6 +900,8 @@ export class Platform {
       limitations: input.limitations ?? 'Not yet declared by an adapter.',
       zone: input.zone ?? 'Zone A',
       pos: input.pos ?? { x: 210, y: 140 },
+      // No position until the device reports one (maps leave it off instead of at the default).
+      ...(input.pos ? {} : { noFix: true }),
       accuracyM: 5,
       lastSeen: 0,
       rateMs: 1000,
@@ -1637,7 +1639,12 @@ export class Platform {
     if (t.seq <= last) return; // duplicate or out of order
     this.lastSeq.set(d.id, t.seq);
     const now = this.now();
-    d.pos = { x: t.pos.x, y: t.pos.y };
+    // A sample without a position (no GNSS fix) keeps the device alive but its position unknown.
+    const pos = t.pos && Number.isFinite(t.pos.x) && Number.isFinite(t.pos.y) ? { x: t.pos.x, y: t.pos.y } : undefined;
+    if (pos) {
+      d.pos = pos;
+      delete d.noFix;
+    } else d.noFix = true;
     if (t.alt !== undefined) d.alt = t.alt;
     d.accuracyM = t.accuracyM;
     if (t.battery !== undefined) d.battery = t.battery;
@@ -1666,13 +1673,15 @@ export class Platform {
     // Source → received delay. Clamp at 0 in case the device clock runs slightly ahead.
     d.latencyMs = Math.max(0, now - t.sourceTime);
     d.lastSeen = now;
-    if (d.kind === 'ugv' || d.kind === 'uav') {
+    if (pos && (d.kind === 'ugv' || d.kind === 'uav')) {
       this.trackStats(d, now);
       this.trackFences(d, now);
     }
     this.devices.set(d.id, d);
     this.db.prepare('UPDATE devices SET data = ? WHERE id = ?').run(JSON.stringify(this.publicDevice(d)), d.id);
-    this.db
+    // Position history: only samples that have a position (a replay must not show a guessed one).
+    if (pos)
+      this.db
       .prepare(
         'INSERT INTO telemetry (device_id, seq, source_time, received_time, x, y, alt, accuracy, battery, speed, quality, heading, signal, satellites, temperature) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       )
@@ -1681,8 +1690,8 @@ export class Platform {
         t.seq,
         t.sourceTime,
         now,
-        t.pos.x,
-        t.pos.y,
+        pos.x,
+        pos.y,
         t.alt ?? null,
         t.accuracyM,
         t.battery ?? null,
@@ -1720,6 +1729,8 @@ export class Platform {
         temperatureC: d.temperatureC,
         gimbal: d.gimbal,
         stats: d.stats,
+        noFix: d.noFix,
+        ...(Array.isArray(t.components) && t.components.length ? { components: d.components } : {}),
       },
     });
   }

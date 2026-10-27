@@ -40,7 +40,7 @@ describe('SimUgv', () => {
     expect(got.telemetry[2].sourceTime - got.telemetry[0].sourceTime).toBe(2000);
     // GNSS noise: the reported fix sits within a couple of metres of the true position.
     const t0 = got.telemetry[0];
-    expect(Math.hypot(t0.pos.x - seed['UGV-01'].pos.x, t0.pos.y - seed['UGV-01'].pos.y)).toBeLessThan(2.5);
+    expect(Math.hypot(t0.pos!.x - seed['UGV-01'].pos.x, t0.pos!.y - seed['UGV-01'].pos.y)).toBeLessThan(2.5);
     expect(t0.speed).toBe(0);
     expect(t0.battery).toBeCloseTo(82, 0);
     expect(t0.accuracyM).toBeGreaterThanOrEqual(0.8);
@@ -59,7 +59,7 @@ describe('SimUgv', () => {
     expect(statuses(got, c.commandId)).toEqual(['acknowledged', 'executing', 'succeeded']);
     vi.advanceTimersByTime(3000);
     const last = got.telemetry[got.telemetry.length - 1];
-    expect(last.pos.x).toBeGreaterThan(seed['UGV-01'].pos.x);
+    expect(last.pos!.x).toBeGreaterThan(seed['UGV-01'].pos.x);
     expect(last.speed).toBeGreaterThan(0);
     expect(last.nextCp).toBe(0);
     a.stop();
@@ -266,7 +266,7 @@ describe('SimUav and SimCctv', () => {
     const { ctx, got } = fakeCtx();
     a.start(ctx);
     vi.advanceTimersByTime(2000);
-    expect(got.telemetry.every((t) => t.pos.x === 376 && t.pos.y === 212)).toBe(true);
+    expect(got.telemetry.every((t) => t.pos!.x === 376 && t.pos!.y === 212)).toBe(true);
     a.onDemo('cut_link');
     vi.advanceTimersByTime(3000);
     expect(got.telemetry).toHaveLength(2);
@@ -283,16 +283,16 @@ describe('SimUav', () => {
     const { ctx, got } = fakeCtx();
     a.start(ctx);
     vi.advanceTimersByTime(3000);
-    const p0 = got.telemetry.at(-1)!.pos;
+    const p0 = got.telemetry.at(-1)!.pos!;
     expect(Math.hypot(p0.x - 318, p0.y - 52)).toBeLessThan(45);
     a.onDemo('overwatch', { x: 335, y: 236 });
     vi.advanceTimersByTime(40_000);
-    const p1 = got.telemetry.at(-1)!.pos;
+    const p1 = got.telemetry.at(-1)!.pos!;
     expect(Math.hypot(p1.x - 335, p1.y - 236)).toBeLessThan(26);
     expect(got.telemetry.at(-1)!.alt).toBeGreaterThan(30);
     a.onDemo('overwatch', null);
     vi.advanceTimersByTime(40_000);
-    const p2 = got.telemetry.at(-1)!.pos;
+    const p2 = got.telemetry.at(-1)!.pos!;
     expect(Math.hypot(p2.x - 318, p2.y - 52)).toBeLessThan(45);
     a.stop();
   });

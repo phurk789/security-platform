@@ -97,6 +97,8 @@ const FRAME_GLOBAL_RELATIVE_ALT_INT = 6;
 const MAV_MODE_FLAG_SAFETY_ARMED = 128;
 const MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1;
 const LINK_STALE_MS = 3000;
+/** A position older than this (no fresh fix) is not reported: the sample goes out without one. */
+const POS_STALE_MS = 3000;
 
 /** Flight-mode numbers per autopilot. */
 const MODES: Record<VehicleProfile, { auto: number[]; hold: number[]; manual: number[]; failsafe: number[]; name: (m: number) => string }> = {
@@ -168,6 +170,10 @@ export class MavlinkVehicleAdapter implements Adapter {
   private armed = false;
   private mode = -1;
   private pos?: Point;
+  /** When `pos` was last set from a trusted source (GNSS 3D fix, or indoor positioning). */
+  private posAt = 0;
+  /** GPS_RAW_INT fix type (0–1 none, 2 2D, 3 3D, 4 DGPS, 5–6 RTK); undefined until the first one. */
+  private fixType?: number;
   private altM = 0;
   private headingDeg?: number;
   private speed = 0;
@@ -378,14 +384,20 @@ export class MavlinkVehicleAdapter implements Adapter {
         const ex = data.y as number;
         const ey = -(data.x as number);
         this.pos = { x: this.cfg.indoor.origin.x + ex * Math.cos(th) - ey * Math.sin(th), y: this.cfg.indoor.origin.y + ex * Math.sin(th) + ey * Math.cos(th) };
+        this.posAt = this.ctx.now();
         this.speed = Math.hypot(data.vx as number, data.vy as number);
         this.accuracyM = 0.3;
         break;
       }
       case MSG.GLOBAL_POSITION_INT: {
         if (this.cfg.indoor) break; // GPS is not trusted indoors
-        const g = geoToSite(this.cfg.geo, { lat: (data.lat as number) / 1e7, lon: (data.lon as number) / 1e7 });
-        this.pos = g;
+        const lat = (data.lat as number) / 1e7;
+        const lon = (data.lon as number) / 1e7;
+        // Before the GNSS has a 3D fix the autopilot sends 0,0 or a drifting estimate: not a position.
+        if (lat === 0 && lon === 0) break;
+        if (this.fixType !== undefined && this.fixType < 3) break;
+        this.pos = geoToSite(this.cfg.geo, { lat, lon });
+        this.posAt = this.ctx.now();
         this.altM = (data.relativeAlt as number) / 1000;
         if ((data.hdg as number) !== 65535) this.headingDeg = headingToSite(this.cfg.geo, (data.hdg as number) / 100);
         this.speed = Math.hypot(data.vx as number, data.vy as number) / 100;
@@ -409,6 +421,7 @@ export class MavlinkVehicleAdapter implements Adapter {
         const eph = data.eph as number;
         this.accuracyM = hAcc > 0 ? hAcc / 1000 : eph && eph !== 65535 ? (eph / 100) * 2.5 : 5;
         const fix = data.fixType as number;
+        this.fixType = fix;
         this.comps.set('gnss', {
           status: fix >= 3 ? 'ok' : 'warn',
           detail: fix >= 3 ? `${this.satellites} sats · ${fix >= 5 ? 'RTK' : '3D'} fix · ±${this.accuracyM.toFixed(1)} m` : `${this.satellites} sats · no 3D fix`,
@@ -497,26 +510,26 @@ export class MavlinkVehicleAdapter implements Adapter {
     }
     if (now - this.lastTel >= 1000) {
       this.lastTel = now;
-      if (this.pos) {
-        this.ctx.telemetry({
-          seq: ++this.telSeq,
-          sourceTime: this.lastHeartbeat,
-          pos: { ...this.pos },
-          alt: this.cfg.kind === 'uav' ? this.altM : undefined,
-          accuracyM: Math.round(this.accuracyM * 10) / 10,
-          battery: this.battery,
-          speed: Math.round(this.speed * 10) / 10,
-          quality: this.accuracyM < 3 ? 'good' : 'degraded',
-          nextCp: this.missionLength ? this.nextCp : undefined,
-          heading: this.headingDeg,
-          signal: this.signal,
-          satellites: this.cfg.indoor ? undefined : this.satellites,
-          level: this.cfg.indoor?.level,
-          // 4-in-1 module state as last confirmed by the flight controller (no gimbal on this device)
-          gimbal: this.cfg.payload ? { yaw: 0, pitch: 0, spotlight: this.payloadState.spotlight, beacon: this.payloadState.beacon } : undefined,
-          components: this.comps.flush(),
-        } as Parameters<AdapterContext['telemetry']>[0]);
-      }
+      // The vehicle is alive (heartbeat), so it always reports; the position only while it is trusted.
+      const havePos = !!this.pos && now - this.posAt <= POS_STALE_MS;
+      this.ctx.telemetry({
+        seq: ++this.telSeq,
+        sourceTime: this.lastHeartbeat,
+        ...(havePos ? { pos: { ...this.pos! } } : {}),
+        alt: this.cfg.kind === 'uav' ? this.altM : undefined,
+        accuracyM: Math.round(this.accuracyM * 10) / 10,
+        battery: this.battery,
+        speed: Math.round(this.speed * 10) / 10,
+        quality: havePos && this.accuracyM < 3 ? 'good' : 'degraded',
+        nextCp: this.missionLength ? this.nextCp : undefined,
+        heading: this.headingDeg,
+        signal: this.signal,
+        satellites: this.cfg.indoor ? undefined : this.satellites,
+        level: this.cfg.indoor?.level,
+        // 4-in-1 module state as last confirmed by the flight controller (no gimbal on this device)
+        gimbal: this.cfg.payload ? { yaw: 0, pitch: 0, spotlight: this.payloadState.spotlight, beacon: this.payloadState.beacon } : undefined,
+        components: this.comps.flush(),
+      } as Parameters<AdapterContext['telemetry']>[0]);
     }
     const M = MODES[this.cfg.profile];
     // Confirm effects from telemetry, never from the request alone.

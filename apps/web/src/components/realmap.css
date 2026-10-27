@@ -1,0 +1,173 @@
+/* Real map (MapLibre) inside the overview: fills .map like the drawn twin did. */
+.map-real {
+  background: #040a14;
+}
+.map-real-canvas {
+  position: absolute;
+  inset: 0;
+}
+.map-real.map-loading {
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  font-size: 0.85rem;
+}
+.map-real .map-tools {
+  align-items: center;
+}
+.map-real .map-tools > .btn-ghost {
+  padding: 6px 8px;
+}
+
+/* MapLibre controls in the console's dark style, below our tool bar. */
+.map-real .maplibregl-ctrl-top-right {
+  top: 54px;
+}
+.map-real .maplibregl-ctrl-group {
+  background: rgba(14, 23, 41, 0.9);
+  border: 1px solid var(--line-2);
+  box-shadow: none;
+}
+.map-real .maplibregl-ctrl-group button + button {
+  border-top-color: var(--line-2);
+}
+.map-real .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(0.9);
+}
+.map-real .maplibregl-ctrl-scale {
+  background: rgba(14, 23, 41, 0.75);
+  color: var(--text-2);
+  border-color: var(--text-2);
+}
+.map-real .maplibregl-ctrl-attrib {
+  background: rgba(14, 23, 41, 0.8);
+  color: var(--text-2);
+  font-size: 0.68rem;
+}
+.map-real .maplibregl-ctrl-attrib a {
+  color: var(--text-2);
+}
+.map-real .maplibregl-ctrl-attrib.maplibregl-compact-show,
+.map-real .maplibregl-ctrl-attrib-button {
+  background-color: rgba(226, 232, 240, 0.9);
+}
+.map-real .maplibregl-ctrl-bottom-left {
+  bottom: 26px;
+}
+
+/* Basemap picker */
+.ps-basemap-ctrl {
+  position: relative;
+}
+.ps-basemap-btn {
+  display: grid !important;
+  place-items: center;
+  color: #e2e8f0;
+}
+.ps-basemap-panel {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 0;
+  min-width: 230px;
+  padding: 8px;
+  display: grid;
+  gap: 2px;
+  background: rgba(14, 23, 41, 0.96);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  color: var(--text-1, #e2e8f0);
+  font-size: 0.8rem;
+}
+.ps-basemap-panel[hidden] {
+  display: none;
+}
+.ps-basemap-panel label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ps-basemap-panel label:hover {
+  background: rgba(56, 189, 248, 0.12);
+}
+
+/* Pivot shown while orbiting the camera */
+.ps-map-pivot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border: 2px solid #fde047;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(11, 18, 32, 0.6);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 3;
+}
+.ps-map-pivot.on {
+  opacity: 1;
+}
+
+.map-nofix {
+  position: absolute;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(146, 64, 14, 0.92);
+  color: #fff7ed;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.map-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-2);
+}
+.ps-popup .maplibregl-popup-content {
+  background: rgba(14, 23, 41, 0.96);
+  color: #e2e8f0;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px 28px 8px 10px;
+  font-size: 0.8rem;
+}
+.ps-popup .maplibregl-popup-close-button {
+  color: #e2e8f0;
+}
+.ps-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip {
+  border-top-color: rgba(14, 23, 41, 0.96);
+}
+
+/* HUD layout: keep tools and controls clear of the floating panels. */
+.overview.hud .map-real .maplibregl-ctrl-top-right {
+  right: var(--view-r);
+}
+.overview.hud .map-real .maplibregl-ctrl-bottom-right {
+  right: var(--view-r);
+  bottom: var(--view-b);
+}
+.overview.hud .map-real .maplibregl-ctrl-bottom-left {
+  left: var(--view-l);
+  bottom: calc(var(--view-b) + 4px);
+}
+.overview.hud .map-real .map-nofix {
+  bottom: calc(var(--view-b) + 16px);
+  left: calc((100% + var(--view-l) - var(--view-r)) / 2);
+}

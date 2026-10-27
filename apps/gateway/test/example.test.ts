@@ -23,7 +23,7 @@ describe('examples/custom-adapter (BUILD YOUR OWN)', () => {
     rover.onCommand(go); // retry with same key
     vi.advanceTimersByTime(3000);
     expect(statuses(got, go.commandId).filter((s) => s === 'succeeded')).toHaveLength(1);
-    expect(got.telemetry[got.telemetry.length - 1].pos.x).toBeGreaterThan(100);
+    expect(got.telemetry[got.telemetry.length - 1].pos!.x).toBeGreaterThan(100);
 
     const stop = cmd('stop', { deviceId: 'ROVER-07' });
     rover.onCommand(stop);

@@ -163,6 +163,10 @@ function fakeRover(opts: { armed?: boolean } = {}) {
     received: [] as number[],
     silent: false,
     relays: {} as Record<number, number>,
+    /** GPS_RAW_INT fix type to report; undefined = send no GPS_RAW_INT at all. */
+    fixType: undefined as number | undefined,
+    /** Report 0,0 in GLOBAL_POSITION_INT, as autopilots do before the first fix. */
+    zero: false,
   };
   const send = (m: unknown) => gcs && !st.silent && sock.send(proto.serialize(m as never, seq++ & 0xff), gcs.port, gcs.address);
   input
@@ -225,9 +229,16 @@ function fakeRover(opts: { armed?: boolean } = {}) {
     send(hb);
     if (st.speed > 0) st.pos = { x: st.pos.x + st.speed * 0.2, y: st.pos.y };
     const g = siteToGeo(GEO, st.pos);
+    if (st.fixType !== undefined) {
+      const raw = new common.GpsRawInt();
+      raw.fixType = st.fixType as never;
+      raw.satellitesVisible = st.fixType >= 3 ? 9 : 0;
+      raw.eph = 120;
+      send(raw);
+    }
     const gp = new common.GlobalPositionInt();
-    gp.lat = Math.round(g.lat * 1e7);
-    gp.lon = Math.round(g.lon * 1e7);
+    gp.lat = st.zero ? 0 : Math.round(g.lat * 1e7);
+    gp.lon = st.zero ? 0 : Math.round(g.lon * 1e7);
     gp.relativeAlt = 0;
     gp.vx = 0;
     gp.vy = Math.round(st.speed * 100);
@@ -273,7 +284,7 @@ describe('MAVLink vehicle adapter (UniFC 6 Pico class, via UniRC datalink)', () 
     cleanup.push(() => a.stop(), rover.close);
     await until(() => got.telemetry.length > 0);
     const t0 = got.telemetry.at(-1)!;
-    expect(Math.hypot(t0.pos.x - 214, t0.pos.y - 218)).toBeLessThan(0.05);
+    expect(Math.hypot(t0.pos!.x - 214, t0.pos!.y - 218)).toBeLessThan(0.05);
     expect(t0.battery).toBe(76);
     // Equipment: declared pending, verified from the first messages (heartbeat, SYS_STATUS, GPS)
     expect(a.declaration.components?.map((c) => [c.id, c.status])).toEqual(
@@ -306,6 +317,40 @@ describe('MAVLink vehicle adapter (UniFC 6 Pico class, via UniRC datalink)', () 
     await until(() => got.updates.filter((u) => u.status === 'succeeded').length === 2, 6000);
     expect(rover.st.mode).toBe(4); // HOLD
   }, 20_000);
+
+  it('reports no position without a GNSS 3D fix, and the position once the fix comes', async () => {
+    const rover = await fakeRover({ armed: false });
+    rover.st.fixType = 1; // no fix: the autopilot still sends a (drifting) GLOBAL_POSITION_INT
+    const a = new MavlinkVehicleAdapter({ deviceId: 'UGV-02', kind: 'ugv', profile: 'ardupilot-rover', link: { mode: 'client', host: '127.0.0.1', port: rover.port }, geo: GEO });
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), rover.close);
+    // Alive (heartbeat) but no position: samples keep coming, without pos, marked degraded.
+    await until(() => got.telemetry.length >= 2);
+    expect(got.telemetry.every((t) => t.pos === undefined && t.quality === 'degraded')).toBe(true);
+    expect(got.telemetry.flatMap((t) => t.components ?? []).find((c) => c.id === 'gnss')).toMatchObject({ status: 'warn' });
+    // 3D fix: the position appears.
+    rover.st.fixType = 3;
+    await until(() => got.telemetry.some((t) => t.pos));
+    const t = got.telemetry.find((x) => x.pos)!;
+    expect(Math.hypot(t.pos!.x - 214, t.pos!.y - 218)).toBeLessThan(0.05);
+    // Fix lost: the last position is not repeated as if it were current.
+    rover.st.fixType = 0;
+    const n = got.telemetry.length;
+    await wait(4500);
+    expect(got.telemetry.slice(n).at(-1)!.pos).toBeUndefined();
+  }, 15_000);
+
+  it('ignores the 0,0 position autopilots send before any GNSS data', async () => {
+    const rover = await fakeRover({ armed: false });
+    rover.st.zero = true; // no GPS_RAW_INT either
+    const a = new MavlinkVehicleAdapter({ deviceId: 'UGV-02', kind: 'ugv', profile: 'ardupilot-rover', link: { mode: 'client', host: '127.0.0.1', port: rover.port }, geo: GEO });
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), rover.close);
+    await until(() => got.telemetry.length >= 2);
+    expect(got.telemetry.every((t) => t.pos === undefined)).toBe(true);
+  }, 10_000);
 
   it('refuses to start a disarmed vehicle unless remote arming is enabled', async () => {
     const rover = await fakeRover({ armed: false });

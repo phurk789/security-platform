@@ -197,7 +197,11 @@ export function RemoteProvider({
               temperatureC: m.temperatureC ?? d.temperatureC,
               gimbal: m.gimbal ?? d.gimbal,
               stats: m.stats ?? d.stats,
+              noFix: m.noFix || undefined,
+              components: m.components ?? d.components,
             };
+            // No fix: the device is alive but its position unknown, so it adds nothing to the trail.
+            if (m.noFix) return { ...p, devices: { ...p.devices, [m.deviceId]: nd } };
             const sample: TelemetrySample = {
               deviceId: m.deviceId,
               at: m.lastSeen,

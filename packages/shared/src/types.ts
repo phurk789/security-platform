@@ -104,6 +104,11 @@ export interface Device {
   limitations: string;
   zone: string;
   pos: Point;
+  /**
+   * No position fix right now (e.g. GNSS without a 3D fix): `pos` is only the last known or registered
+   * one, so maps leave the device off rather than draw it somewhere it may not be.
+   */
+  noFix?: boolean;
   /** Altitude in metres above site datum (UAV only). */
   alt?: number;
   /** Horizontal accuracy in metres. */
