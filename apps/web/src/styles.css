@@ -2274,6 +2274,38 @@ code {
 .secret {
   word-break: break-all;
 }
+/* Admin → Pair an edge remote: the QR and digits are read from a remote's screen distance. */
+.pair-code {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+}
+.pair-code > div,
+.pair-code > p {
+  flex: 1;
+}
+.pair-qr {
+  width: 168px;
+  height: 168px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+}
+.pair-digits {
+  font-size: 2.2rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+@media (max-width: 480px) {
+  .pair-code {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 .filters {
   display: flex;
   flex-wrap: wrap;

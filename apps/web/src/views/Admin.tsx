@@ -41,6 +41,7 @@ import { useStore } from '../store';
 import { roleLabel, useT } from '../i18n';
 import { StepUpDialog } from '../components/StepUp';
 import { NotificationChannels } from '../components/NotificationChannels';
+import { EdgePairingCard } from '../components/EdgePairingCard';
 
 interface Backup {
   id: string;
@@ -120,6 +121,8 @@ function Admin() {
   const [ret, setRet] = useState<Record<keyof OrgSettings['retention'], string>>({ telemetryDays: '90', closedIncidentDays: '0', evidenceDays: '0', detectionDays: '90' });
   const geofences = useStore().s.geofences;
   const geo = useStore().s.geo;
+  const devices = useStore().s.devices;
+  const [reloads, setReloads] = useState(0);
   const [ga, setGa] = useState<{ lat: string; lon: string; rot: string } | null>(null);
   const gaForm = ga ?? { lat: String(geo.originLat), lon: String(geo.originLon), rot: String(geo.rotationDeg ?? 0) };
   const [imp, setImp] = useState<{ imported: number; errors: string[] } | null>(null);
@@ -152,6 +155,7 @@ function Admin() {
     ]);
     setUsers(u);
     setKeys(k);
+    setReloads((n) => n + 1);
     setGws(g);
     setOrigins(eo);
     setBackups(b);
@@ -350,6 +354,8 @@ function Admin() {
             </button>
           </form>
         </section>
+
+        <EdgePairingCard api={api} act={act} registered={Object.keys(devices)} reloadKey={reloads} />
 
         <section className="card">
           <h3>
