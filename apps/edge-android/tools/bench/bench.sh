@@ -126,6 +126,7 @@ test_() {
   "$ADB" exec-out screencap -p >shots/running.png
   echo "gateways: $(curl -fsS "${auth[@]}" $API/admin/gateways)"
   echo "UGV-01 last data $(age) s ago"
+  echo "UGV-01 on the server: $(curl -sS "${auth[@]}" $API/devices/UGV-01 | python3 -c 'import json,sys; d=json.load(sys.stdin); print({k: d.get(k) for k in ("mode", "integration", "teleop")})')"
   grep -c "is publishing to path 'ugv-01'" logs/mtx-ingest.log | sed 's/^/video publish sessions so far: /'
   "$ADB" shell input keyevent KEYCODE_SLEEP
   "$ADB" shell dumpsys battery unplug
