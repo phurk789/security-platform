@@ -48,7 +48,9 @@ bash ~/edge-kit/install.sh
 
 ## 3.5 ตรวจลิงก์กับรถ (อ่านอย่างเดียว)
 
-เปิดรถ (กล้องห้อยหัวลง) ใน UniGCS ตั้ง Datalink 1 = UDP และ baud ให้ตรงกับพอร์ตของบอร์ดที่ต่อกับ air unit แล้วปิดการต่อ datalink ของ UniGCS จากนั้น:
+เปิดรถ (กล้องห้อยหัวลง) ใน UniGCS ตั้ง Datalink 1 = UDP และ baud ให้ตรงกับพอร์ตของบอร์ดที่ต่อกับ air unit แล้วปิด UniGCS (Settings → Apps → UniGCS → Force stop) จากนั้น:
+
+> หลังเปลี่ยน Datalink 1 เป็น UDP แล้ว ถ้าจะใช้ UniGCS เองต้องตั้งการเชื่อมต่อใน UniGCS เป็น **UDPCL** ที่ `192.168.144.20` พอร์ต `19856` ด้วย ไม่อย่างนั้น UniGCS เห็นรถแต่ค้างที่ "parameter loading" (เจอ 27 ต.ค.)
 
 ```bash
 ~/edge/probe.sh
@@ -93,7 +95,11 @@ nano ~/edge/mediamtx.android.yml
 ## 6. ปิดของโน้ตบุ๊ก
 
 - กด Ctrl+C ในหน้าต่าง `Start-Edge.ps1` และปิดหน้าต่าง MediaMTX
-- บนรีโมต: ปิดการเชื่อมต่อ datalink ใน UniGCS (UniGCS ส่ง heartbeat ของตัวเองด้วย ถ้าเปิดค้างจะมี ground station สองตัวบน link) จะเปิดดูวิดีโอใน UniGCS ได้ แต่อย่าใช้ความละเอียดเต็ม
+- บนรีโมต: **ปิด UniGCS** (Force stop) ระหว่างที่ gateway ทำงาน ทดสอบ 27 ต.ค. พบว่าเมื่อทั้งสองต่อประตู `19856` พร้อมกัน:
+  - UniGCS ยังเห็นข้อมูลรถ แต่**คำสั่งจาก UniGCS (เช่นเปลี่ยนโหมด) ไปไม่ถึงบอร์ด** และไม่มีอะไรเตือน
+  - ตอน UniGCS ต่อหรือโหลด parameter ใหม่ platform ขาดข้อมูลรถไปประมาณ 2 นาที
+  - คนขับยังใช้คันโยกและสวิตช์บนรีโมตได้ตามปกติ (ไม่ผ่าน datalink)
+  - ถ้าต้องใช้ UniGCS: หยุด gateway ก่อน (Ctrl+C) ใช้เสร็จแล้วปิด UniGCS แล้วค่อยรัน `start.sh` ใหม่
 
 ## 7. เปิดบนรีโมต
 
@@ -144,6 +150,9 @@ rm -rf ~/edge-kit && cp -r ~/storage/downloads/edge-kit ~/edge-kit && bash ~/edg
 | MediaMTX หยุดทันทีด้วย error อื่น | ดู `~/edge/logs/mediamtx.log` แล้วรันแค่ gateway บนรีโมตก่อน (ดูภาพผ่านโน้ตบุ๊กไปพลาง) |
 | gateway ไม่ได้ heartbeat จากรถ | datalink ใน UniGCS ต้องเป็น UDP; ปิด datalink ของ UniGCS; 🧪 ลองเปลี่ยน `link.host` ใน `site.json` จาก `192.168.144.20` เป็น `127.0.0.1` |
 | รถหลุดเป็น STALE เมื่อพักจอ | Battery → Unrestricted, ไม่ปัด Termux ทิ้ง, ดูว่ามีแจ้งเตือน "wake lock held" ของ Termux |
-| ภาพจอดำ | กล้องยังส่ง H.265: ตั้งเป็น H.264 ใน UniGCS |
+| ภาพจอดำ / เว็บขึ้น "เซิร์ฟเวอร์วิดีโอขัดข้อง (400)" | กล้องยังส่ง H.265 (`mediamtx.log` ขึ้น `track (H265)` และ `doesn't contain any supported codec`): ตั้ง main stream เป็น H.264 ในเมนูกล้องของ UniGCS ถ้าหาเมนูไม่เจอ สั่งผ่าน SDK ของกล้อง (คำสั่ง `0x21`) แล้วปิดเปิดรถ กล้องในโดม (รหัส 75…) ใช้ค่าใหม่หลังรีบูต |
+| UniGCS ค้าง "parameter loading" | การเชื่อมต่อใน UniGCS ต้องเป็น UDPCL `192.168.144.20:19856` เมื่อ Datalink 1 = UDP และต้องไม่มี gateway รันอยู่ |
+| UniGCS กดเปลี่ยนโหมดไม่ไป | gateway รันอยู่ด้วย: หยุด gateway หรือใช้สวิตช์โหมดบนตัวรีโมตแทน |
+| แผงอุปกรณ์บนเว็บขึ้น STALE ทั้งที่รถส่งข้อมูล | ดูด้วยบัญชี admin: admin ไม่ได้รับข้อมูลสด ให้ดูด้วยบัญชีหัวหน้าเวรหรือผู้ควบคุม |
 | เครื่องอื่นไม่เห็นภาพ | อยู่ Wi-Fi เดียวกับรีโมต, ทำข้อ 5 แล้ว, gateway รีสตาร์ทหลังข้อ 5 |
 | `Start-Edge.ps1` บนโน้ตบุ๊กกับรีโมตเปิดพร้อมกัน | ปิดตัวใดตัวหนึ่งทันที (gateway ได้ทีละตัว) |
