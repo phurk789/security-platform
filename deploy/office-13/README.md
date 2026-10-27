@@ -76,6 +76,20 @@ may publish only its own device's path (`ugv-01` for `UGV-01`) while it is conne
 pushed video off, remove the two `MEDIA_*` lines and run `docker compose up -d` (gateways then
 log "the server gave no video publish address" and video stays off until they use pull mode).
 
+## Google basemaps (optional)
+
+Google satellite / roads in the map need a Map Tiles API key (billing on, key restricted to the
+Map Tiles API and this server's public IP): see `docs/MAPS.md`. Put it on the server only:
+
+```powershell
+cd C:\Server\thermal
+Copy-Item .env.server ".env.server.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
+Add-Content -Encoding ascii .env.server "GOOGLE_MAPS_API_KEY=<key>"   # type the key yourself; never paste it in chat
+docker compose up -d server
+```
+
+Remove the line and run `docker compose up -d server` again to switch Google off.
+
 ## Deploy a new version
 
 Builds run **on the server**. Over SSH, Docker Desktop's credential helper fails ("A specified

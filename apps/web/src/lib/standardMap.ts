@@ -4,6 +4,7 @@
 import maplibregl, { type Map as MlMap } from 'maplibre-gl';
 import { addBasemapLayers, getInitialBasemap } from './basemaps';
 import { BasemapControl } from './basemapControl';
+import { GoogleAttributionControl, type ApiGet } from './googleAttribution';
 import { ensureSlots } from './layerOrder';
 import { attachOrbitControls } from './orbitControls';
 import { MAX_PITCH, baseMapStyle } from './terrain3d';
@@ -20,6 +21,10 @@ export interface StandardMapOptions {
   t?: (s: string) => string;
   /** Called once the style is ready and the basemap is in: add sources and layers here. */
   onReady?: (map: MlMap) => void;
+  /** The viewer's session token: sent with requests to this server's /api/ (server-proxied basemaps). */
+  token?: () => string | undefined;
+  /** JSON from this server's API (Google attribution); without it Google basemaps show no copyright line. */
+  apiGet?: ApiGet;
 }
 
 export interface StandardMap {
@@ -48,12 +53,19 @@ export function createStandardMap(container: HTMLElement, opts: StandardMapOptio
     attributionControl: false,
     // Right-drag rotation is replaced by the orbit gesture (middle / Ctrl+drag), so the right button stays free.
     dragRotate: false,
+    // Server-proxied basemap tiles need the viewer's session, like every other API call. Only our own
+    // origin gets the token; tile providers never see it.
+    transformRequest: (url) => {
+      const token = opts.token?.();
+      return token && url.startsWith(`${location.origin}/api/`) ? { url, headers: { authorization: `Bearer ${token}` } } : { url };
+    },
   });
   liveMaps.add(map);
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true, showCompass: true, showZoom: true }), 'top-right');
   map.addControl(new BasemapControl(opts.t), 'top-right');
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric', maxWidth: 120 }), 'bottom-left');
   map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+  if (opts.apiGet) map.addControl(new GoogleAttributionControl(opts.apiGet), 'bottom-right');
 
   const pivot = document.createElement('div');
   pivot.className = 'ps-map-pivot';

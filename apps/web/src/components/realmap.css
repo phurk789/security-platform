@@ -171,3 +171,22 @@
   bottom: calc(var(--view-b) + 16px);
   left: calc((100% + var(--view-l) - var(--view-r)) / 2);
 }
+
+/* Google basemaps: the mark and copyright Google requires, apart from other attributions. */
+.ps-google-attrib {
+  clear: both;
+  margin: 0 10px 4px 0 !important;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #3c4043;
+  font: 500 11px/1.4 Roboto, Arial, sans-serif;
+  pointer-events: auto;
+}
+.ps-google-attrib[hidden] {
+  display: none;
+}
+.ps-google-mark {
+  font-weight: 700;
+  letter-spacing: 0.1px;
+}

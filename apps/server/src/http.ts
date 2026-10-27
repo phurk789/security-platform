@@ -9,6 +9,7 @@ import { createBackup, listBackups, verifyBackup } from './backup';
 import type { Config } from './config';
 import type { DB } from './db';
 import { GatewayHub } from './gatewayHub';
+import { GOOGLE_STYLES, GoogleTiles, tileXYZ } from './googleTiles';
 import { Metrics } from './metrics';
 import { OidcClient, OidcError } from './oidc';
 import { openapi } from './openapi';
@@ -375,6 +376,44 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     reply.header('Content-Type', 'image/svg+xml').header('Cache-Control', 'private, max-age=60');
     return svg;
   });
+  // ---- server-proxied basemaps (Google Map Tiles API; the key stays here) ----------------------
+  const google = cfg.googleMapsApiKey ? new GoogleTiles(cfg.googleMapsApiKey, cfg.googleTilesUrl, { log: (m) => console.warn(m) }) : undefined;
+  const googleStyle = (id: string) => {
+    if (!google || !GOOGLE_STYLES[id]) throw new ApiError(404, 'not_found', `Basemap ${id} is not offered by this server.`);
+    return google;
+  };
+  app.get('/api/v1/basemaps', async () => google?.basemaps() ?? []);
+  app.get('/api/v1/basemaps/:id/tiles/:z/:x/:y', async (req: Req, reply: FastifyReply) => {
+    const g = googleStyle(req.params.id);
+    const t = tileXYZ(req.params.z, req.params.x, req.params.y);
+    if (!t) throw new ApiError(400, 'invalid', 'Tile z/x/y out of range.');
+    let r;
+    try {
+      r = await g.tile(req.params.id, t.z, t.x, t.y);
+    } catch (e) {
+      console.warn(`[google] ${req.params.id}: ${(e as Error).message}`);
+      return reply.status(502).send({ error: 'The map provider did not answer.', code: 'invalid' });
+    }
+    if (r.status >= 400) return reply.status(r.status === 404 ? 404 : 502).header('Cache-Control', 'no-store').send();
+    // Google's cache rules apply as given (no longer than they allow).
+    reply.header('Content-Type', r.contentType).header('Cache-Control', r.cacheControl ?? 'private, max-age=3600');
+    if (r.etag) reply.header('ETag', r.etag);
+    return reply.send(r.body);
+  });
+  app.get('/api/v1/basemaps/:id/attribution', async (req: Req) => {
+    const g = googleStyle(req.params.id);
+    const n = (k: string) => Number(req.query[k]);
+    const v = { zoom: Math.round(n('zoom')), north: n('north'), south: n('south'), east: n('east'), west: n('west') };
+    if (!(v.zoom >= 0 && v.zoom <= 22) || !(v.north < 90 && v.south > -90 && v.north > v.south) || !(v.east <= 180 && v.west >= -180))
+      throw new ApiError(400, 'invalid', 'zoom, north, south, east and west are needed.');
+    try {
+      return { copyright: await g.attribution(req.params.id, v) };
+    } catch (e) {
+      console.warn(`[google] attribution ${req.params.id}: ${(e as Error).message}`);
+      return { copyright: '' };
+    }
+  });
+
   // Site media server (MediaMTX authMethod: http) asks here before serving video. 200 = allow.
   app.post('/api/v1/media/auth', async (req: Req, reply: FastifyReply) => {
     const ok = p.mediaAuth(body(req));

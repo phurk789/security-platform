@@ -16,6 +16,13 @@ export interface Config {
    */
   mediaIngestUrl?: string;
   mediaPublicUrl?: string;
+  /**
+   * Google Maps Platform key for Google basemaps (Map Tiles API, proxied: never sent to browsers).
+   * Unset: no Google basemaps. Needs the Map Tiles API enabled, billing, and Google's terms accepted.
+   */
+  googleMapsApiKey?: string;
+  /** Map Tiles API base URL (tests point it at a fake). */
+  googleTilesUrl: string;
   /** Password given to seeded demo users (demo env only). */
   seedPassword: string;
   sessionTtlMs: number;
@@ -94,6 +101,8 @@ export function loadConfig(over: Partial<Config> = {}): Config {
     mediaSecret: process.env.MEDIA_SECRET || (env === 'demo' ? 'demo-media-secret' : ''),
     mediaIngestUrl: process.env.MEDIA_INGEST_URL || undefined,
     mediaPublicUrl: process.env.MEDIA_PUBLIC_URL || undefined,
+    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY?.trim() || undefined,
+    googleTilesUrl: process.env.GOOGLE_TILES_URL || 'https://tile.googleapis.com',
     seedPassword: process.env.SEED_PASSWORD || 'demo1234',
     sessionTtlMs: Number(process.env.SESSION_TTL_MS || 12 * 60 * 60_000),
     embedGateway: (process.env.EMBED_GATEWAY ?? (env === 'demo' ? '1' : '0')) === '1',

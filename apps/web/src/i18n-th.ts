@@ -1191,4 +1191,7 @@ export const TH: Record<string, string> = {
   'Show the whole site': 'แสดงทั้งไซต์',
   'no GNSS fix: not shown on the map': 'ยังไม่มีพิกัด GNSS จึงไม่แสดงบนแผนที่',
   'Loading map…': 'กำลังโหลดแผนที่…',
+  'Google satellite': 'ภาพดาวเทียม Google',
+  'Google satellite + labels': 'ภาพดาวเทียม Google + ชื่อสถานที่',
+  'Google Maps (roads)': 'Google Maps (ถนน)',
 };

@@ -2,7 +2,7 @@
 // basemap switching, idempotent setup and overlay data can be checked exactly.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_GEOFENCES, geoToSite, type Device, type Incident, type Mission, type TelemetrySample } from '@13store/shared';
-import { BASEMAPS, BASEMAP_STORAGE_KEY, DEFAULT_BASEMAP, addBasemapLayers, basemapLabelsLayerId, basemapLayerId, currentBasemap, getInitialBasemap, switchBasemap } from './basemaps';
+import { BASEMAPS, BASEMAP_STORAGE_KEY, DEFAULT_BASEMAP, addBasemapLayers, basemapLabelsLayerId, basemapLayerId, basemaps, currentBasemap, getInitialBasemap, registerBasemaps, switchBasemap } from './basemaps';
 import { LAYER_GROUPS, addLayerTo, ensureSlots, slotId } from './layerOrder';
 import { OPERATIONAL_LAYER_IDS, SRC, buildOverlayData, ensureOperationalLayers, lngLat, trueBearing, updateOverlayData, type OverlayInput } from './overlays';
 import { attachOrbitControls, clampPitch } from './orbitControls';
@@ -101,6 +101,22 @@ describe('basemaps', () => {
 
     expect(switchBasemap(m as never, 'no-such-map')).toBe(false);
     store.set(BASEMAP_STORAGE_KEY, 'retired-provider');
+    expect(getInitialBasemap()).toBe(DEFAULT_BASEMAP);
+  });
+
+  it('adds the basemaps the server offers (Google) to the list, and drops them when the server stops offering them', () => {
+    const google = { id: 'google-hybrid', label: 'Google satellite + labels', tiles: ['https://console.example/api/v1/basemaps/google-hybrid/tiles/{z}/{x}/{y}'], attribution: '', maxzoom: 22, provider: 'google' as const };
+    store.set(BASEMAP_STORAGE_KEY, 'google-hybrid');
+    expect(getInitialBasemap()).toBe(DEFAULT_BASEMAP); // not offered (yet): the default
+    registerBasemaps([google, { ...google, id: 'osm', label: 'clash' }]);
+    expect(basemaps().map((b) => b.id)).toEqual([...BASEMAPS.map((b) => b.id), 'google-hybrid']); // a clashing id is ignored
+    expect(getInitialBasemap()).toBe('google-hybrid');
+    const m = new FakeMap();
+    ensureSlots(m as never);
+    addBasemapLayers(m as never, getInitialBasemap());
+    expect(currentBasemap(m as never)).toBe('google-hybrid');
+    expect((m.sources.get(basemapLayerId('google-hybrid'))!.spec as { tiles: string[] }).tiles[0]).toMatch(/\/api\/v1\/basemaps\/google-hybrid\/tiles\//);
+    registerBasemaps([]);
     expect(getInitialBasemap()).toBe(DEFAULT_BASEMAP);
   });
 });

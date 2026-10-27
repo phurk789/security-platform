@@ -45,7 +45,8 @@ npm run dev -w @13store/web      # console on :5173 (proxies /api to :8080)
 Sign in with a demo account; the overview shows the real map. In the browser console
 `__psMaps.size` (dev builds only) is the number of live maps: 0 after leaving the page, 1 on it.
 
-No environment variables are needed in phase 1: every basemap is keyless.
+The built-in basemaps need no environment variables. Google basemaps need `GOOGLE_MAPS_API_KEY`
+on the server (see below).
 
 ## Basemap licensing
 
@@ -54,7 +55,38 @@ No environment variables are needed in phase 1: every basemap is keyless.
 | Esri World Imagery, Imagery + labels, World Topo | Free with the attribution shown. Commercial production use needs Esri's terms (ArcGIS Location Platform account). |
 | Sentinel-2 cloudless 2016 (EOX) | CC BY 4.0 with attribution. Later years (2018+) are CC BY-NC-SA: do not switch the layer without checking. |
 | OpenStreetMap (tile.openstreetmap.org) | Light use only, attribution required ([tile usage policy](https://operations.osmfoundation.org/policies/tiles/)). Production: own tile server or a provider. |
-| Google imagery | Not included. Needs a licence and a key, and the key must stay on the server (a server-proxied provider). The drawn twin's photorealistic option (`VITE_GOOGLE_MAPS_API_KEY`) remains for the offline demo build only. |
+| Google (satellite, satellite + labels, roads) | Official **Map Tiles API** only, through the server (below). Billed by Google per tile request beyond a free monthly allowance; needs the attribution the console shows. Unofficial tile URLs (`mt*.google.com`, `khms*`) are never used: they break Google's terms and can be blocked at any time. The drawn twin's photorealistic option (`VITE_GOOGLE_MAPS_API_KEY`) remains for the offline demo build only. |
+
+## Google basemaps (server-proxied)
+
+Off until the server has a key. With `GOOGLE_MAPS_API_KEY` set, the basemap picker also offers
+**Google satellite**, **Google satellite + labels** and **Google Maps (roads)** (Thai labels).
+
+```
+browser ──/api/v1/basemaps/google-hybrid/tiles/{z}/{x}/{y} + session token──► platform server
+platform server ──createSession (cached ~2 weeks) / 2dtiles + API key──► tile.googleapis.com
+browser ◄── /api/v1/basemaps/:id/attribution (viewport copyright) ── shown as "Google Maps · ©…"
+```
+
+- The key stays on the server; browsers send only their session token (to our own origin).
+- Every tile request needs a signed-in user (the API's normal sign-in check).
+- One Google session per map style is shared by all viewers and renewed before it expires (or
+  when Google rejects it). Google's `Cache-Control` is passed on unchanged; the server stores no tiles.
+- Required attribution: the "Google Maps" mark and the copyright for the area on screen, in their
+  own box at the bottom right, apart from other providers.
+
+To switch it on (Google Cloud console, then the server):
+
+1. A Google Cloud project with **billing** and the **Map Tiles API** enabled; accept the Google Maps
+   Platform terms.
+2. An API key restricted to **Map Tiles API** and, if possible, to the server's public IP address
+   (the key is only used from the server).
+3. `GOOGLE_MAPS_API_KEY=<key>` in the server's environment (on .13: `.env.server`), then restart the server.
+
+| Variable | Default | What |
+|---|---|---|
+| `GOOGLE_MAPS_API_KEY` | (unset: no Google basemaps) | Map Tiles API key, server only |
+| `GOOGLE_TILES_URL` | `https://tile.googleapis.com` | Only for tests (a fake Google) |
 
 ## Limits (phase 1)
 

@@ -13,6 +13,7 @@ import { useT } from '../i18n';
 import { createStandardMap, SITE_ZOOM, type StandardMap } from '../lib/standardMap';
 import { CLICKABLE, buildOverlayData, devicePositions, ensureOperationalLayers, lngLat, updateOverlayData, type OverlayInput } from '../lib/overlays';
 import { addMapImages } from '../lib/mapImages';
+import { registerBasemaps, type Basemap } from '../lib/basemaps';
 
 const TRAILS_KEY = 'ps-map-trails';
 const PLAN_KEY = 'ps-map-plan';
@@ -69,7 +70,7 @@ function hudPadding(el: HTMLElement) {
 }
 
 export default function RealMap() {
-  const { s, dispatch } = useStore();
+  const { s, dispatch, session } = useStore();
   const t = useT();
   const el = useRef<HTMLDivElement>(null);
   const sm = useRef<StandardMap | null>(null);
@@ -78,46 +79,64 @@ export default function RealMap() {
   const [layersOpen, setLayersOpen] = useState(false);
   const [showTrails, setShowTrails] = useLocalFlag(TRAILS_KEY, true);
   const [showPlan, setShowPlan] = useLocalFlag(PLAN_KEY, false);
-  const latest = useRef({ s, showTrails, showPlan, dispatch, t });
-  latest.current = { s, showTrails, showPlan, dispatch, t };
+  const latest = useRef({ s, showTrails, showPlan, dispatch, t, session });
+  latest.current = { s, showTrails, showPlan, dispatch, t, session };
 
   // One map per mounted component; everything it added goes with it.
   useEffect(() => {
     const host = el.current;
     if (!host) return;
-    let m: StandardMap;
+    let m: StandardMap | undefined;
+    let gone = false;
+    let ro: ResizeObserver | undefined;
     const off: (() => void)[] = [];
-    try {
-      m = createStandardMap(host, {
-        center: lngLat(latest.current.s.geo, { x: SITE.width / 2, y: SITE.height / 2 }) as [number, number],
-        zoom: SITE_ZOOM,
-        t: (k) => latest.current.t(k),
-        onReady: (map) => {
-          ensureOperationalLayers(map);
-          off.push(addMapImages(map));
-          bindInteractions(map, off);
-          map.setPadding(hudPadding(host));
-          setReady(true);
-        },
+    const api = latest.current.session?.api;
+    const start = () => {
+      if (gone) return;
+      try {
+        m = createStandardMap(host, {
+          center: lngLat(latest.current.s.geo, { x: SITE.width / 2, y: SITE.height / 2 }) as [number, number],
+          zoom: SITE_ZOOM,
+          t: (k) => latest.current.t(k),
+          token: () => latest.current.session?.api.token,
+          apiGet: api ? (path) => api.get(path) : undefined,
+          onReady: (map) => {
+            ensureOperationalLayers(map);
+            off.push(addMapImages(map));
+            bindInteractions(map, off);
+            map.setPadding(hudPadding(host));
+            setReady(true);
+          },
+        });
+      } catch (e) {
+        console.error('[map] cannot start', e);
+        setError(latest.current.t('The map needs WebGL 2. Use a current Chrome, Edge or Firefox with graphics acceleration on.'));
+        return;
+      }
+      sm.current = m;
+      m.map.on('webglcontextlost', () => setError(latest.current.t('The map lost its graphics context. Reload the page.')));
+      let logged = 0;
+      m.map.on('error', (ev) => {
+        // Tile servers fail now and then; log a few for diagnosis (tile URLs carry no credentials).
+        if (logged++ < 5) console.warn('[map]', ev.error?.message ?? ev);
       });
-    } catch (e) {
-      console.error('[map] cannot start', e);
-      setError(latest.current.t('The map needs WebGL 2. Use a current Chrome, Edge or Firefox with graphics acceleration on.'));
-      return;
-    }
-    sm.current = m;
-    m.map.on('webglcontextlost', () => setError(latest.current.t('The map lost its graphics context. Reload the page.')));
-    let logged = 0;
-    m.map.on('error', (ev) => {
-      // Tile servers fail now and then; log a few for diagnosis, never URLs with credentials (there are none).
-      if (logged++ < 5) console.warn('[map]', ev.error?.message ?? ev);
-    });
-    const ro = new ResizeObserver(() => sm.current?.map.setPadding(hudPadding(host)));
-    ro.observe(host);
+      ro = new ResizeObserver(() => sm.current?.map.setPadding(hudPadding(host)));
+      ro.observe(host);
+    };
+    // Basemaps the server offers (Google, with the key on the server) join the list before the map exists.
+    if (api)
+      api
+        .get<Basemap[]>('/basemaps')
+        // Absolute URLs (tiles load in a web worker); plain concatenation keeps the {z}/{x}/{y} placeholders as they are.
+        .then((list) => registerBasemaps(list.map((b) => ({ ...b, tiles: b.tiles.map((u) => (u.startsWith('/') ? `${location.origin}${u}` : u)) }))))
+        .catch((e) => console.warn('[map] server basemaps unavailable', e))
+        .finally(start);
+    else start();
     return () => {
-      ro.disconnect();
+      gone = true;
+      ro?.disconnect();
       for (const f of off.splice(0)) f();
-      m.destroy();
+      m?.destroy();
       sm.current = null;
       setReady(false);
     };
