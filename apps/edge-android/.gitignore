@@ -1,0 +1,11 @@
+# Gradle and IDE output
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+# Built by tools/build-natives.sh (Node, ffmpeg, launcher, license texts): large binaries, not committed
+app/src/main/jniLibs/
+app/src/main/assets/licenses/
+# APKs from tools/build-apk.sh
+dist/

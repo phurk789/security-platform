@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- High contrast for a remote's screen outdoors. -->
+    <color name="bg">#FFEEF1F4</color>
+    <color name="card">#FFFFFFFF</color>
+    <color name="text">#FF14181C</color>
+    <color name="muted">#FF55606B</color>
+    <color name="primary">#FF0B5CAD</color>
+    <color name="ok">#FF1B7F3B</color>
+    <color name="warn">#FF9A5600</color>
+    <color name="bad">#FFB3261E</color>
+    <color name="idle">#FF5F6368</color>
+    <color name="ic_launcher_background">#FF0B2A4A</color>
+</resources>

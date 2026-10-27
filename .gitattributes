@@ -3,3 +3,5 @@
 *.sh text eol=lf
 deploy/remote/* text eol=lf
 deploy/edge/*.yml text eol=lf
+apps/edge-android/gradlew text eol=lf
+*.jar binary

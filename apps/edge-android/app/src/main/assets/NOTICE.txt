@@ -1,0 +1,18 @@
+13STORE Edge (Android) runs the 13STORE edge gateway on a SIYI remote.
+
+It includes these third-party programs, unmodified, each under its own license:
+
+- Node.js 18.20.4 for mobile (nodejs-mobile, https://github.com/nodejs-mobile/nodejs-mobile):
+  libnode.so. MIT and the licenses of its bundled parts (see nodejs-LICENSE.txt).
+
+- FFmpeg 8.1.3 (https://ffmpeg.org): libffmpeg.so, the ffmpeg program. Built from the official
+  release tarball (ffmpeg-8.1.3.tar.xz, signature checked) with only the RTSP/RTP input and output,
+  the H.264/H.265 parsers and decoders, and no GPL or non-free parts. License: GNU Lesser General
+  Public License 2.1 or later (see ffmpeg-LGPL-2.1.txt). The exact build script is
+  apps/edge-android/tools/build-natives.sh in the 13STORE repository; the source is available from
+  https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz, or on request from 13STORE.
+
+- LLVM libc++ (libc++_shared.so) from the Android NDK r27c: Apache 2.0 with LLVM exceptions
+  (see android-ndk-libcxx-NOTICE.txt).
+
+- ZXing and ZXing Android Embedded (QR scanning): Apache License 2.0.
