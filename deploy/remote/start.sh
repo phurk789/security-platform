@@ -9,7 +9,8 @@ cd "$EDGE"
 
 if pgrep -f 'edge-gateway.mjs' >/dev/null; then echo "The gateway is already running here. Stop it first: ./stop.sh"; exit 1; fi
 if grep -q 'REPLACE' site.json; then echo "site.json still has the placeholder gateway key."; exit 1; fi
-if grep -q 'REMOTE_IP' site.json mediamtx.android.yml; then echo "Put this remote's Wi-Fi address in site.json (stream.whep) and mediamtx.android.yml (webrtcAdditionalHosts)."; exit 1; fi
+# Comment lines in the MediaMTX config mention REMOTE_IP too; only the settings count.
+if grep -q 'REMOTE_IP' site.json || grep -v '^[[:space:]]*#' mediamtx.android.yml | grep -q 'REMOTE_IP'; then echo "Put this remote's Wi-Fi address in site.json (stream.whep) and mediamtx.android.yml (webrtcAdditionalHosts)."; exit 1; fi
 
 echo "!!! Only one gateway may talk to this remote's datalink: stop the laptop's Start-Edge.ps1 first."
 
