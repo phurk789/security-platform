@@ -1,0 +1,63 @@
+/* Live driving panel (DrivePanel.tsx). */
+.drive .panel-head h2 { display: inline-flex; align-items: center; gap: 6px; }
+.drive-state { margin: 0 0 10px; padding: 6px 9px; border-radius: 6px; font-size: 0.8rem; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.18); }
+.drive-state.tone-ok { border-color: color-mix(in srgb, var(--green) 45%, transparent); color: var(--green); }
+.drive-state.tone-warn { border-color: color-mix(in srgb, var(--amber) 50%, transparent); color: var(--amber); }
+.drive-state.tone-fault, .drive-state.tone-offline { border-color: color-mix(in srgb, var(--red) 50%, transparent); color: var(--red); }
+
+.drive-pad {
+  position: relative;
+  width: min(200px, 100%);
+  aspect-ratio: 1;
+  margin: 2px auto 10px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 0 12%, rgba(0, 0, 0, 0.25) 13% 100%);
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+.drive-pad:active { cursor: grabbing; }
+.drive-axis { position: absolute; background: var(--line); pointer-events: none; }
+.drive-axis.h { left: 8%; right: 8%; top: 50%; height: 1px; }
+.drive-axis.v { top: 8%; bottom: 8%; left: 50%; width: 1px; }
+.drive-knob {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 14px var(--hud-glow, rgba(0, 200, 255, 0.4));
+  pointer-events: none;
+  transition: left 60ms linear, top 60ms linear;
+}
+
+.drive-read { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+.drive-read span { display: flex; flex-direction: column; align-items: center; padding: 5px 0; border: 1px solid var(--line); border-radius: 6px; }
+.drive-read small { font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.drive-read b { font-family: var(--mono); font-size: 0.95rem; }
+
+.drive-stop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--red);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.drive-stop:hover { filter: brightness(1.1); }
+
+.drive-check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 10px; font-size: 0.8rem; color: var(--text-2); }
+.drive-check input { margin-top: 2px; }
+.drive-mode { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.drive-mode input { width: 100%; }
+.drive .fine { margin: 8px 0 0; }

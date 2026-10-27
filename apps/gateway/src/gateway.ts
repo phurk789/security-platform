@@ -166,6 +166,13 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
         a.onCamera(requestId, action as Parameters<NonNullable<Adapter['onCamera']>>[1]);
         return;
       }
+      case 'drive': {
+        const a = byId.get(msg.deviceId);
+        if (!a || !accepted.has(msg.deviceId)) return;
+        if (!a.onDrive) return log.warn(`drive sample for ${msg.deviceId}, which cannot be driven live; ignored`);
+        a.onDrive(msg);
+        return;
+      }
       case 'demo': {
         // `*` targets every adapter (used for a full demo reset).
         const targets = msg.deviceId === '*' ? opts.adapters : [byId.get(msg.deviceId)].filter((a): a is Adapter => !!a);

@@ -2,7 +2,10 @@
 // turns, reports a noisy GNSS fix with an honest accuracy, confirms commands only when the effect
 // is real, stops by itself on link loss, and never resumes or replays on reconnect.
 import {
+  UGV_ACCEL,
+  UGV_BRAKE,
   UGV_FAILSAFE_BRAKE,
+  UGV_SPEED,
   newMotion,
   newSensors,
   readSensors,
@@ -12,14 +15,18 @@ import {
   type Point,
   type SensorState,
   type SrvCommand,
+  type SrvDrive,
+  type TeleopLimits,
   type VehicleMotion,
   INDOOR_UGV_SPEED,
   FLOOR_PATROL_RESUME_MS,
   floorPatrolLoop,
   floorPlan,
 } from '@13store/shared';
+import { DriveState } from '../drive';
 import { admitCommand } from '../sdk';
 import { SimDevice, type SimOptions } from './base';
+import { ComponentTracker } from './components';
 
 /** Link-loss time after which the vehicle stops in place. */
 export const UGV_FAILSAFE_MS = 1_500;
@@ -32,6 +39,10 @@ export const UGV_CONFIRM_MS = 700;
 export const UGV_CONFIRM_TIMEOUT_MS = 8_000;
 /** Physics step of the simulated vehicle (ms), independent of the telemetry rate. */
 const PHYSICS_MS = 100;
+/** Console driving on outdoor simulated UGVs: the real adapter's default caps and dead-man. */
+export const SIM_TELEOP: TeleopLimits = { maxThrottle: 0.3, maxSteer: 0.6, deadmanMs: 500 };
+/** Turn rate at full stick (deg/s), before the steering cap. Tracked vehicles turn on the spot. */
+const DRIVE_YAW_RATE = 90;
 
 type Mode = 'idle' | 'moving' | 'paused';
 
@@ -46,9 +57,20 @@ export class SimUgv extends SimDevice {
   private failsafeTimer?: ReturnType<typeof setTimeout>;
   private physics?: ReturnType<typeof setInterval>;
   private lastPhysics = 0;
+  // console driving
+  private drive = new DriveState(SIM_TELEOP.deadmanMs);
+  /** Signed speed while driven from the console (m/s, negative = reversing). */
+  private driveSpeed = 0;
+  private driveComps?: ComponentTracker;
 
   constructor(seed: Device, opts: SimOptions = {}) {
     super(seed, opts);
+    if (!seed.indoor) {
+      const part = { id: 'drive', name: 'Console driving (simulated)', kind: 'other' as const, status: 'ok' as const, detail: 'Idle' };
+      this.driveComps = new ComponentTracker([part]);
+      this.declaration.teleop = SIM_TELEOP;
+      this.declaration.components = [...(this.declaration.components ?? []), part];
+    }
     this.resetState();
   }
 
@@ -77,6 +99,8 @@ export class SimUgv extends SimDevice {
     this.failsafeAt = undefined;
     this.round = false;
     this.lastCmdAt = -Infinity;
+    this.drive.end();
+    this.driveSpeed = 0;
   }
 
   start(ctx: Parameters<SimDevice['start']>[0]) {
@@ -99,6 +123,11 @@ export class SimUgv extends SimDevice {
     const now = this.ctx.now();
     const dt = Math.max(0, now - this.lastPhysics) / 1000;
     this.lastPhysics = now;
+    if (this.drive.active || this.driveSpeed !== 0) {
+      this.driveStep(now, dt);
+      stepSensors(this.sensors, dt, 'ugv', this.motion.speed);
+      return;
+    }
     this.roundStep(now);
     const r = stepMotion(this.motion, dt);
     stepSensors(this.sensors, dt, 'ugv', this.motion.speed);
@@ -162,7 +191,67 @@ export class SimUgv extends SimDevice {
       quality: r.signal < 45 || r.accuracyM > 2.2 ? 'degraded' : 'good',
       nextCp: this.motion.route && !this.round ? this.motion.nextCp : undefined,
       floorPatrol: this.seed.indoor ? this.round : undefined,
+      components: this.driveComps?.flush(),
     });
+  }
+
+  // ---- console driving --------------------------------------------------------------------
+
+  onDrive(s: SrvDrive) {
+    if (!this.declaration.teleop || this.linkCut) return; // the radio never delivered it
+    if (this.mode !== 'idle') return; // on a route: the route owns the vehicle
+    const r = this.drive.accept(s, this.ctx.now());
+    if (r === 'release') return this.endDrive('released by the console');
+    if (r === 'start') this.ctx.log.info(`${this.declaration.deviceId}: console driving started`);
+  }
+
+  private endDrive(why: string) {
+    if (!this.drive.active) return;
+    this.drive.end();
+    this.ctx.log.info(`${this.declaration.deviceId}: console driving ended (${why})`);
+    this.driveComps?.set('drive', { status: 'ok', detail: `Idle (${why})` });
+  }
+
+  /** Throttle sets a target speed, steering a turn rate; the vehicle accelerates and brakes as on a route. */
+  private driveStep(now: number, dt: number) {
+    const lim = this.declaration.teleop!;
+    const step = this.drive.step(now);
+    if (step?.kind === 'end') this.endDrive(step.reason);
+    let throttle = 0;
+    let steer = 0;
+    if (step && step.kind !== 'end') {
+      if (this.mode !== 'idle') {
+        // A route started: it owns the vehicle now.
+        this.endDrive('a route started');
+        this.driveSpeed = 0;
+        return;
+      }
+      if (step.kind === 'drive') {
+        throttle = step.throttle * lim.maxThrottle;
+        steer = step.steer * lim.maxSteer;
+      }
+      this.driveComps?.set(
+        'drive',
+        step.kind === 'drive'
+          ? { status: 'ok', detail: `Driving from the console · throttle ≤${Math.round(lim.maxThrottle * 100)}% · steering ≤${Math.round(lim.maxSteer * 100)}%` }
+          : step.reason === 'deadman'
+            ? { status: 'warn', detail: 'No stick input from the console: stopped' }
+            : { status: 'warn', detail: 'Stopped: centre the sticks to drive' },
+      );
+    }
+    const m = this.motion;
+    const target = throttle * (m.maxSpeed ?? UGV_SPEED);
+    // Speeding up in the same direction uses the drive acceleration; anything else is braking.
+    const speedingUp = Math.abs(target) > Math.abs(this.driveSpeed) && target * this.driveSpeed >= 0;
+    const dv = (speedingUp ? UGV_ACCEL : UGV_BRAKE) * dt;
+    this.driveSpeed = this.driveSpeed < target ? Math.min(target, this.driveSpeed + dv) : Math.max(target, this.driveSpeed - dv);
+    if (Math.abs(this.driveSpeed) < 1e-3) this.driveSpeed = 0;
+    m.heading = (m.heading + steer * DRIVE_YAW_RATE * dt + 360) % 360;
+    const rad = (m.heading * Math.PI) / 180;
+    m.x += Math.sin(rad) * this.driveSpeed * dt;
+    m.y -= Math.cos(rad) * this.driveSpeed * dt;
+    m.speed = Math.abs(this.driveSpeed);
+    m.intent = 'hold';
   }
 
   protected handleCommand(cmd: SrvCommand) {

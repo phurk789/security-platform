@@ -11,7 +11,7 @@
 //  - On link loss the device must reach a safe state on its own. Nothing received or queued
 //    during the outage may run after the link comes back.
 
-import type { AdapterDeclaration, CameraAction, GwCameraResult, GwCommandUpdate, GwDeviceEvent, GwTelemetry, SrvCommand, SrvDemo } from '@13store/shared';
+import type { AdapterDeclaration, CameraAction, GwCameraResult, GwCommandUpdate, GwDeviceEvent, GwTelemetry, SrvCommand, SrvDemo, SrvDrive } from '@13store/shared';
 import type { CommandLedger } from './ledger';
 import type { PushState } from './videoPush';
 
@@ -84,6 +84,12 @@ export interface Adapter {
    * media server and reports how it goes here, e.g. to show it on the device's camera component.
    */
   onMediaState?(state: PushState): void;
+  /**
+   * Live driving (adapters that declare `teleop`): one stick sample. The adapter applies its caps,
+   * stops the vehicle when samples stop arriving for `teleop.deadmanMs`, and on `release` hands
+   * the controls back to the vehicle's own remote.
+   */
+  onDrive?(sample: SrvDrive): void;
 }
 
 /**

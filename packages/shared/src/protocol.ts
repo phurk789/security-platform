@@ -65,6 +65,16 @@ export interface AdapterDeclaration {
   indoor?: IndoorState;
   /** Equipment on the device. Status starts `pending` until the adapter has talked to the part. */
   components?: DeviceComponent[];
+  /** The device can be driven live from the console (ground vehicles); limits applied by the adapter. */
+  teleop?: TeleopLimits;
+}
+
+/** Live driving from the console: the adapter's own caps (fractions of full stick, 0–1). */
+export interface TeleopLimits {
+  maxThrottle: number;
+  maxSteer: number;
+  /** The vehicle stops when no stick update arrived for this long (ms). */
+  deadmanMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +325,26 @@ export interface MediaPublish {
   publish: string;
 }
 
-export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera;
+/**
+ * Live driving: one stick sample from the operator who holds the drive session. Sent about ten
+ * times a second; the adapter stops the vehicle when they stop coming (dead-man), never replays
+ * old ones, and hands the sticks back to the remote on `release`.
+ */
+export interface SrvDrive {
+  t: 'drive';
+  deviceId: string;
+  seq: number;
+  /** −1 (full reverse) … 1 (full forward), before the adapter's own cap. */
+  throttle: number;
+  /** −1 (full left) … 1 (full right), before the adapter's own cap. */
+  steer: number;
+  /** Server time when it was forwarded (ms). */
+  at: number;
+  /** Stop now and give control back to the remote control. */
+  release?: boolean;
+}
+
+export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera | SrvDrive;
 
 // ---------------------------------------------------------------------------
 // Client API
@@ -501,6 +530,15 @@ export interface ConsoleHello {
 }
 
 export type ConsoleMessage = ConsoleEvent | ConsoleHello;
+
+/** Console → server over the same WebSocket: one stick sample while driving (see SrvDrive). */
+export interface ConsoleDrive {
+  type: 'drive';
+  deviceId: string;
+  seq: number;
+  throttle: number;
+  steer: number;
+}
 
 export interface UserAdminView extends User {
   username: string;

@@ -1197,4 +1197,26 @@ export const TH: Record<string, string> = {
   'Google satellite (official API)': 'ดาวเทียม · Google (API ทางการ)',
   'Google satellite + labels (official API)': 'ดาวเทียม+ป้าย · Google (API ทางการ)',
   'Google Maps roads (official API)': 'ถนน · Google Maps (API ทางการ)',
+  // --- live driving -----------------------------------------------------------
+  Drive: 'ขับ',
+  Throttle: 'คันเร่ง',
+  Steering: 'เลี้ยว',
+  'Driving finished': 'ขับเสร็จแล้ว',
+  'Drive pad: drag up to go forward, sideways to turn': 'แป้นขับ: ลากขึ้นเพื่อเดินหน้า ลากซ้ายขวาเพื่อเลี้ยว',
+  'STOP · end drive': 'หยุด · จบการขับ',
+  'Hold W A S D or the arrow keys, or drag the pad. Space or Esc stops. Release everything and the vehicle stops.':
+    'กด W A S D หรือปุ่มลูกศรค้างไว้ หรือลากแป้น กด Space หรือ Esc เพื่อหยุด ปล่อยทุกปุ่มแล้วรถจะหยุด',
+  '{who} is driving {id}.': '{who} กำลังขับ {id}',
+  'Stop their drive': 'หยุดการขับของผู้นั้น',
+  '{id} is in {mode}. A supervisor must allow live driving (LIVE MANUAL) first.': '{id} อยู่ในโหมด {mode} หัวหน้าต้องอนุญาตให้ขับสด (LIVE MANUAL) ก่อน',
+  'Operators drive vehicles. Your role can watch only.': 'ผู้ควบคุมเป็นผู้ขับรถ บทบาทของคุณดูได้อย่างเดียว',
+  'Telemetry is {f}. Drive only a vehicle reporting live data.': 'ข้อมูลรถเป็น {f} ขับได้เฉพาะรถที่ส่งข้อมูลสดอยู่',
+  '{id} is on a mission. Stop or finish it first.': '{id} กำลังทำภารกิจ หยุดหรือจบภารกิจก่อน',
+  'I can see the vehicle or its video, the area is clear, and a pilot holds the remote ready to disarm.':
+    'ฉันเห็นรถหรือภาพจากรถ พื้นที่โล่ง และมีคนถือรีโมทพร้อมปลดอาวุธ (disarm) ได้ทันที',
+  'Start driving': 'เริ่มขับ',
+  'Limited to {th}% throttle and {st}% steering. Stops {ms} ms after input stops.': 'จำกัดคันเร่ง {th}% เลี้ยว {st}% รถหยุดเองเมื่อไม่มีคำสั่งเกิน {ms} ms',
+  'Reason: who is on site, which checks passed': 'เหตุผล: ใครอยู่หน้างาน ตรวจอะไรผ่านแล้ว',
+  'Allow live driving (LIVE MANUAL)': 'อนุญาตให้ขับสด (LIVE MANUAL)',
+  'Back to SHADOW (no commands)': 'กลับเป็น SHADOW (ไม่สั่งรถ)',
 };

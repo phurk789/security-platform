@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { PAYLOAD_CATALOG, VEHICLE_CATALOG, type CameraMount, type GeoAnchor, type StreamInfo } from '@13store/shared';
 import { defaultAdapters } from '../adapters';
 import type { Adapter } from '../sdk';
-import { MavlinkVehicleAdapter, UNIRC7_DATALINK, type VehicleProfile } from './mavlinkVehicle';
+import { MavlinkVehicleAdapter, UNIRC7_DATALINK, teleopProblem, type TeleopConfig, type VehicleProfile } from './mavlinkVehicle';
 import { SiyiCameraAdapter } from './siyiCamera';
 import { OnvifCameraAdapter, type OnvifCameraConfig } from './onvifCamera';
 import { RosNav2Adapter, type RosNav2Config } from './rosNav2';
@@ -33,6 +33,8 @@ export type DeviceConfig =
       indoor?: { buildingId: string; level: number; origin: { x: number; y: number }; yawDeg?: number };
       /** Onboard camera video through the site media server (shown on the vehicle). Video only: gimbal control needs a siyi-camera device. */
       stream?: StreamInfo;
+      /** UGVs: allow live driving from the console (RC override on steering/throttle). `true` = defaults. */
+      teleop?: true | TeleopConfig;
     }
   | ({ type: 'ros2-nav2' } & RosNav2Config)
   | {
@@ -85,6 +87,11 @@ export function parseSiteConfig(json: unknown): SiteConfig {
     if (d.type === 'mavlink' && d.payload && !PAYLOAD_CATALOG[d.payload.module]) throw new ConfigError(`${d.deviceId}: unknown payload module ${d.payload.module}`);
     if (d.type === 'mavlink' && !['ardupilot-rover', 'ardupilot-copter', 'px4-rover', 'px4-multicopter'].includes(d.profile))
       throw new ConfigError(`${d.deviceId}: unknown profile ${d.profile}`);
+    if (d.type === 'mavlink' && d.teleop) {
+      if (d.kind !== 'ugv') throw new ConfigError(`${d.deviceId}: teleop is for ground vehicles (kind "ugv") only.`);
+      const problem = teleopProblem(d.teleop);
+      if (problem) throw new ConfigError(`${d.deviceId}: ${problem}`);
+    }
     if (d.type === 'siyi-camera' && (!d.pos || !Number.isFinite(d.pos.x) || !Number.isFinite(d.pos.y)))
       throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required.`);
     if (d.type === 'siyi-camera' && d.mount && (!Number.isFinite(d.mount.bearingDeg) || !Number.isFinite(d.mount.heightM)))
@@ -134,6 +141,7 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           flightController: d.flightController,
           radio: d.radio,
           stream: d.stream,
+          teleop: d.teleop,
         }),
       );
     else if (d.type === 'ros2-nav2') out.push(new RosNav2Adapter(d));

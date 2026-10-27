@@ -8,6 +8,9 @@
 //  • Remote arming is OFF by default: the pilot arms on the remote after the pre-op check.
 //  • A command is confirmed only when telemetry shows the effect (moving, or stopped).
 //  • Mode changes made on the remote (manual override) are reported, never fought.
+//  • Live driving (`teleop`, UGVs) overrides only the steering and throttle sticks, only while the
+//    pilot has armed the vehicle in a manual mode, and stops when stick samples stop coming. The
+//    arm switch and the mode switch stay on the remote.
 import dgram from 'node:dgram';
 import { ComponentTracker } from '../adapters/components';
 import { PassThrough } from 'node:stream';
@@ -24,10 +27,13 @@ import {
   type GeoAnchor,
   type Point,
   type SrvCommand,
+  type SrvDrive,
   type StreamInfo,
+  type TeleopLimits,
 } from '@13store/shared';
 import { CommandLedger, admitCommand, type Adapter, type AdapterContext } from '../sdk';
 import type { PushState } from '../videoPush';
+import { DriveState } from '../drive';
 
 export type VehicleProfile = 'ardupilot-rover' | 'ardupilot-copter' | 'px4-rover' | 'px4-multicopter';
 
@@ -68,7 +74,65 @@ export interface MavlinkVehicleConfig {
    * person checks the picture.
    */
   stream?: StreamInfo;
+  /**
+   * Live driving from the console (UGVs only): stick samples become RC_CHANNELS_OVERRIDE on the
+   * steering and throttle channels. `true` takes the defaults (TELEOP_DEFAULTS).
+   */
+  teleop?: true | TeleopConfig;
 }
+
+/** Live driving from the console. Every field is optional; see TELEOP_DEFAULTS. */
+export interface TeleopConfig {
+  /** Largest throttle the console may ask for, as a fraction of full stick (0–1). */
+  maxThrottle?: number;
+  /** Largest steering, as a fraction of full stick (0–1). */
+  maxSteer?: number;
+  /** The vehicle stops when no stick sample arrived for this long (ms, 100–3000). */
+  deadmanMs?: number;
+  /** RC input channels for steering and throttle (ArduPilot RCMAP_ROLL / RCMAP_THROTTLE). */
+  steerChannel?: number;
+  throttleChannel?: number;
+  /** Stick centre and full travel either side of it (µs). */
+  center?: number;
+  travel?: number;
+  /** Flip a direction when right/forward on the console comes out left/backward on the vehicle. */
+  reverseSteer?: boolean;
+  reverseThrottle?: boolean;
+}
+
+export const TELEOP_DEFAULTS: Required<TeleopConfig> = {
+  maxThrottle: 0.3,
+  maxSteer: 0.6,
+  deadmanMs: 500,
+  steerChannel: 1,
+  throttleChannel: 3,
+  center: 1500,
+  travel: 400,
+  reverseSteer: false,
+  reverseThrottle: false,
+};
+
+/** What is wrong with a teleop setting, or undefined when it is fine. */
+export function teleopProblem(t: unknown): string | undefined {
+  if (t === undefined || t === true) return undefined;
+  if (!t || typeof t !== 'object') return 'teleop must be true or an object';
+  const c = { ...TELEOP_DEFAULTS, ...(t as TeleopConfig) };
+  const num = (v: unknown, lo: number, hi: number) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+  if (!num(c.maxThrottle, 0.01, 1) || !num(c.maxSteer, 0.01, 1)) return 'teleop.maxThrottle and maxSteer must be between 0.01 and 1';
+  if (!num(c.deadmanMs, 100, 3000)) return 'teleop.deadmanMs must be between 100 and 3000';
+  if (!Number.isInteger(c.steerChannel) || !Number.isInteger(c.throttleChannel) || !num(c.steerChannel, 1, 18) || !num(c.throttleChannel, 1, 18))
+    return 'teleop.steerChannel and throttleChannel must be RC channels 1–18';
+  if (c.steerChannel === c.throttleChannel) return 'teleop.steerChannel and throttleChannel must differ';
+  if (!num(c.center, 1000, 2000) || !num(c.travel, 50, 500) || c.center - c.travel < 800 || c.center + c.travel > 2200)
+    return 'teleop.center ± travel must stay within 800–2200 µs';
+  return undefined;
+}
+
+/** RC overrides go out this often while driving (ArduPilot drops them after RC_OVERRIDE_TIME). */
+const DRIVE_TICK_MS = 100;
+/** RC_CHANNELS_OVERRIDE values: channels 1–8 ignore 65535 and release on 0; 9–18 ignore 0 and release on 65534. */
+const rcIgnore = (ch: number) => (ch <= 8 ? 65535 : 0);
+const rcRelease = (ch: number) => (ch <= 8 ? 0 : 65534);
 
 /** UniRC 7 / 7 Pro datalink UDP server (SIYI manual: QGroundControl "server address"). */
 export const UNIRC7_DATALINK = { host: '192.168.144.20', port: 19856 };
@@ -89,6 +153,7 @@ const MSG = {
   MISSION_REQUEST_INT: 51,
   VFR_HUD: 74,
   COMMAND_ACK: 77,
+  RC_CHANNELS_OVERRIDE: 70,
   RADIO_STATUS: 109,
   STATUSTEXT: 253,
 };
@@ -191,9 +256,23 @@ export class MavlinkVehicleAdapter implements Adapter {
   private wasStale = false;
   private lastTel = 0;
 
+  // live driving
+  private teleop?: Required<TeleopConfig>;
+  private drive = new DriveState(TELEOP_DEFAULTS.deadmanMs);
+  /** True while RC overrides are going out (the pilot's sticks are not in charge). */
+  private overriding = false;
+  /** Overrides have gone out to an armed vehicle at least once (the part is then known to work). */
+  private droveOnce = false;
+
   constructor(private cfg: MavlinkVehicleConfig) {
     this.proto = new MavLinkProtocolV2(cfg.gcsSystemId ?? 255, 190);
     const uav = cfg.kind === 'uav';
+    if (cfg.teleop && !uav) {
+      const problem = teleopProblem(cfg.teleop);
+      if (problem) throw new Error(`${cfg.deviceId}: ${problem}`);
+      this.teleop = { ...TELEOP_DEFAULTS, ...(cfg.teleop === true ? {} : cfg.teleop) };
+      this.drive = new DriveState(this.teleop.deadmanMs);
+    }
     this.comps = new ComponentTracker([
       { id: 'fc', name: cfg.flightController ?? 'Flight controller (MAVLink)', kind: 'flight_controller', status: 'pending', detail: 'Waiting for the first heartbeat' },
       ...(cfg.indoor ? [] : [{ id: 'gnss', name: 'GNSS receiver', kind: 'gnss' as const, status: 'pending' as const, detail: 'Waiting for GPS_RAW_INT' }]),
@@ -213,6 +292,17 @@ export class MavlinkVehicleAdapter implements Adapter {
                 ? `Waiting to push ${cfg.stream.rtsp ?? 'the camera'} to the platform media server`
                 : `Video through the site media server from ${cfg.stream.rtsp ?? 'the camera'}; check the picture in the console`,
               stream: cfg.stream,
+            },
+          ]
+        : []),
+      ...(this.teleop
+        ? [
+            {
+              id: 'drive',
+              name: 'Console driving (RC override)',
+              kind: 'other' as const,
+              status: 'pending' as const,
+              detail: `Not driven from the console yet · steering ch${this.teleop.steerChannel}, throttle ch${this.teleop.throttleChannel}`,
             },
           ]
         : []),
@@ -239,11 +329,12 @@ export class MavlinkVehicleAdapter implements Adapter {
       catalogId: cfg.catalogId && VEHICLE_CATALOG[cfg.catalogId] ? cfg.catalogId : undefined,
       indoor: cfg.indoor ? { buildingId: cfg.indoor.buildingId, level: cfg.indoor.level, positioning: 'slam' } : undefined,
       payloads: cfg.payload && PAYLOAD_CATALOG[cfg.payload.module] ? [cfg.payload.module] : undefined,
+      teleop: this.teleop ? ({ maxThrottle: this.teleop.maxThrottle, maxSteer: this.teleop.maxSteer, deadmanMs: this.teleop.deadmanMs } satisfies TeleopLimits) : undefined,
       commands: ['start', 'pause', 'resume', 'stop'],
       components: this.comps.list(),
       units: { position: 'site-m', altitude: 'm-site-datum', speed: 'm/s', battery: 'percent' },
       rateMs: 1000,
-      limitations: `Flight controller via ${cfg.link.mode === 'client' ? `${cfg.link.host}:${cfg.link.port}` : `UDP :${cfg.link.port}`}. ${cfg.allowRemoteArm ? 'Remote arming enabled.' : 'Arm on the remote; the platform will not arm.'}`,
+      limitations: `Flight controller via ${cfg.link.mode === 'client' ? `${cfg.link.host}:${cfg.link.port}` : `UDP :${cfg.link.port}`}. ${cfg.allowRemoteArm ? 'Remote arming enabled.' : 'Arm on the remote; the platform will not arm.'}${this.teleop ? ` Console driving overrides steering and throttle only, while armed in a manual mode; it stops ${this.teleop.deadmanMs} ms after stick samples stop.` : ''}`,
       linkLossBehavior: uav
         ? 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE / NAV_DLL_ACT): RTL or loiter as configured on the vehicle.'
         : 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE, FS_ACTION=Hold): stop in place as configured on the vehicle.',
@@ -272,10 +363,12 @@ export class MavlinkVehicleAdapter implements Adapter {
       setInterval(() => this.sendGcsHeartbeat(), 1000),
       setInterval(() => this.tick(), 250),
     );
+    if (this.teleop) this.timers.push(setInterval(() => this.driveTick(), DRIVE_TICK_MS));
     this.sendGcsHeartbeat();
   }
 
   stop() {
+    if (this.drive.active || this.overriding) this.endDrive('gateway stopping');
     this.timers.forEach(clearInterval);
     this.timers = [];
     this.sock?.close();
@@ -293,6 +386,108 @@ export class MavlinkVehicleAdapter implements Adapter {
       status: s.status === 'pushing' ? (hevc ? 'warn' : 'ok') : s.status === 'missing' ? 'fault' : s.status === 'stopped' ? 'offline' : 'warn',
       detail: s.status === 'pushing' && hevc ? 'Pushing H.265, which browsers cannot play: set the camera main stream to H.264' : s.detail,
     });
+  }
+
+  // ---- live driving ------------------------------------------------------------------
+  //
+  // The server forwards the driver's stick samples (about ten a second). Each one is capped and
+  // sent as RC_CHANNELS_OVERRIDE on the steering and throttle channels only, so the arm switch and
+  // the mode switch stay with the pilot. When samples stop for `deadmanMs` the sticks go to neutral;
+  // DRIVE_NEUTRAL_HOLD_MS later they are handed back to the remote.
+
+  onDrive(s: SrvDrive) {
+    if (!this.teleop || !this.ctx) return;
+    const r = this.drive.accept(s, this.ctx.now());
+    if (r === 'release') return this.endDrive('released by the console');
+    if (r === 'late') return;
+    if (r === 'start') {
+      this.ctx.log.info(`${this.cfg.deviceId}: console driving started`);
+      this.setPositionRate(250_000);
+    }
+    this.driveTick();
+  }
+
+  /** Why the vehicle may not be driven right now, or undefined when it may. */
+  private driveBlocked(now: number): string | undefined {
+    if (!this.lastHeartbeat || now - this.lastHeartbeat > LINK_STALE_MS) return 'No heartbeat from the flight controller';
+    const M = MODES[this.cfg.profile];
+    if (!M.manual.includes(this.mode)) return `The vehicle is in ${M.name(this.mode)}: switch it to MANUAL on the remote`;
+    if (!this.armed) return 'The vehicle is disarmed: the pilot arms it on the remote';
+    return undefined;
+  }
+
+  private driveTick() {
+    const t = this.teleop;
+    if (!t || !this.drive.active) return;
+    const now = this.ctx.now();
+    const step = this.drive.step(now)!;
+    if (step.kind === 'end') return this.endDrive(step.reason);
+    const blocked = this.driveBlocked(now);
+    if (blocked) {
+      // Never fight the vehicle or the pilot: give the sticks back and say why.
+      if (this.overriding) this.releaseSticks();
+      this.drive.interrupt();
+      this.comps.set('drive', { status: 'warn', detail: `Not driving. ${blocked}.` });
+      return;
+    }
+    if (step.kind === 'drive') this.sendSticks(step.throttle, step.steer);
+    else this.sendSticks(0, 0);
+    this.droveOnce = true;
+    this.comps.set(
+      'drive',
+      step.kind === 'drive'
+        ? { status: 'ok', detail: `Driving from the console · throttle ≤${Math.round(t.maxThrottle * 100)}% · steering ≤${Math.round(t.maxSteer * 100)}%` }
+        : step.reason === 'deadman'
+          ? { status: 'warn', detail: 'No stick input from the console: stopped' }
+          : { status: 'warn', detail: 'Stopped: centre the sticks to drive' },
+    );
+  }
+
+  private endDrive(why: string) {
+    const was = this.drive.active;
+    this.drive.end();
+    if (this.overriding) {
+      this.sendSticks(0, 0); // stop first, then hand the sticks back
+      this.releaseSticks();
+    }
+    if (was) {
+      this.ctx.log.info(`${this.cfg.deviceId}: console driving ended (${why})`);
+      this.setPositionRate(1_000_000);
+    }
+    this.comps.set('drive', { status: this.droveOnce ? 'ok' : 'pending', detail: `Idle, the remote has the sticks (${why})` });
+  }
+
+  /** Throttle and steering in −1…1 of the capped range → RC override on those two channels. */
+  private sendSticks(throttle: number, steer: number) {
+    const t = this.teleop!;
+    const pwm = (v: number, cap: number, reverse: boolean) => Math.round(t.center + (reverse ? -v : v) * cap * t.travel);
+    this.sendOverride({ [t.steerChannel]: pwm(steer, t.maxSteer, t.reverseSteer), [t.throttleChannel]: pwm(throttle, t.maxThrottle, t.reverseThrottle) });
+    this.overriding = true;
+  }
+
+  /** Hand the two channels back to the remote. Sent twice (UDP); ArduPilot also drops overrides after RC_OVERRIDE_TIME. */
+  private releaseSticks() {
+    const t = this.teleop!;
+    const msg = { [t.steerChannel]: rcRelease(t.steerChannel), [t.throttleChannel]: rcRelease(t.throttleChannel) };
+    this.sendOverride(msg);
+    this.sendOverride(msg);
+    this.overriding = false;
+  }
+
+  /** RC_CHANNELS_OVERRIDE with the given channels set and every other channel left alone. */
+  private sendOverride(values: Record<number, number>) {
+    const o = new common.RcChannelsOverride();
+    o.targetSystem = this.sys;
+    o.targetComponent = this.comp;
+    const raw = o as unknown as Record<string, number>;
+    for (let ch = 1; ch <= 18; ch++) raw[`chan${ch}Raw`] = values[ch] ?? rcIgnore(ch);
+    this.send(o);
+  }
+
+  /** Position and speed come faster while someone drives (the map and speed readout keep up). */
+  private setPositionRate(intervalUs: number) {
+    if (!this.sys) return;
+    for (const id of [MSG.GLOBAL_POSITION_INT, MSG.VFR_HUD]) this.commandLong(CMD.SET_MESSAGE_INTERVAL, [id, intervalUs]);
   }
 
   // ---- transport -----------------------------------------------------------------
@@ -508,7 +703,7 @@ export class MavlinkVehicleAdapter implements Adapter {
       this.comps.set('fc', { status: 'offline', detail: 'No heartbeat' });
       return; // no telemetry → the platform shows STALE, then OFFLINE
     }
-    if (now - this.lastTel >= 1000) {
+    if (now - this.lastTel >= (this.drive.active ? 250 : 1000)) {
       this.lastTel = now;
       // The vehicle is alive (heartbeat), so it always reports; the position only while it is trusted.
       const havePos = !!this.pos && now - this.posAt <= POS_STALE_MS;
