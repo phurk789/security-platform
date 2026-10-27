@@ -48,6 +48,7 @@ import {
   type SrvCommand,
   type SrvDemo,
   type SrvCamera,
+  type SrvDrive,
   type GwCameraResult,
   sanitizeCameraAction,
   describeCameraAction,
@@ -165,13 +166,27 @@ export interface BusMessage {
 
 /** Transport to edge gateways, implemented by the gateway hub. */
 export interface GatewayLink {
-  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera): boolean;
+  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera | SrvDrive): boolean;
   /** Gateways connected right now and the devices each holds. */
   connected?(orgId: string): { gatewayId: string; devices: string[] }[];
 }
 
+/** Stick samples closer together than this are dropped (25 per second at most). */
+export const DRIVE_MIN_INTERVAL_MS = 40;
+
 /** A gateway's credential to publish one device's video into the platform's media server. */
 export const MEDIA_PUBLISH_TTL_MS = 7 * 24 * 3600_000;
+
+/** A gateway's declared drive limits, kept only when they make sense (caps 0–1, dead-man 100 ms–3 s). */
+export function sanitizeTeleop(raw: unknown): Device['teleop'] {
+  const t = raw as { maxThrottle?: unknown; maxSteer?: unknown; deadmanMs?: unknown } | undefined;
+  if (!t || typeof t !== 'object') return undefined;
+  const frac = (v: unknown) => (typeof v === 'number' && v > 0 && v <= 1 ? v : undefined);
+  const maxThrottle = frac(t.maxThrottle);
+  const maxSteer = frac(t.maxSteer);
+  const deadmanMs = typeof t.deadmanMs === 'number' && t.deadmanMs >= 100 && t.deadmanMs <= 3000 ? t.deadmanMs : undefined;
+  return maxThrottle && maxSteer && deadmanMs ? { maxThrottle, maxSteer, deadmanMs } : undefined;
+}
 
 /** Path of a device's pushed stream on the platform's media server: UGV-01 → ugv-01. */
 export function pushPath(deviceId: string) {
@@ -207,6 +222,8 @@ export class Platform {
   private devices = new Map<string, Device & { orgId: string; siteId: string }>();
   private lastFresh = new Map<string, Freshness>();
   private lastSeq = new Map<string, number>();
+  /** Live drive sessions by device id (memory only: a restart ends them). */
+  private driving = new Map<string, { userId: string; orgId: string; since: number; seq: number; lastAt: number; ownedBefore: boolean }>();
   /** Geofences per site (loaded on first use; defaults seeded for a new site). */
   private fenceCache = new Map<string, Geofence[]>();
   /** Fence ids each vehicle is currently inside of. */
@@ -397,7 +414,9 @@ export class Platform {
     for (const r of rows) {
       const d = JSON.parse(r.data) as Device;
       // A restart never raises a mode: a missing or unknown value reads as SHADOW (ADR-006 §5).
-      this.devices.set(d.id, { ...d, mode: modeOf(d), orgId: r.org_id, siteId: r.site_id });
+      // Nobody drives a vehicle across a restart: drive sessions live in memory only.
+      const { drivenBy: _drivenBy, ...rest } = d;
+      this.devices.set(d.id, { ...rest, mode: modeOf(d), orgId: r.org_id, siteId: r.site_id });
     }
   }
 
@@ -1004,6 +1023,8 @@ export class Platform {
       this.saveDevice(d);
       auditId = this.audit(a, 'device.mode_change', d.id, 'ok', `${from} → ${to}: ${reason}`).id;
     });
+    // Live driving needs LIVE_MANUAL: any demotion ends it at once.
+    if (this.driving.has(d.id) && to !== 'LIVE_MANUAL') this.endDrive(d.id, a, `mode changed to ${to}`);
     const running = to === 'SHADOW' && this.activeMission(d.id)?.status === 'executing';
     this.publish({
       orgId: d.orgId,
@@ -1433,6 +1454,8 @@ export class Platform {
           ? `${d.id} is ${mode}. Automatic ${type} needs LIVE_ASSISTED.`
           : `${d.id} is in ${mode} mode. A supervisor must promote it to LIVE_MANUAL before ${type}. Stop and pause still work.`,
       );
+    // A route and a person on the sticks would both steer the vehicle.
+    if ((type === 'start' || type === 'resume') && this.driving.has(d.id)) deny('conflict', `${d.id} is being driven from the console. End the drive first.`);
     if (d.controlOwner !== a.userId)
       deny(
         'control_held',
@@ -1585,6 +1608,7 @@ export class Platform {
         indoor: sanitizeIndoor(decl.indoor) ?? d.indoor,
         payloads: Array.isArray(decl.payloads) ? decl.payloads.filter((p) => typeof p === 'string' && PAYLOAD_CATALOG[p]) : d.payloads,
         components: comps?.components ?? d.components,
+        teleop: d.kind === 'ugv' ? sanitizeTeleop(decl.teleop) : undefined,
       });
       d.mode = modeOf(d);
       this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
@@ -1617,7 +1641,96 @@ export class Platform {
   }
 
   gatewayClosed(orgId: string, gatewayId: string) {
-    this.audit(this.systemActor(orgId, 'gateway', gatewayId), 'gateway.disconnect', gatewayId);
+    const sys = this.systemActor(orgId, 'gateway', gatewayId);
+    for (const id of [...this.driving.keys()]) {
+      const holder = (this.db.prepare('SELECT gateway_id FROM devices WHERE id = ?').get(id) as { gateway_id: string | null } | undefined)?.gateway_id;
+      if (holder === gatewayId) this.endDrive(id, sys, 'gateway disconnected');
+    }
+    this.audit(sys, 'gateway.disconnect', gatewayId);
+  }
+
+  // ---- live driving from the console --------------------------------------------------
+  //
+  // A vehicle in LIVE_MANUAL (simulators in SIMULATION) that declares `teleop` can be driven by the
+  // operator who takes a drive session: it also takes control of the device (F08). Stick samples
+  // come over the console WebSocket and go straight to the gateway, which caps them, turns them into
+  // RC overrides and stops the vehicle when they stop coming. Start, stop and refusals are audited;
+  // the samples themselves are not (ten a second).
+
+  /** Opens a drive session: the caller holds control and may send stick samples. */
+  startDriving(a: Actor, deviceId: string) {
+    this.require(a, 'device.command', deviceId);
+    const d = this.getDevice(a, deviceId);
+    const deny = (status: number, code: string, why: string): never => {
+      this.audit(a, 'drive.start', d.id, 'denied', why);
+      return fail(status, code, why);
+    };
+    if (d.kind !== 'ugv' || !d.teleop) return deny(409, 'not_enabled', `${d.id} cannot be driven from the console (its gateway does not offer it).`);
+    const mode = modeOf(d);
+    if (mode !== 'LIVE_MANUAL' && mode !== 'SIMULATION')
+      return deny(409, 'mode_locked', `${d.id} is in ${mode}. A supervisor must promote it to LIVE_MANUAL before anyone drives it.`);
+    const fresh = freshnessAt(this.now(), d);
+    if (fresh !== 'live') return deny(409, 'stale_telemetry', `${d.id} telemetry is ${fresh}. Drive only a vehicle reporting live data.`);
+    const m = this.activeMission(d.id);
+    if (m && ['assigned', 'executing', 'paused'].includes(m.status)) return deny(409, 'conflict', `${d.id} is on mission ${m.id}. Stop or finish it first.`);
+    const cur = this.driving.get(d.id);
+    if (cur && cur.userId !== a.userId) return deny(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
+    if (d.controlOwner && d.controlOwner !== a.userId) return deny(409, 'control_held', `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`);
+    if (!cur) this.driving.set(d.id, { userId: a.userId!, orgId: d.orgId, since: this.now(), seq: -1, lastAt: 0, ownedBefore: d.controlOwner === a.userId });
+    d.controlOwner = a.userId;
+    d.drivenBy = a.userId;
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, 'drive.start', d.id, 'ok', `${mode} · limits throttle ${Math.round(d.teleop!.maxThrottle * 100)}% steer ${Math.round(d.teleop!.maxSteer * 100)}%`);
+    });
+    return this.publicDevice(d);
+  }
+
+  /** Ends a drive session: the driver, or a supervisor/administrator stopping someone else's. */
+  stopDriving(a: Actor, deviceId: string) {
+    const d = this.getDevice(a, deviceId);
+    const cur = this.driving.get(d.id);
+    if (!cur) return this.publicDevice(d);
+    if (cur.userId !== a.userId && a.role !== 'supervisor' && a.role !== 'admin') fail(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
+    this.endDrive(d.id, a, cur.userId === a.userId ? 'driver stopped' : `stopped by ${a.name}`);
+    return this.publicDevice(d);
+  }
+
+  /** One stick sample from the driver (WebSocket). False when it is not theirs to send or too soon. */
+  drive(a: Actor, msg: { deviceId?: unknown; seq?: unknown; throttle?: unknown; steer?: unknown }): boolean {
+    const id = String(msg.deviceId ?? '');
+    const cur = this.driving.get(id);
+    if (!cur || cur.userId !== a.userId || cur.orgId !== a.orgId) return false;
+    const seq = Number(msg.seq);
+    if (!Number.isInteger(seq) || seq <= cur.seq) return false;
+    const now = this.now();
+    if (now - cur.lastAt < DRIVE_MIN_INTERVAL_MS) return false;
+    const clamp = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0);
+    cur.seq = seq;
+    cur.lastAt = now;
+    return this.gateways.send(cur.orgId, id, { t: 'drive', deviceId: id, seq, throttle: clamp(msg.throttle), steer: clamp(msg.steer), at: now });
+  }
+
+  /** The driver's console went away: stop everything they were driving. */
+  stopAllDriving(a: Actor, why: string) {
+    for (const [id, cur] of [...this.driving]) if (cur.userId === a.userId && cur.orgId === a.orgId) this.endDrive(id, a, why);
+  }
+
+  private endDrive(deviceId: string, a: Actor, why: string) {
+    const cur = this.driving.get(deviceId);
+    if (!cur) return;
+    this.driving.delete(deviceId);
+    // Tell the gateway at once (it would also stop on its own when samples stop coming).
+    this.gateways.send(cur.orgId, deviceId, { t: 'drive', deviceId, seq: cur.seq + 1, throttle: 0, steer: 0, at: this.now(), release: true });
+    const d = this.devices.get(deviceId);
+    if (!d) return;
+    d.drivenBy = undefined;
+    const m = this.activeMission(deviceId);
+    if (!cur.ownedBefore && !m && d.controlOwner === cur.userId) d.controlOwner = undefined;
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, 'drive.stop', d.id, 'ok', `${this.userName(cur.orgId, cur.userId)} · ${why}`);
+    });
   }
 
   private expireUndelivered(deviceId: string, why: string) {
@@ -2251,6 +2364,8 @@ export class Platform {
       const f = freshnessAt(now, d);
       const before = this.lastFresh.get(d.id);
       this.lastFresh.set(d.id, f);
+      // A driver who cannot see live data must not keep driving.
+      if (f !== 'live' && this.driving.has(d.id)) this.endDrive(d.id, this.systemActor(d.orgId, 'system', 'Safety stop'), `telemetry ${f}`);
       if (before === undefined || before === f) continue;
       this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'device', device: this.publicDevice(d) } });
       if (f === 'offline')

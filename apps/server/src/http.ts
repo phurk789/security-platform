@@ -368,6 +368,13 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.post('/api/v1/devices/:id/service', async (req: Req) => p.recordService(A(req), req.params.id, String(body(req).note ?? '')));
   app.patch('/api/v1/devices/:id/stats', async (req: Req) => p.updateDeviceStats(A(req), req.params.id, body(req) as any));
   app.post('/api/v1/devices/:id/release', async (req: Req) => p.release(A(req), req.params.id));
+  // Live driving: start / stop a drive session. Stick samples then go over the console WebSocket.
+  app.post('/api/v1/devices/:id/drive', async (req: Req) => {
+    const action = body(req).action;
+    if (action === 'start') return p.startDriving(A(req), req.params.id);
+    if (action === 'stop') return p.stopDriving(A(req), req.params.id);
+    throw new ApiError(400, 'invalid', 'action must be start or stop.');
+  });
   app.get('/api/v1/devices/:id/telemetry', async (req: Req) => p.telemetryHistory(A(req), req.params.id, num(req.query.from, p.now() - 3600_000)!, num(req.query.to, p.now())!));
   app.post('/api/v1/devices/:id/camera', async (req: Req) => p.cameraControl(A(req), req.params.id, body(req)));
   app.post('/api/v1/devices/:id/aim', async (req: Req) => p.aimCamera(A(req), req.params.id, body(req)));
@@ -613,7 +620,16 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
       if (actor && !accounts.authenticate(token)) socket.close(4401, 'session ended');
     }, 30_000);
     socket.on('message', (raw) => {
-      if (actor) return;
+      if (actor) {
+        // After sign-in the console sends only stick samples while driving (ConsoleDrive).
+        try {
+          const msg = JSON.parse(String(raw)) as { type?: string };
+          if (msg.type === 'drive') p.drive(actor, msg as Record<string, unknown>);
+        } catch {
+          /* ignore malformed samples; the vehicle stops on its own when they stop */
+        }
+        return;
+      }
       try {
         const msg = JSON.parse(String(raw)) as { type: string; token?: string };
         const auth = msg.type === 'auth' ? accounts.authenticate(msg.token) : null;
@@ -629,7 +645,15 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
       }
     });
     socket.on('close', () => {
-      if (actor) wsClients--;
+      if (actor) {
+        wsClients--;
+        // A driver whose console disconnects stops driving at once.
+        try {
+          p.stopAllDriving(actor, 'console disconnected');
+        } catch (e) {
+          console.warn('[drive] stop on disconnect failed:', e instanceof Error ? e.message : e);
+        }
+      }
       clearTimeout(timer);
       clearInterval(recheck);
       p.bus.off('event', onEvent);

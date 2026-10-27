@@ -100,6 +100,28 @@ Rules:
 
 Any resume comes from the operator as a new command with a new `commandId`.
 
+### 4.1 Live driving (optional, ground vehicles)
+
+An adapter that declares `teleop: { maxThrottle, maxSteer, deadmanMs }` can be driven from the console.
+The server lets an operator open a drive session only in `LIVE_MANUAL` (simulators: `SIMULATION`), with
+fresh telemetry and no running mission, and then forwards their stick samples (about ten a second):
+
+```json
+{ "t": "drive", "deviceId": "UGV-01", "seq": 42, "throttle": 0.6, "steer": -0.2, "at": 1792188209870 }
+```
+
+`throttle` and `steer` are −1…1 of full stick, before the adapter's caps. The adapter must:
+
+- apply its own caps (the declared `maxThrottle` / `maxSteer`), never trusting the server for them;
+- ignore samples with a `seq` at or below the last one it applied;
+- stop the vehicle when no sample arrived for `deadmanMs`, and hand control back to the vehicle's own remote soon after;
+- after any stop (dead-man, disarmed, mode changed) obey only once a centred sample arrives;
+- on `"release": true`, stop and hand control back at once;
+- never fight the pilot: drive only while the vehicle is armed in a manual mode, and let go when the pilot changes mode.
+
+`apps/gateway/src/drive.ts` (`DriveState`) implements the ordering, dead-man and centring rules; the MAVLink
+adapter turns samples into `RC_CHANNELS_OVERRIDE` on the steering and throttle channels only.
+
 ## 5. Events
 
 `kind` is one of `checkpoint`, `route_complete`, `snapshot`, `failsafe_stop` or `fault`. A `snapshot` can
