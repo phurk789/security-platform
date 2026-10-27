@@ -16,12 +16,15 @@ arch="$(uname -m)"
 if [ "$arch" != "aarch64" ]; then echo "This kit needs aarch64 (64-bit ARM); this device is $arch."; exit 1; fi
 
 echo "--- packages (Node.js LTS, curl, tar, procps)"
-# upgrade, not just update: a new Node.js needs the current libc++, otherwise it fails with
-# 'CANNOT LINK EXECUTABLE "node": cannot locate symbol ...' (seen on a UniRC 7 Pro, 2026-10-27).
-pkg upgrade -y
-pkg install -y libc++ nodejs-lts curl tar procps
-if ! node --version >/dev/null 2>&1; then
-  echo "node does not start. Run: pkg upgrade -y && pkg install -y libc++ nodejs-lts   then this script again."
+# Full upgrade first, with apt itself: a new Node.js needs the current libc++ and OpenSSL. A
+# partial upgrade broke both node and curl on a UniRC 7 Pro (2026-10-27): 'CANNOT LINK EXECUTABLE
+# ... cannot locate symbol', and then pkg (which runs curl) failed too. If apt cannot find a mirror,
+# run termux-change-repo and pick a mirror group.
+apt update
+apt full-upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold
+apt install -y libc++ nodejs-lts curl tar procps
+if ! node --version >/dev/null 2>&1 || ! curl --version >/dev/null 2>&1; then
+  echo "node or curl does not start. Run: apt update && apt full-upgrade -y   then this script again."
   exit 1
 fi
 major="$(node -p 'process.versions.node.split(".")[0]')"
