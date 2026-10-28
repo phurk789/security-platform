@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Edge" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/primary</item>
+        <item name="android:colorAccent">@color/primary</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/primary</item>
+        <item name="android:textColorPrimary">@color/text</item>
+    </style>
+
+    <!-- Base of the Edge.* text and card styles (a dotted name implies this parent). -->
+    <style name="Edge" />
+
+    <style name="Edge.Card">
+        <item name="android:background">@drawable/card</item>
+        <item name="android:padding">16dp</item>
+        <item name="android:layout_marginTop">14dp</item>
+        <item name="android:elevation">1dp</item>
+    </style>
+
+    <style name="Edge.Title">
+        <item name="android:textSize">26sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/text</item>
+    </style>
+
+    <style name="Edge.Heading">
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/text</item>
+    </style>
+
+    <style name="Edge.Label">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:textColor">@color/muted</item>
+    </style>
+
+    <style name="Edge.Body">
+        <item name="android:textSize">17sp</item>
+        <item name="android:textColor">@color/text</item>
+    </style>
+
+    <style name="Edge.Status">
+        <item name="android:textSize">19sp</item>
+        <item name="android:lineSpacingExtra">4dp</item>
+        <item name="android:textColor">@color/text</item>
+    </style>
+
+    <style name="Edge.Muted">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/muted</item>
+    </style>
+
+    <style name="Edge.BigButton" parent="@android:style/Widget.Material.Button.Colored">
+        <item name="android:textSize">22sp</item>
+        <item name="android:minHeight">72dp</item>
+        <item name="android:textColor">#FFFFFFFF</item>
+    </style>
+
+    <style name="Edge.SmallButton" parent="@android:style/Widget.Material.Button">
+        <item name="android:textSize">15sp</item>
+    </style>
+</resources>

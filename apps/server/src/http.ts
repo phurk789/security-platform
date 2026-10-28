@@ -13,6 +13,7 @@ import { GOOGLE_STYLES, GoogleTiles, tileXYZ } from './googleTiles';
 import { Metrics } from './metrics';
 import { OidcClient, OidcError } from './oidc';
 import { openapi } from './openapi';
+import { EdgePairing } from './pairing';
 import { ApiError, Platform, type Actor, type BusMessage } from './platform';
 import { PushService, initVapid, registerPushRoutes } from './push';
 import { DEMO_ORG, resetDemo } from './seed';
@@ -40,6 +41,7 @@ const PUBLIC = new Set([
   '/api/v1/gateway',
   '/api/v1/ws',
   '/api/v1/media/auth',
+  '/api/v1/edge/pair',
 ]);
 
 function bearer(req: FastifyRequest) {
@@ -52,6 +54,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   if (secrets.source === 'generated') console.log(`[server] generated secrets key at ${secrets.file}; keep it with the backups`);
   const p = new Platform(db, cfg);
   const accounts = new Accounts(db, p, cfg.sessionTtlMs);
+  const pairing = new EdgePairing(db, p, accounts, (orgId) => (cfg.env === 'pilot' ? 'pilot' : orgEnv(db, orgId)));
   const hub = new GatewayHub(p, accounts);
   p.gateways = hub;
   const metrics = new Metrics();
@@ -118,7 +121,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.addHook('onRequest', async (req, reply) => {
     const path = req.url.split('?')[0];
     if (!path.startsWith('/api/v1/')) return;
-    const isAuth = path === '/api/v1/auth/login' || path === '/api/v1/auth/step-up' || path.startsWith('/api/v1/auth/sso');
+    const isAuth = path === '/api/v1/auth/login' || path === '/api/v1/auth/step-up' || path.startsWith('/api/v1/auth/sso') || path === '/api/v1/edge/pair';
     const wait = isAuth ? limiter.hit(`auth:${req.ip}`, cfg.rateLimitAuthPerMin, Date.now()) : limiter.hit(`api:${req.ip}`, cfg.rateLimitPerMin, Date.now());
     if (wait) {
       metrics.inc('ps_rate_limited_total', { kind: isAuth ? 'auth' : 'api' });
@@ -467,6 +470,17 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.get('/api/v1/admin/gateways', async (req) => {
     p.require(A(req), 'admin.devices', 'gateways', { mutating: false });
     return hub.connected(A(req).orgId);
+  });
+  // One-time codes that let an edge app fetch its gateway key and configuration (E-3).
+  app.get('/api/v1/admin/pairing-codes', async (req) => pairing.list(A(req)));
+  app.post('/api/v1/admin/pairing-codes', async (req: Req) => pairing.create(A(req), body(req) as any));
+  app.delete('/api/v1/admin/pairing-codes/:id', async (req: Req) => {
+    pairing.cancel(A(req), req.params.id);
+    return { ok: true };
+  });
+  app.post('/api/v1/edge/pair', async (req: Req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return pairing.pair(body(req) as any, { ip: req.ip, serverUrl: `${req.protocol === 'https' ? 'wss' : 'ws'}://${req.host}` });
   });
   // Edge media origins that gateway-declared stream URLs must match (per site, or the whole org).
   app.get('/api/v1/admin/edge-origins', async (req) => p.listEdgeOrigins(A(req)));

@@ -118,6 +118,31 @@ describe('gateway ↔ server', () => {
     expect(ids.has('CCTV-04')).toBe(false);
   });
 
+  it('reports a status snapshot: server link, refused devices, last telemetry per device', async () => {
+    server = await new FakeServer().listen();
+    server.accept = (ids) => ids.filter((i) => i !== 'CCTV-01');
+    start();
+    const ugv = () => gw!.status().devices.find((d) => d.deviceId === 'UGV-01');
+    await until(() => gw!.accepted.size === 9 && !!ugv()?.lastTelemetryAt);
+    const s = gw!.status();
+    expect(s).toMatchObject({ gatewayId: 'edge-test', server: { connected: true, refused: false } });
+    expect(ugv()).toMatchObject({ kind: 'ugv', accepted: true });
+    expect(s.devices.find((d) => d.deviceId === 'CCTV-01')).toMatchObject({ accepted: false, rejected: 'not registered' });
+    expect(s.devices.find((d) => d.deviceId === 'CCTV-04')?.lastTelemetryAt).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(s))).toEqual(s); // written to a file as JSON for the Android app
+    await server.close();
+    await until(() => !gw!.status().server.connected);
+  });
+
+  it('says so when the server refuses the gateway key', async () => {
+    server = await new FakeServer().listen();
+    server.wss.removeAllListeners('connection');
+    server.wss.on('connection', (sock) => sock.close(4401, 'gateway credential refused'));
+    start();
+    await until(() => gw!.status().server.refused);
+    expect(gw!.status().server.connected).toBe(false);
+  });
+
   it('routes commands to the adapter and relays its status updates', async () => {
     server = await new FakeServer().listen();
     start();

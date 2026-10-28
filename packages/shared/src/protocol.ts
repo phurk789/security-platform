@@ -556,3 +556,73 @@ export interface ApiKeyView {
   createdAt: number;
   revoked: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Edge pairing (CLEANUP_PLAN E-3): an administrator creates a one-time code, the edge app sends it
+// to POST /api/v1/edge/pair and receives its gateway key and site configuration. No one types or sees the key.
+// ---------------------------------------------------------------------------
+
+/** Minutes a pairing code stays valid. */
+export const PAIRING_CODE_TTL_MIN = 10;
+
+export interface PairingCodeView {
+  id: string;
+  label: string;
+  gatewayId: string;
+  siteId: string;
+  /** Device ids in the configuration the edge receives. */
+  deviceIds: string[];
+  createdAt: number;
+  createdBy: string;
+  expiresAt: number;
+  status: 'waiting' | 'paired' | 'expired' | 'cancelled';
+  pairedAt?: number;
+  /** What the edge said about itself when it paired (app version, phone or remote model). */
+  pairedBy?: string;
+  /** The 6 digits: only in the response that created the code. */
+  code?: string;
+}
+
+export interface CreatePairingCode {
+  label?: string;
+  gatewayId: string;
+  siteId?: string;
+  /** Gateway device list, as in a site.json (apps/gateway/src/real/config.ts DeviceConfig). */
+  devices: unknown[];
+}
+
+export interface EdgePairRequest {
+  code: string;
+  /** Free text about the edge, for the audit log (e.g. "Edge app 0.1.0 · SIYI UniRC 7 Pro · Android 13"). */
+  client?: string;
+}
+
+/** What the edge receives once. Everything a site.json holds, the key included. */
+export interface EdgePairResponse {
+  gatewayId: string;
+  key: string;
+  /** ws:// or wss:// address of this server as the edge reached it. */
+  serverUrl: string;
+  site: { id: string; name: string };
+  geo: GeoAnchor;
+  devices: unknown[];
+}
+
+/** QR text for a pairing code: the edge app reads the server address and the code from it. */
+export function pairingLink(serverOrigin: string, code: string) {
+  return `psedge://pair?server=${encodeURIComponent(serverOrigin)}&code=${code}`;
+}
+
+/** Server address and code from a scanned QR text or what a person typed; null when it is neither. */
+export function parsePairingLink(text: string): { server?: string; code: string } | null {
+  const t = text.trim();
+  const digits = t.replace(/[\s-]/g, '');
+  if (/^\d{6}$/.test(digits)) return { code: digits };
+  const m = /^psedge:\/\/pair\?(.*)$/i.exec(t);
+  if (!m) return null;
+  const q = new URLSearchParams(m[1]);
+  const code = (q.get('code') ?? '').replace(/[\s-]/g, '');
+  const server = q.get('server') ?? undefined;
+  if (!/^\d{6}$/.test(code) || (server !== undefined && !/^https?:\/\/[^\s/]+$/i.test(server))) return null;
+  return { server, code };
+}

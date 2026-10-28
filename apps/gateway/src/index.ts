@@ -1,5 +1,5 @@
 // Edge Gateway library entry. The command-line program is src/cli.ts.
-export { startGateway, type DroppedCounts, type GatewayHandle, type GatewayOptions } from './gateway';
+export { startGateway, type DroppedCounts, type GatewayHandle, type GatewayOptions, type GatewayStatus } from './gateway';
 export { defaultAdapters, SimCctv, SimUav, SimUgv, SimDevice, declarationFrom } from './adapters';
 export * from './sdk';
 export { SiyiCameraAdapter, type SiyiCameraConfig } from './real/siyiCamera';

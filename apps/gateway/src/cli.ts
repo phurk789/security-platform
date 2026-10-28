@@ -7,6 +7,11 @@
 //   GATEWAY_DATA_DIR  state kept across restarts (command ledgers in <dir>/ledger/).
 //                   Default $DATA_DIR/gateway (/data/gateway in the Docker image), else ./data/gateway.
 //                   Put it on persistent storage: see docs/ADAPTER_CONTRACT.md §7.
+//   FFMPEG_PATH     ffmpeg used to push video (default: `ffmpeg` on PATH)
+//   GATEWAY_STATUS_FILE  write a status snapshot (JSON, GatewayStatus) to this file every second
+//   GATEWAY_EXIT_WITH_PARENT=1  stop when the process that started this one goes away (the Android
+//                   edge app: a gateway left running would hold the vehicle datalink)
+import { renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { defaultAdapters } from './adapters';
 import { startGateway } from './gateway';
@@ -34,11 +39,43 @@ try {
 console.log(`[gw] ${site ? `site config ${configPath}` : 'simulated devices'}: ${adapters.map((a) => `${a.declaration.deviceId} (${a.declaration.adapterVersion})`).join(', ')}`);
 const dataDir = resolve(process.env.GATEWAY_DATA_DIR || (process.env.DATA_DIR ? join(process.env.DATA_DIR, 'gateway') : './data/gateway'));
 console.log(`[gw] command ledgers in ${join(dataDir, 'ledger')}`);
-const gw = startGateway({ serverUrl, key, gatewayId, adapters, geo: site?.geo, dataDir });
+const gw = startGateway({ serverUrl, key, gatewayId, adapters, geo: site?.geo, dataDir, ffmpegPath: process.env.FFMPEG_PATH || undefined });
+
+const statusFile = process.env.GATEWAY_STATUS_FILE;
+const writeStatus = () => {
+  if (!statusFile) return;
+  try {
+    // Write then rename, so a reader never sees half a file.
+    writeFileSync(`${statusFile}.tmp`, JSON.stringify(gw.status()));
+    renameSync(`${statusFile}.tmp`, statusFile);
+  } catch (e) {
+    console.error(`[gw] cannot write status to ${statusFile}: ${(e as Error).message}`);
+  }
+};
+if (statusFile) setInterval(writeStatus, 1000).unref();
+
+let stopping = false;
 const shutdown = async () => {
+  if (stopping) return;
+  stopping = true;
   console.log('[gw] shutting down');
   await gw.stop();
+  writeStatus();
   process.exit(0);
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+// Any other exit (an unexpected error included): stopping the video pushes is synchronous, so no ffmpeg is left behind.
+process.on('exit', () => {
+  if (!stopping) void gw.stop();
+});
+
+if (process.env.GATEWAY_EXIT_WITH_PARENT === '1') {
+  const parent = process.ppid;
+  setInterval(() => {
+    if (process.ppid !== parent) {
+      console.log('[gw] the app that started the gateway is gone');
+      void shutdown();
+    }
+  }, 2000).unref();
+}

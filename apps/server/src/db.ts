@@ -119,7 +119,14 @@ CREATE INDEX IF NOT EXISTS notifications_org_time ON notifications(org_id, at);
 CREATE TABLE IF NOT EXISTS edge_origins (
   org_id TEXT NOT NULL, site_id TEXT NOT NULL DEFAULT '', origin TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
   PRIMARY KEY (org_id, site_id, origin)
-);`);
+);
+CREATE TABLE IF NOT EXISTS pairing_codes (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL, site_id TEXT NOT NULL, code_hash TEXT NOT NULL, label TEXT NOT NULL,
+  gateway_id TEXT NOT NULL, device_ids TEXT NOT NULL, config TEXT, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL, cancelled INTEGER NOT NULL DEFAULT 0, paired_at INTEGER, paired_by TEXT, key_id TEXT
+);
+CREATE INDEX IF NOT EXISTS pairing_codes_hash ON pairing_codes(code_hash);
+CREATE INDEX IF NOT EXISTS pairing_codes_org ON pairing_codes(org_id, created_at);`);
 }
 
 export function tx<T>(db: DB, fn: () => T): T {
