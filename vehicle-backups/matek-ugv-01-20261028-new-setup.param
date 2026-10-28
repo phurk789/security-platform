@@ -1,0 +1,75 @@
+# Matek H743-WING UGV-01: settings applied on top of factory defaults, 2026-10-28.
+# Everything not listed stays at the ArduRover 4.7.2 default. Loadable in Mission Planner.
+#
+# Outputs, as wired (factory default would put steering on S1 and throttle on S3)
+SERVO1_FUNCTION,0
+SERVO1_MIN,1000
+SERVO1_MAX,2000
+SERVO2_FUNCTION,26
+SERVO2_MIN,1000
+SERVO2_MAX,2000
+SERVO3_FUNCTION,0
+SERVO3_MIN,1000
+SERVO3_MAX,2000
+SERVO4_FUNCTION,70
+SERVO4_MIN,1300
+SERVO4_MAX,1700
+SERVO5_FUNCTION,26
+SERVO6_FUNCTION,70
+#
+# Stick ranges measured from the SIYI UniRC 7 Pro (1050-1950)
+RC1_MIN,1050
+RC1_MAX,1950
+RC1_TRIM,1500
+RC3_MIN,1050
+RC3_MAX,1950
+RC3_TRIM,1500
+#
+# Arm / disarm on ch12
+RC12_OPTION,153
+#
+# Mode switch on ch10: low = HOLD, middle and high = MANUAL
+MODE_CH,10
+MODE1,4
+MODE2,4
+MODE3,0
+MODE4,0
+MODE5,0
+MODE6,0
+#
+# Failsafes: remote lost -> HOLD after 1.5 s (defaults), gateway lost -> HOLD
+FS_THR_ENABLE,1
+FS_ACTION,2
+FS_GCS_ENABLE,1
+#
+# Console driving: RC overrides expire 1 s after the gateway stops sending
+RC_OVERRIDE_TIME,1
+#
+# Compass off until it is calibrated outdoors (as before)
+COMPASS_USE,0
+COMPASS_USE3,0
+#
+# SIYI datalink (SERIAL2 / MAV3) stream rates as before
+MAV3_EXT_STAT,2
+MAV3_EXTRA1,10
+MAV3_EXTRA2,5
+MAV3_EXTRA3,3
+MAV3_POSITION,3
+MAV3_RAW_SENS,2
+MAV3_RC_CHAN,2
+#
+# Accelerometer calibration restored from the backup (same IMUs: INS_ACC_ID 3080482, INS_ACC2_ID 1245450)
+INS_ACCOFFS_X,0.060028
+INS_ACCOFFS_Y,0.171578
+INS_ACCOFFS_Z,0.13158
+INS_ACCSCAL_X,1.001002
+INS_ACCSCAL_Y,1.032118
+INS_ACCSCAL_Z,1.004915
+INS_ACC2OFFS_X,-0.177901
+INS_ACC2OFFS_Y,0.029037
+INS_ACC2OFFS_Z,-1.859531
+INS_ACC2SCAL_X,0.998759
+INS_ACC2SCAL_Y,1.003141
+INS_ACC2SCAL_Z,0.986892
+AHRS_TRIM_X,-0.00597
+AHRS_TRIM_Y,-0.008117
