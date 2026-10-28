@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- In-app updates from the paired server; the person confirms each install on Android's screen. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- The QR scanner is optional: the SIYI remote may have no camera, the 6 digits always work. -->
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
@@ -60,6 +62,20 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Answers from Android's installer for in-app updates (sent by our own PendingIntent). -->
+        <receiver
+            android:name=".InstallReceiver"
+            android:exported="false" />
+
+        <!-- The new version after an update: start the gateway again if it was running. -->
+        <receiver
+            android:name=".UpdatedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>

@@ -72,6 +72,33 @@
     <string name="yes">ตกลง</string>
     <string name="cancel">ยกเลิก</string>
 
+    <string name="update_title">อัปเดตแอป</string>
+    <string name="update_check">ตรวจหาอัปเดต</string>
+    <string name="update_now">อัปเดตเป็น %1$s</string>
+    <string name="update_retry">ลองใหม่</string>
+    <string name="update_installed">แอปนี้: %1$s</string>
+    <string name="update_checking">กำลังตรวจหาอัปเดตจากเซิร์ฟเวอร์…</string>
+    <string name="update_available">มีเวอร์ชันใหม่ %1$s (ที่ติดตั้งอยู่ %2$s)</string>
+    <string name="update_latest">เป็นเวอร์ชันล่าสุดแล้ว (%1$s)</string>
+    <string name="update_none">เซิร์ฟเวอร์ยังไม่มีไฟล์อัปเดตแอป</string>
+    <string name="update_stopping">กำลังหยุด Gateway ก่อนอัปเดต…</string>
+    <string name="update_downloading">กำลังดาวน์โหลด %1$s: %2$d%%</string>
+    <string name="update_installing">กำลังติดตั้ง: กด "อัปเดต" บนหน้าจอของ Android แอปจะเปิดใหม่เอง การจับคู่ยังอยู่ และ Gateway จะเริ่มทำงานต่อถ้าเปิดอยู่ก่อนอัปเดต</string>
+    <string name="update_not_paired">จับคู่ก่อน แอปจะอัปเดตจากเซิร์ฟเวอร์ที่จับคู่ไว้</string>
+    <string name="update_no_server">ติดต่อเซิร์ฟเวอร์เพื่ออัปเดตไม่ได้ ตรวจ Wi-Fi แล้วลองใหม่</string>
+    <string name="update_key_refused">เซิร์ฟเวอร์ไม่รับคีย์ของรีโมตนี้ จับคู่ใหม่ก่อน แล้วจึงอัปเดต</string>
+    <string name="update_bad_file">ไฟล์ที่ดาวน์โหลดมาเสีย (ค่าตรวจสอบไม่ตรง) กดลองใหม่</string>
+    <string name="update_wrong_package">ไฟล์บนเซิร์ฟเวอร์ไม่ใช่แอป 13STORE Edge แจ้งผู้ดูแล</string>
+    <string name="update_not_newer">ไฟล์บนเซิร์ฟเวอร์ไม่ใหม่กว่าแอปที่ติดตั้งอยู่ แจ้งผู้ดูแล</string>
+    <string name="update_wrong_signer">ไฟล์อัปเดตนี้ถูกเซ็นด้วยกุญแจคนละชุดกับแอปที่ติดตั้งอยู่ Android จึงติดตั้งทับไม่ได้ ผู้พัฒนาต้องสร้างไฟล์ใหม่ด้วยกุญแจเดิม (~/.13store) หรือถ้าจำเป็น: ถอนแอปออก ติดตั้ง APK ใหม่ด้วยมือ แล้วจับคู่ใหม่</string>
+    <string name="update_permission">อนุญาตให้ 13STORE Edge ติดตั้งแอป: ในหน้าถัดไปเปิด "อนุญาตจากแหล่งนี้" กดย้อนกลับ แล้วกดอัปเดตอีกครั้ง (ถามครั้งเดียว)</string>
+    <string name="update_cancelled">ยกเลิกการอัปเดตแล้ว แอปยังเป็นเวอร์ชันเดิม</string>
+    <string name="update_no_space">พื้นที่ในรีโมตไม่พอสำหรับอัปเดต ลบไฟล์ที่ไม่ใช้แล้วลองใหม่</string>
+    <string name="update_failed">Android ไม่ได้ติดตั้งอัปเดต: %1$s</string>
+    <string name="update_done">อัปเดตเป็น %1$s แล้ว</string>
+    <string name="update_done_resumed">Gateway เริ่มทำงานต่อแล้ว</string>
+    <string name="update_done_start">เปิดแอปแล้วกด "เริ่ม" เมื่อพร้อม</string>
+
     <string name="notif_channel">Gateway</string>
     <string name="notif_running">Gateway %1$s</string>
 </resources>

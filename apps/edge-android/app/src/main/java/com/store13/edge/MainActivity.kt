@@ -44,6 +44,12 @@ class MainActivity : Activity() {
     private lateinit var batteryText: TextView
     private lateinit var batteryButton: Button
     private lateinit var unpairButton: Button
+    private lateinit var updateBanner: View
+    private lateinit var updateBannerText: TextView
+    private lateinit var updateBannerButton: Button
+    private lateinit var updateText: TextView
+    private lateinit var checkUpdateButton: Button
+    private lateinit var installUpdateButton: Button
     private var logExpanded = false
     private var pairing = false
 
@@ -75,6 +81,15 @@ class MainActivity : Activity() {
         batteryText = findViewById(R.id.batteryText)
         batteryButton = findViewById(R.id.batteryButton)
         unpairButton = findViewById(R.id.unpairButton)
+        updateBanner = findViewById(R.id.updateBanner)
+        updateBannerText = findViewById(R.id.updateBannerText)
+        updateBannerButton = findViewById(R.id.updateBannerButton)
+        updateText = findViewById(R.id.updateText)
+        checkUpdateButton = findViewById(R.id.checkUpdateButton)
+        installUpdateButton = findViewById(R.id.installUpdateButton)
+        checkUpdateButton.setOnClickListener { Updater.check(this, force = true) }
+        installUpdateButton.setOnClickListener { startUpdate() }
+        updateBannerButton.setOnClickListener { startUpdate() }
 
         serverInput.setText(Prefs.lastServer(this))
         pairButton.setOnClickListener { pair() }
@@ -109,7 +124,7 @@ class MainActivity : Activity() {
             Prefs.setLang(this, if (Prefs.lang(this) == "th") "en" else "th")
             recreate()
         }
-        findViewById<TextView>(R.id.versionText).text = getString(R.string.version, BuildConfig.VERSION_NAME)
+        findViewById<TextView>(R.id.versionText).text = getString(R.string.version, "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         handleLink(intent)
     }
 
@@ -122,6 +137,60 @@ class MainActivity : Activity() {
         super.onResume()
         EdgeState.listen(render)
         render()
+        // Look for a newer version when the app opens (at most every 10 minutes).
+        if (PairingStore.load(this) != null) Updater.check(this, force = false)
+    }
+
+    /** Update button: ask once for "install unknown apps", then stop the gateway, download, verify and install. */
+    private fun startUpdate() {
+        if (UpdateState.release == null || UpdateState.busy) return
+        if (!Updater.canInstall(this)) {
+            UpdateState.set(UpdateState.Step.AVAILABLE, problem = UpdateState.Problem.NEED_PERMISSION)
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        Updater.update(this)
+    }
+
+    /** What the update section says, and whether its Update button shows (with which label). */
+    private fun updateView(paired: Boolean): Pair<String, String?> {
+        val s = UpdateState
+        val r = s.release
+        val mine = BuildConfig.VERSION_NAME
+        val newer = r != null && UpdateLogic.isNewer(BuildConfig.VERSION_CODE.toLong(), r)
+        if (!paired) return getString(R.string.update_not_paired) to null
+        val text = when (s.step) {
+            UpdateState.Step.IDLE -> getString(R.string.update_installed, mine)
+            UpdateState.Step.CHECKING -> getString(R.string.update_checking)
+            UpdateState.Step.LATEST -> getString(R.string.update_latest, mine)
+            UpdateState.Step.NONE -> getString(R.string.update_none)
+            UpdateState.Step.AVAILABLE ->
+                if (s.problem == UpdateState.Problem.NEED_PERMISSION) getString(R.string.update_permission) else getString(R.string.update_available, r?.versionName ?: "", mine)
+            UpdateState.Step.STOPPING -> getString(R.string.update_stopping)
+            UpdateState.Step.DOWNLOADING -> getString(R.string.update_downloading, r?.versionName ?: "", s.progress)
+            UpdateState.Step.INSTALLING -> getString(R.string.update_installing)
+            UpdateState.Step.FAILED -> when (s.problem) {
+                UpdateState.Problem.NOT_PAIRED -> getString(R.string.update_not_paired)
+                UpdateState.Problem.KEY_REFUSED -> getString(R.string.update_key_refused)
+                UpdateState.Problem.BAD_FILE -> getString(R.string.update_bad_file)
+                UpdateState.Problem.WRONG_PACKAGE -> getString(R.string.update_wrong_package)
+                UpdateState.Problem.NOT_NEWER -> getString(R.string.update_not_newer)
+                UpdateState.Problem.WRONG_SIGNER -> getString(R.string.update_wrong_signer)
+                UpdateState.Problem.NEED_PERMISSION -> getString(R.string.update_permission)
+                UpdateState.Problem.CANCELLED -> getString(R.string.update_cancelled)
+                UpdateState.Problem.NO_SPACE -> getString(R.string.update_no_space)
+                UpdateState.Problem.INSTALL_FAILED -> getString(R.string.update_failed, s.detail)
+                UpdateState.Problem.NO_SERVER, null -> getString(R.string.update_no_server)
+            }
+        }
+        val retryable = s.step == UpdateState.Step.FAILED && newer &&
+            s.problem in setOf(UpdateState.Problem.NO_SERVER, UpdateState.Problem.BAD_FILE, UpdateState.Problem.CANCELLED, UpdateState.Problem.NO_SPACE, UpdateState.Problem.INSTALL_FAILED)
+        val button = when {
+            s.step == UpdateState.Step.AVAILABLE && r != null -> getString(R.string.update_now, r.versionName)
+            retryable -> getString(R.string.update_retry)
+            else -> null
+        }
+        return text to button
     }
 
     override fun onPause() {
@@ -258,6 +327,17 @@ class MainActivity : Activity() {
         val log = GatewayLog.last(if (logExpanded) 150 else 12)
         logView.text = if (log.isEmpty()) getString(R.string.log_empty) else log.joinToString("\n")
         logMore.text = getString(if (logExpanded) R.string.log_less else R.string.log_more)
+
+        val (uText, uButton) = updateView(p != null)
+        updateText.text = uText
+        installUpdateButton.visibility = if (uButton != null) View.VISIBLE else View.GONE
+        installUpdateButton.text = uButton ?: ""
+        checkUpdateButton.isEnabled = p != null && !UpdateState.busy
+        val inBanner = uButton != null || UpdateState.busy && UpdateState.step != UpdateState.Step.CHECKING
+        updateBanner.visibility = if (p != null && inBanner) View.VISIBLE else View.GONE
+        updateBannerText.text = uText
+        updateBannerButton.visibility = installUpdateButton.visibility
+        updateBannerButton.text = uButton ?: ""
 
         bootSwitch.isChecked = Prefs.startOnBoot(this)
         val ignoring = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)

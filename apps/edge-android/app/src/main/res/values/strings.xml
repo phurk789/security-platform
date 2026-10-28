@@ -73,6 +73,33 @@
     <string name="yes">Yes</string>
     <string name="cancel">Cancel</string>
 
+    <string name="update_title">App update</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_now">Update to %1$s</string>
+    <string name="update_retry">Try again</string>
+    <string name="update_installed">This app: %1$s</string>
+    <string name="update_checking">Checking the server for updates…</string>
+    <string name="update_available">Version %1$s is available (this app: %2$s).</string>
+    <string name="update_latest">This is the latest version (%1$s).</string>
+    <string name="update_none">The server has no app update yet.</string>
+    <string name="update_stopping">Stopping the gateway before the update…</string>
+    <string name="update_downloading">Downloading %1$s: %2$d%%</string>
+    <string name="update_installing">Installing: press Update on Android\'s screen. The app restarts by itself, keeps its pairing, and starts the gateway again if it was running.</string>
+    <string name="update_not_paired">Pair first: updates come from the paired server.</string>
+    <string name="update_no_server">Cannot reach the server to update. Check the Wi-Fi, then try again.</string>
+    <string name="update_key_refused">The server refused this remote\'s key. Pair again, then update.</string>
+    <string name="update_bad_file">The downloaded file is damaged (it does not match its checksum). Try again.</string>
+    <string name="update_wrong_package">The file on the server is not the 13STORE Edge app. Tell the administrator.</string>
+    <string name="update_not_newer">The file on the server is not newer than this app. Tell the administrator.</string>
+    <string name="update_wrong_signer">This update is signed with a different key from the installed app, so Android cannot install it over this one. The developer must build it with the original signing key (~/.13store). Otherwise: uninstall the app, install the new APK by hand, and pair again.</string>
+    <string name="update_permission">Allow 13STORE Edge to install apps: on the next screen turn on \"Allow from this source\", press Back, then press Update again. This is asked once.</string>
+    <string name="update_cancelled">Update cancelled. The app was not changed.</string>
+    <string name="update_no_space">Not enough storage on the remote for the update. Free some space and try again.</string>
+    <string name="update_failed">Android did not install the update: %1$s</string>
+    <string name="update_done">Updated to %1$s</string>
+    <string name="update_done_resumed">The gateway started again.</string>
+    <string name="update_done_start">Open the app and press Start when you are ready.</string>
+
     <string name="notif_channel">Gateway</string>
     <string name="notif_running">Gateway %1$s</string>
 </resources>

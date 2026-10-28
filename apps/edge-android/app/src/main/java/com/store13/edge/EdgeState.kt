@@ -84,6 +84,10 @@ object Prefs {
     fun wantRunning(ctx: Context) = p(ctx).getBoolean("wantRunning", false)
     fun setWantRunning(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("wantRunning", v).apply()
 
+    /** The gateway was running when an update started: start it again once the new version is installed (or the update fails). */
+    fun resumeAfterUpdate(ctx: Context) = p(ctx).getBoolean("resumeAfterUpdate", false)
+    fun setResumeAfterUpdate(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("resumeAfterUpdate", v).commit()
+
     fun lastServer(ctx: Context): String = p(ctx).getString("lastServer", DEFAULT_SERVER) ?: DEFAULT_SERVER
     fun setLastServer(ctx: Context, v: String) = p(ctx).edit().putString("lastServer", v).apply()
 

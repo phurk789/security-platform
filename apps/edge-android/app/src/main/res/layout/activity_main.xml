@@ -46,6 +46,32 @@
                 android:text="@string/switch_language" />
         </LinearLayout>
 
+        <!-- A newer version on the paired server, or an update in progress -->
+        <LinearLayout
+            android:id="@+id/updateBanner"
+            style="@style/Edge.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/updateBannerText"
+                style="@style/Edge.Body"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/updateBannerButton"
+                style="@style/Edge.SmallButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp" />
+        </LinearLayout>
+
         <!-- Not paired: pair with a code from Admin → Pair an edge remote -->
         <LinearLayout
             android:id="@+id/pairSection"
@@ -305,6 +331,41 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/battery_button" />
+
+            <TextView
+                style="@style/Edge.Label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/update_title" />
+
+            <TextView
+                android:id="@+id/updateText"
+                style="@style/Edge.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/checkUpdateButton"
+                    style="@style/Edge.SmallButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/update_check" />
+
+                <Button
+                    android:id="@+id/installUpdateButton"
+                    style="@style/Edge.SmallButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:visibility="gone" />
+            </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
