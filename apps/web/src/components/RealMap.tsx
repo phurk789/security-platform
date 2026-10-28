@@ -4,9 +4,11 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './realmap.css';
 import { useEffect, useRef, useState } from 'react';
-import maplibregl, { type Map as MlMap, type MapLayerMouseEvent } from 'maplibre-gl';
+import maplibregl, { type GeoJSONSource, type Map as MlMap, type MapLayerMouseEvent, type MapMouseEvent } from 'maplibre-gl';
 import { Layers as LayersIcon, LocateFixed, SatelliteDish } from 'lucide-react';
-import { GEOFENCE_KIND_LABEL, SITE, fmtLatLon, type AppState, type Layers as LayerState } from '@13store/shared';
+import { GEOFENCE_KIND_LABEL, SITE, fmtLatLon, geoToSite, type AppState, type Layers as LayerState } from '@13store/shared';
+import { addPoint, maxPoints, movePoint, removePoint, routeDraft, useRouteDraft } from '../domain/routeDraft';
+import { RouteDraftPanel } from './RouteDraftPanel';
 import { freshness } from '../domain/policy';
 import { useStore } from '../store';
 import { useT } from '../i18n';
@@ -19,6 +21,10 @@ const TRAILS_KEY = 'ps-map-trails';
 const PLAN_KEY = 'ps-map-plan';
 /** Overlay redraws at most this often (telemetry and the clock change the state many times a second). */
 const REDRAW_MS = 250;
+/** The route being drawn (dashed line; its checkpoints are draggable DOM markers). */
+const DRAFT_SRC = 'route-draft';
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+const drawing = () => routeDraft.get()?.state === 'drawing';
 
 function useLocalFlag(key: string, def: boolean): [boolean, (v: boolean) => void] {
   const [v, setV] = useState(() => {
@@ -102,6 +108,15 @@ export default function RealMap() {
           apiGet: api ? (path) => api.get(path) : undefined,
           onReady: (map) => {
             ensureOperationalLayers(map);
+            if (!map.getSource(DRAFT_SRC)) map.addSource(DRAFT_SRC, { type: 'geojson', data: EMPTY_FC });
+            if (!map.getLayer('route-draft-line'))
+              map.addLayer({
+                id: 'route-draft-line',
+                type: 'line',
+                source: DRAFT_SRC,
+                layout: { 'line-cap': 'round', 'line-join': 'round' },
+                paint: { 'line-color': '#fbbf24', 'line-width': 3, 'line-dasharray': [2, 1.5] },
+              });
             off.push(addMapImages(map));
             bindInteractions(map, off);
             map.setPadding(hudPadding(host));
@@ -152,10 +167,20 @@ export default function RealMap() {
       on('mouseenter', id, pointer('pointer'));
       on('mouseleave', id, pointer(''));
     }
-    for (const id of CLICKABLE.device) on('click', id, (e) => e.features?.[0] && latest.current.dispatch({ type: 'selectDevice', id: String(e.features[0].properties.id) }));
-    for (const id of CLICKABLE.incident) on('click', id, (e) => e.features?.[0] && latest.current.dispatch({ type: 'selectIncident', id: String(e.features[0].properties.id) }));
+    // While a route is drawn, every click on the map is a checkpoint (selection waits).
+    const onMapClick = (e: MapMouseEvent) => {
+      const d = routeDraft.get();
+      if (!d || d.state !== 'drawing') return;
+      if ((e.originalEvent.target as HTMLElement | null)?.closest?.('.route-pt')) return;
+      routeDraft.setPoints(addPoint(d.points, geoToSite(latest.current.s.geo, { lat: e.lngLat.lat, lon: e.lngLat.lng }), maxPoints(d.purpose)));
+    };
+    map.on('click', onMapClick);
+    off.push(() => map.off('click', onMapClick));
+    for (const id of CLICKABLE.device) on('click', id, (e) => !drawing() && e.features?.[0] && latest.current.dispatch({ type: 'selectDevice', id: String(e.features[0].properties.id) }));
+    for (const id of CLICKABLE.incident) on('click', id, (e) => !drawing() && e.features?.[0] && latest.current.dispatch({ type: 'selectIncident', id: String(e.features[0].properties.id) }));
     for (const id of CLICKABLE.geofence)
       on('click', id, (e) => {
+        if (drawing()) return;
         const p = e.features?.[0]?.properties;
         if (!p || map.queryRenderedFeatures(e.point, { layers: [...CLICKABLE.device, ...CLICKABLE.incident] }).length) return;
         const tt = latest.current.t;
@@ -184,6 +209,59 @@ export default function RealMap() {
   useEffect(
     () => () => {
       if (timer.current !== null) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  // The route being drawn: dashed line from the vehicle through the checkpoints, and one draggable
+  // numbered marker per checkpoint (right-click removes it). Rebuilt whenever the draft changes.
+  const draft = useRouteDraft();
+  const markers = useRef<maplibregl.Marker[]>([]);
+  useEffect(() => {
+    const map = sm.current?.map;
+    if (!ready || !map) return;
+    for (const mk of markers.current) mk.remove();
+    markers.current = [];
+    const src = map.getSource(DRAFT_SRC) as GeoJSONSource | undefined;
+    const on = draft?.state === 'drawing';
+    map.getCanvas().style.cursor = on ? 'crosshair' : '';
+    if (!on || !draft) {
+      src?.setData(EMPTY_FC);
+      return;
+    }
+    const cur = latest.current.s;
+    const g = cur.geo;
+    // A route starts at the vehicle; a zone outline closes on its first corner.
+    const zone = draft.purpose === 'zone';
+    const dev = zone ? undefined : cur.devices[draft.deviceId];
+    const from = dev && !dev.noFix ? dev.pos : undefined;
+    const line = zone ? (draft.points.length > 2 ? [...draft.points, draft.points[0]] : draft.points) : [...(from ? [from] : []), ...draft.points];
+    const coords = line.map((p) => lngLat(g, p));
+    src?.setData(coords.length > 1 ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }] } : EMPTY_FC);
+    draft.points.forEach((p, i) => {
+      const el = document.createElement('div');
+      el.className = 'route-pt';
+      el.textContent = String(i + 1);
+      el.title = latest.current.t('Drag to move · right-click to remove');
+      el.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const d = routeDraft.get();
+        if (d) routeDraft.setPoints(removePoint(d.points, i));
+      });
+      const mk = new maplibregl.Marker({ element: el, draggable: true }).setLngLat(lngLat(g, p) as [number, number]).addTo(map);
+      mk.on('dragend', () => {
+        const ll = mk.getLngLat();
+        const d = routeDraft.get();
+        if (d) routeDraft.setPoints(movePoint(d.points, i, geoToSite(g, { lat: ll.lat, lon: ll.lng })));
+      });
+      markers.current.push(mk);
+    });
+  }, [ready, draft]);
+  useEffect(
+    () => () => {
+      for (const mk of markers.current) mk.remove();
+      markers.current = [];
     },
     [],
   );
@@ -270,6 +348,7 @@ export default function RealMap() {
               <LocateFixed size={16} />
             </button>
           </div>
+          <RouteDraftPanel />
           {noFix.length > 0 && (
             <div className="map-nofix" role="status">
               <SatelliteDish size={14} />

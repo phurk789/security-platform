@@ -81,11 +81,14 @@ import {
   type DeviceStats,
   DEFAULT_GEOFENCES,
   GEOFENCE_KIND_LABEL,
+  GEOFENCE_KINDS,
   fencesAt,
+  insideSite,
+  operatingAreas,
+  type FencedKind,
   planRoute,
   rankUnits,
   routeViolations,
-  insideDemoArea,
   type Playbook,
   type SlaStage,
   type NotificationChannel,
@@ -228,6 +231,8 @@ export class Platform {
   private fenceCache = new Map<string, Geofence[]>();
   /** Fence ids each vehicle is currently inside of. */
   private insideFences = new Map<string, Set<string>>();
+  /** Devices last seen outside every operating area of their site. */
+  private outsideArea = new Set<string>();
   /** Last telemetry position per vehicle, for odometer and runtime. */
   private lastFix = new Map<string, { pos: Point; at: number }>();
   private lastStatsSave = new Map<string, number>();
@@ -2834,7 +2839,7 @@ export class Platform {
     const name = String(input.name ?? existing?.name ?? '').trim();
     if (!name || name.length > 80) fail(400, 'invalid', 'A name of up to 80 characters is required.');
     const kind = (input.kind ?? existing?.kind ?? 'keep_out') as Geofence['kind'];
-    if (!['keep_out', 'caution', 'no_fly'].includes(kind)) fail(400, 'invalid', 'kind must be keep_out, caution or no_fly.');
+    if (!GEOFENCE_KINDS.includes(kind)) fail(400, 'invalid', 'kind must be keep_out, caution, no_fly or operating_area.');
     const poly = (input.poly ?? existing?.poly ?? []) as Point[];
     if (
       !Array.isArray(poly) ||
@@ -2843,7 +2848,9 @@ export class Platform {
       poly.some((p) => typeof p?.x !== 'number' || typeof p?.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y))
     )
       fail(400, 'invalid', 'poly needs 3–30 {x, y} points.');
-    if (!poly.some(insideDemoArea)) fail(400, 'invalid', 'The zone must touch the site.');
+    // An operating area defines the site; any other zone must touch it (or the demo boundary when there is none).
+    const others = this.geofencesOf(a.orgId, site.id).filter((g) => g.id !== id);
+    if (kind !== 'operating_area' && !poly.some((p) => insideSite(p, others, 'ugv') || insideSite(p, others, 'uav'))) fail(400, 'invalid', 'The zone must touch the site.');
     const appliesTo = ((input.appliesTo ?? existing?.appliesTo ?? ['ugv', 'uav']) as string[]).filter((k) => k === 'ugv' || k === 'uav') as Geofence['appliesTo'];
     if (!appliesTo.length) fail(400, 'invalid', 'appliesTo must include ugv and/or uav.');
     const g: Geofence = {
@@ -2878,13 +2885,17 @@ export class Platform {
     return { ok: true };
   }
 
-  /** Live geofence tracking: entering a keep-out or no-fly zone is a breach; caution zones are noted. */
+  /**
+   * Live geofence tracking: entering a keep-out or no-fly zone is a breach; caution zones are noted.
+   * Leaving the operating area is a breach during a mission and a warning otherwise.
+   */
   private trackFences(d: Device & { orgId: string; siteId: string }, now: number) {
     if (d.kind !== 'ugv' && d.kind !== 'uav') return;
     const fences = this.geofencesOf(d.orgId, d.siteId);
-    const nowIn = new Set(fencesAt(d.pos, fences, d.kind).map((f) => f.id));
-    const was = this.insideFences.get(d.id) ?? new Set<string>();
     const m = this.activeMission(d.id);
+    this.trackArea(d, d.kind, fences, m, now);
+    const nowIn = new Set(fencesAt(d.pos, fences, d.kind).filter((f) => f.kind !== 'operating_area').map((f) => f.id));
+    const was = this.insideFences.get(d.id) ?? new Set<string>();
     for (const id of nowIn) {
       if (was.has(id)) continue;
       const f = fences.find((x) => x.id === id)!;
@@ -2910,6 +2921,29 @@ export class Platform {
       if (f && f.kind !== 'caution') this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: 'info', text: `${d.id} left zone "${f.name}".` } });
     }
     this.insideFences.set(d.id, nowIn);
+  }
+
+  /** Outside every operating area of its site (only sites that have one, only with a position fix). */
+  private trackArea(d: Device & { orgId: string; siteId: string }, kind: FencedKind, fences: Geofence[], m: Mission | undefined, now: number) {
+    const areas = operatingAreas(fences, kind);
+    const out = areas.length > 0 && !d.noFix && !insideSite(d.pos, areas, kind);
+    const wasOut = this.outsideArea.has(d.id);
+    if (out === wasOut) return;
+    if (!out) {
+      this.outsideArea.delete(d.id);
+      this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: 'info', text: `${d.id} is back inside the operating area.` } });
+      return;
+    }
+    this.outsideArea.add(d.id);
+    const breach = !!m;
+    const text = `${d.id} is outside the operating area${m ? ` during ${m.id}` : ''}`;
+    if (m) this.event(null, d.orgId, d.siteId, m.incidentId, text, { actor: d.id, tone: 'alert', at: now });
+    this.audit(this.systemActor(d.orgId, 'system', 'Geofence'), 'geofence.breach', d.id, breach ? 'error' : 'ok', `${text} (${areas.map((f) => f.name).join(', ')})`);
+    this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: breach ? 'error' : 'warn', text: `${text}.` } });
+    if (breach) {
+      this.bus.emit('geofence', { orgId: d.orgId, deviceId: d.id, fence: areas[0], breach });
+      this.notify(d.orgId, { event: 'geofence.breach', title: text, text: 'Left the operating area', severity: 'high', incidentId: m.incidentId, data: { deviceId: d.id, fenceId: areas[0].id, pos: d.pos } });
+    }
   }
 
   // ---- usage counters, service, docking ---------------------------------------------
@@ -2998,7 +3032,7 @@ export class Platform {
     if (ih !== undefined) st.serviceIntervalH = ih;
     if (patch.dock === null) st.dock = undefined;
     else if (patch.dock) {
-      if (!Number.isFinite(patch.dock.x) || !Number.isFinite(patch.dock.y) || !insideDemoArea(patch.dock)) fail(400, 'invalid', 'dock must be {x, y} inside the site.');
+      if (!Number.isFinite(patch.dock.x) || !Number.isFinite(patch.dock.y) || !insideSite(patch.dock, this.geofencesOf(a.orgId, d.siteId), d.kind === 'uav' ? 'uav' : 'ugv')) fail(400, 'invalid', 'dock must be {x, y} inside the site.');
       st.dock = { x: patch.dock.x, y: patch.dock.y };
     }
     this.saveStats(d, true);

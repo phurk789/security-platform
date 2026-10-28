@@ -45,7 +45,7 @@ export interface OverlayInput {
 
 export const KIND_COLOR: Record<string, string> = { ugv: '#38bdf8', uav: '#c084fc', cctv: '#cbd5e1' };
 export const SEVERITY_COLOR: Record<string, string> = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' };
-export const GEOFENCE_COLOR: Record<string, string> = { keep_out: '#ef4444', caution: '#f59e0b', no_fly: '#a855f7' };
+export const GEOFENCE_COLOR: Record<string, string> = { keep_out: '#ef4444', caution: '#f59e0b', no_fly: '#a855f7', operating_area: '#22c55e' };
 const OFFLINE_COLOR = '#64748b';
 const STALE_COLOR = '#f59e0b';
 /** A trail breaks where samples are further apart than this (link outage, no fix). */
@@ -219,7 +219,7 @@ const OPERATIONAL_LAYERS: [LayerGroup, LayerSpecification][] = [
   ['vector', { id: 'ops-plan-fill', type: 'fill', source: SRC.plan, paint: { 'fill-color': '#0f172a', 'fill-opacity': 0.45 } }],
   ['vector', { id: 'ops-plan-line', type: 'line', source: SRC.plan, paint: { 'line-color': '#94a3b8', 'line-width': 1 } }],
   ['boundaries', { id: 'ops-boundary-line', type: 'line', source: SRC.boundary, paint: { 'line-color': '#e2e8f0', 'line-width': 1.5, 'line-opacity': 0.75, 'line-dasharray': [3, 2] } }],
-  ['boundaries', { id: 'ops-geofence-fill', type: 'fill', source: SRC.geofences, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.16 } }],
+  ['boundaries', { id: 'ops-geofence-fill', type: 'fill', source: SRC.geofences, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['==', ['get', 'kind'], 'operating_area'], 0.05, 0.16] } }],
   ['boundaries', { id: 'ops-geofence-line', type: 'line', source: SRC.geofences, paint: { 'line-color': ['get', 'color'], 'line-width': 2 } }],
   ['routes', { id: 'ops-trail-line', type: 'line', source: SRC.trails, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 0.7 } }],
   [

@@ -1219,7 +1219,7 @@ export class TwinWorld {
         (c as THREE.Mesh).geometry?.dispose?.();
       }
       for (const g of s.geofences) {
-        const color = g.kind === 'keep_out' ? RED : g.kind === 'caution' ? AMBER : new THREE.Color('#a78bfa');
+        const color = g.kind === 'keep_out' ? RED : g.kind === 'caution' ? AMBER : g.kind === 'operating_area' ? new THREE.Color('#22c55e') : new THREE.Color('#a78bfa');
         const alpha = g.active ? 1 : 0.35;
         const pts = g.poly.map((p) => {
           const w = toWorld(p.x, p.y);

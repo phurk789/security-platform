@@ -1,6 +1,6 @@
 // Rules shared by the server (authoritative) and the clients (to hide what a role cannot do).
-import { BUILDINGS, atBuilding, insideDemoArea } from './site';
-import { routeViolations, type Geofence } from './routing';
+import { BUILDINGS, atBuilding } from './site';
+import { routeOutsideSite, routeViolations, type Geofence } from './routing';
 import { floorPlan, inNoGo, routeCrossesWalls } from './indoor';
 import type { Device, Freshness, Mission, OperationalMode, Role } from './types';
 
@@ -203,7 +203,8 @@ export interface Check {
 /** Pre-approval checks shown to the supervisor and re-run by the server on approve. */
 export function constraintChecksAt(now: number, d: Device, m: Mission, nameOf: (id?: string) => string, fences: Geofence[] = []): Check[] {
   const fresh = freshnessAt(now, d);
-  const inside = m.checkpoints.length > 0 && m.checkpoints.every(insideDemoArea);
+  // Inside the site's operating area when it has one, else the demo site boundary (legs included).
+  const inside = m.checkpoints.length > 0 && routeOutsideSite(m.checkpoints, fences, d.kind === 'uav' ? 'uav' : 'ugv').length === 0;
   const battery = d.battery ?? 0;
   const hits = d.kind === 'ugv' || d.kind === 'uav' ? routeViolations(m.checkpoints, d.pos, fences, d.kind) : [];
   const routeChecks: Check[] = d.indoor

@@ -2,7 +2,7 @@
 // devices and incidents into one FeatureCollection in WGS 84 for any GIS (QGIS, ArcGIS, a city
 // platform); import turns polygons drawn in a GIS into geofences.
 import { geoToSite, siteToGeo, type GeoAnchor } from './geo';
-import type { Geofence } from './routing';
+import { GEOFENCE_KINDS, type Geofence } from './routing';
 import type { SiteGeometry } from './site';
 import type { Device, Incident, Point } from './types';
 
@@ -176,11 +176,11 @@ export interface GeoImport {
   errors: string[];
 }
 
-const KINDS = new Set(['keep_out', 'caution', 'no_fly']);
+const KINDS = new Set<string>(GEOFENCE_KINDS);
 
 /**
  * Polygons from a GIS → geofences in the site grid. Properties understood: name (or id), kind
- * (keep_out | caution | no_fly, default keep_out), appliesTo (["ugv","uav"] or "ugv,uav"),
+ * (keep_out | caution | no_fly | operating_area, default keep_out), appliesTo (["ugv","uav"] or "ugv,uav"),
  * reason, active. Holes are ignored; a MultiPolygon becomes one geofence per part.
  */
 export function geofencesFromGeoJson(anchor: GeoAnchor, extent: { width: number; height: number }, input: unknown, opts: { max?: number; maxVertices?: number } = {}): GeoImport {
@@ -210,7 +210,7 @@ export function geofencesFromGeoJson(anchor: GeoAnchor, extent: { width: number;
     const kind = String(props.kind ?? props.type ?? 'keep_out')
       .toLowerCase()
       .replace(/[\s-]/g, '_');
-    if (!KINDS.has(kind)) return out.errors.push(`${where}: kind must be keep_out, caution or no_fly (got ${kind}).`);
+    if (!KINDS.has(kind)) return out.errors.push(`${where}: kind must be keep_out, caution, no_fly or operating_area (got ${kind}).`);
     const applies = Array.isArray(props.appliesTo)
       ? props.appliesTo.map(String)
       : typeof props.appliesTo === 'string'

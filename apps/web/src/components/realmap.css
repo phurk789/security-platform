@@ -190,3 +190,72 @@
   font-weight: 700;
   letter-spacing: 0.1px;
 }
+
+/* Drawing a route: floating panel at the top of the map, numbered draggable checkpoints. */
+.route-draft {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: min(440px, calc(100% - 32px));
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  background: rgba(14, 23, 41, 0.95);
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.overview.hud .map-real .route-draft {
+  left: calc((100% + var(--view-l) - var(--view-r)) / 2);
+  width: min(440px, calc(100% - var(--view-l) - var(--view-r) - 32px));
+}
+.route-draft-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fbbf24;
+}
+.route-draft p {
+  margin: 0;
+}
+.route-draft-stats {
+  display: flex;
+  gap: 14px;
+  color: var(--text-2);
+}
+.route-draft-stats b {
+  color: #f8fafc;
+  font-size: 0.95rem;
+}
+.route-draft-bad {
+  color: #fca5a5;
+}
+.route-draft-warn {
+  color: #fcd34d;
+}
+.route-draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.route-pt {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid #0b1220;
+  background: #fbbf24;
+  color: #0b1220;
+  font: 700 12px/1 system-ui, sans-serif;
+  cursor: grab;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.route-pt:active {
+  cursor: grabbing;
+}
