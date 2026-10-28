@@ -880,6 +880,11 @@ function Planner({ m }: { m: Mission }) {
             <Hand size={18} /> {t('Accept mission & take control')}
           </button>
         )}
+        {(m.status === 'pending_approval' || m.status === 'approved') && canPrep && (
+          <button className="btn-secondary wide" onClick={() => dispatch({ type: 'cancelMission', missionId: m.id })}>
+            <X size={16} /> {t('Cancel mission')}
+          </button>
+        )}
       </section>
       {dlg && (
         <ReasonDialog
@@ -913,6 +918,9 @@ export function LiveMission({ m }: { m: Mission }) {
   const holder = d.controlOwner;
   const iHold = holder === me.id;
   const off = s.replay.active;
+  const canPrep = can(me.role, 'mission.prepare') && !off;
+  // The newest command was refused or failed: say why where the next press would happen.
+  const refused = cmds[0] && (cmds[0].status === 'rejected' || cmds[0].status === 'failed') && cmds[0].detail ? cmds[0] : undefined;
 
   const send = (type: CommandType) => {
     const n = s.commands.filter((c) => c.missionId === m.id && c.type === type && isTerminal(c)).length;
@@ -978,10 +986,23 @@ export function LiveMission({ m }: { m: Mission }) {
             )}
           </p>
         )}
+        {refused && (
+          <p className="banner warn" role="alert">
+            <b>{t('{type} was not carried out:', { type: refused.type.toUpperCase() })}</b> {t(refused.detail!)}
+          </p>
+        )}
         {m.status === 'assigned' && has('start') && (
-          <button className="btn-primary wide big" disabled={!iHold || off} onClick={() => send('start')}>
+          <button className="btn-primary wide big" disabled={!iHold || off || !!pending} onClick={() => send('start')}>
             <Play size={18} /> {pending?.type === 'start' ? t('Start requested — waiting for vehicle') : t('Send start request')}
           </button>
+        )}
+        {m.status === 'assigned' && canPrep && (
+          <>
+            <button className="btn-secondary wide" disabled={!!pending} onClick={() => dispatch({ type: 'cancelMission', missionId: m.id })}>
+              <X size={16} /> {t('Cancel mission')}
+            </button>
+            <p className="fine">{t('Cancelling releases control and frees {id} for another mission. It has not started moving.', { id: d.id })}</p>
+          </>
         )}
         {(m.status === 'executing' || m.status === 'paused') && (
           <div className="ctl-grid">
@@ -1023,7 +1044,7 @@ export function LiveMission({ m }: { m: Mission }) {
                   key: c.idempotencyKey.split(':').slice(1).join(':'),
                 })}
               </small>
-              {c.detail && <small className={c.status === 'succeeded' ? 'muted' : 'warn-text'}>{c.detail}</small>}
+              {c.detail && <small className={c.status === 'succeeded' ? 'muted' : 'warn-text'}>{t(c.detail)}</small>}
             </li>
           ))}
         </ul>

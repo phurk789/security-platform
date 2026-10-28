@@ -68,6 +68,29 @@ describe('operating area', () => {
     expect((await nida.post('/geofences', { name: 'x', kind: 'parking', poly: square(10, -20) })).status).toBe(400);
   });
 
+  it('keeps patrols inside the area: refused when saved outside it, skipped when the area moved away', async () => {
+    const base = { deviceId: 'UGV-01', operatorId: 'u-somchai', days: [1, 2, 3, 4, 5], times: ['22:00'] };
+    const out = await nida.post('/patrols', { ...base, name: 'Car park loop', route: [{ x: 262, y: 218 }] });
+    expect(out.status).toBe(400);
+    expect(out.body.error).toMatch(/Checkpoints 1 are outside the site/);
+    const p = await nida.post('/patrols', { ...base, name: 'Yard loop', route: [{ x: 30, y: -30 }, { x: 30, y: -5 }] });
+    expect(p.status).toBe(200);
+    // The yard is redrawn smaller: the next run is skipped instead of driving outside it.
+    const area = ((await alex.get('/geofences')).body as any[]).find((g) => g.kind === 'operating_area');
+    const small = [
+      { x: 0, y: -40 },
+      { x: 20, y: -40 },
+      { x: 20, y: 0 },
+      { x: 0, y: 0 },
+    ];
+    expect((await nida.patch(`/geofences/${area.id}`, { poly: small })).status).toBe(200);
+    const run = await nida.post(`/patrols/${p.body.id}/run`);
+    expect(run.status).toBe(409);
+    expect(run.body.error).toMatch(/checkpoints 1, 2 are outside the site/);
+    expect((await nida.patch(`/geofences/${area.id}`, { poly: YARD })).status).toBe(200);
+    await nida.req('DELETE', `/patrols/${p.body.id}`);
+  });
+
   it('reports a vehicle leaving the area, once, and when it is back', async () => {
     expect((await ploy.post('/devices', { id: 'UGV-88', kind: 'ugv', model: 'Yard rover' })).status).toBe(200);
     const orgId = (srv.db.prepare('SELECT org_id FROM devices WHERE id = ?').get('UGV-88') as { org_id: string }).org_id;

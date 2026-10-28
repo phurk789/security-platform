@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Role } from '@13store/shared';
 import { TH } from './i18n-th';
+import { thaiPattern } from './i18n-patterns';
 
 export type Lang = 'th' | 'en';
 type Vars = Record<string, string | number | undefined>;
@@ -31,9 +32,13 @@ function fill(s: string, vars?: Vars) {
   return s.replace(/\{(\w+)\}/g, (m, k) => (vars[k] === undefined ? m : String(vars[k])));
 }
 
-/** Translate an English UI string. Use `{name}` placeholders for values. */
+/**
+ * Translate an English UI string. Use `{name}` placeholders for values. Messages from the server
+ * that carry names or numbers fall back to the patterns in i18n-patterns.ts.
+ */
 export function tr(en: string, vars?: Vars, lang: Lang = current): string {
-  return fill(lang === 'th' ? (TH[en] ?? en) : en, vars);
+  if (lang !== 'th') return fill(en, vars);
+  return fill(TH[en] ?? thaiPattern(en, (s) => tr(s, undefined, lang)) ?? en, vars);
 }
 
 export type T = (en: string, vars?: Vars) => string;

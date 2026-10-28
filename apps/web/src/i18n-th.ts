@@ -1282,4 +1282,17 @@ export const TH: Record<string, string> = {
     'พื้นที่ปฏิบัติงานคือบริเวณที่รถทำงานได้ เมื่อไซต์มีพื้นที่นี้แล้ว เส้นทางต้องอยู่ข้างในเท่านั้น และถ้ารถออกนอกพื้นที่ระหว่างภารกิจจะแจ้งเตือนทันที',
   'Add drawn zone · {n} corners': 'เพิ่มโซนที่วาด · {n} มุม',
   'Discard outline': 'ทิ้งขอบเขตที่วาด',
+  // Mission start, cancel and messages from the vehicle
+  'Cancel mission': 'ยกเลิกภารกิจ',
+  'Cancelling releases control and frees {id} for another mission. It has not started moving.': 'ยกเลิกแล้วสิทธิ์ควบคุมจะถูกปล่อย และ {id} รับภารกิจอื่นได้ (ภารกิจนี้ยังไม่ได้เริ่มวิ่ง)',
+  '{type} was not carried out:': 'คำสั่ง {type} ไม่ได้ทำ:',
+  'Vehicle is disarmed. Arm it on the remote after the safety check, then send start again.': 'รถยังไม่ได้ arm — ตรวจความปลอดภัยรอบรถแล้ว arm ที่รีโมต จากนั้นกดเริ่มอีกครั้งหนึ่งครั้ง',
+  'No heartbeat from the flight controller. Not sent.': 'ไม่ได้รับสัญญาณจากบอร์ดสั่งงาน คำสั่งยังไม่ถูกส่ง',
+  'No route in the start command.': 'คำสั่งเริ่มไม่มีเส้นทาง',
+  'Mission upload failed.': 'ส่งเส้นทางให้รถไม่สำเร็จ',
+  'Mission upload timed out.': 'ส่งเส้นทางให้รถไม่ทันเวลา',
+  'Pause refused by the vehicle.': 'รถไม่ยอมพัก',
+  'Resume refused by the vehicle.': 'รถไม่ยอมทำต่อ',
+  'Hold requested. Waiting for speed 0.': 'สั่ง HOLD แล้ว รอรถหยุดนิ่ง',
+  'Waiting for the vehicle to stop.': 'รอรถหยุด',
 };

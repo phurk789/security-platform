@@ -85,6 +85,7 @@ import {
   fencesAt,
   insideSite,
   operatingAreas,
+  routeOutsideSite,
   type FencedKind,
   planRoute,
   rankUnits,
@@ -3133,6 +3134,9 @@ export class Platform {
     const raw = this.validRoute((input.route ?? prev?.route ?? []) as Point[]);
     // Indoor vehicles get the floor-plan checks below instead of the outdoor obstacle check.
     const route = d.indoor ? raw : this.clearRoute(a.orgId, d, raw);
+    // Outdoors the route has to stay on the site (its operating area when it has one), as approval requires.
+    const outside = d.indoor ? [] : routeOutsideSite(route, this.geofencesOf(a.orgId, d.siteId), d.kind as FencedKind);
+    if (outside.length) fail(400, 'invalid', `Checkpoints ${outside.join(', ')} are outside the site.`);
     if (d.indoor) {
       // Indoor vehicles patrol their floor: the route has to pass the same checks as an indoor mission.
       const bad = indoorRouteChecks(d, { checkpoints: route } as Mission).filter((c) => c.hard && !c.ok);
@@ -3240,6 +3244,8 @@ export class Platform {
     if (!isReadyAt(now, d, this.allMissions(orgId))) return skip(`${d.id} is on another mission.`);
     const hits = routeViolations(p.route, d.pos, this.geofencesOf(orgId, siteId), d.kind as 'ugv' | 'uav');
     if (hits.length) return skip(`route enters keep-out zone "${hits[0].name}".`);
+    const outside = d.indoor ? [] : routeOutsideSite(p.route, this.geofencesOf(orgId, siteId), d.kind as FencedKind);
+    if (outside.length) return skip(`checkpoints ${outside.join(', ')} are outside the site.`);
     const operator = this.db.prepare('SELECT name FROM users WHERE id = ? AND org_id = ? AND active = 1').get(p.operatorId, orgId) as { name: string } | undefined;
     if (!operator) return skip('the assigned operator is no longer active.');
     const source = trigger === 'schedule' ? 'Patrol scheduler' : a.name;
