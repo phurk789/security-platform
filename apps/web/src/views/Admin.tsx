@@ -42,6 +42,7 @@ import { roleLabel, useT } from '../i18n';
 import { StepUpDialog } from '../components/StepUp';
 import { NotificationChannels } from '../components/NotificationChannels';
 import { EdgePairingCard } from '../components/EdgePairingCard';
+import { EdgeAppCard } from '../components/EdgeAppCard';
 
 interface Backup {
   id: string;
@@ -356,6 +357,8 @@ function Admin() {
         </section>
 
         <EdgePairingCard api={api} act={act} registered={Object.keys(devices)} reloadKey={reloads} />
+
+        <EdgeAppCard api={api} act={act} reloadKey={reloads} />
 
         <section className="card">
           <h3>

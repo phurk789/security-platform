@@ -450,6 +450,20 @@ export const TH: Record<string, string> = {
   Paired: 'จับคู่แล้ว',
   Expired: 'หมดอายุ',
   'Code cancelled.': 'ยกเลิกรหัสแล้ว',
+  // Admin → Edge app updates
+  'Edge app updates': 'อัปเดตแอป Edge',
+  'Publish a new build of the 13STORE Edge app: choose the .apk and the .json that build-apk.sh wrote next to it. Paired remotes see it under "Check for updates" and install it after the person on site confirms. The app keeps its pairing.':
+    'เผยแพร่แอป 13STORE Edge รุ่นใหม่: เลือกไฟล์ .apk และไฟล์ .json ที่ build-apk.sh สร้างไว้คู่กัน รีโมตที่จับคู่แล้วจะเห็นในปุ่ม "ตรวจหาอัปเดต" และติดตั้งได้เมื่อคนหน้างานกดยืนยัน การจับคู่ยังอยู่เหมือนเดิม',
+  'version code {n}': 'รหัสเวอร์ชัน {n}',
+  Withdraw: 'ถอนออก',
+  'Update withdrawn.': 'ถอนไฟล์อัปเดตแล้ว',
+  'No app update published.': 'ยังไม่มีไฟล์อัปเดตแอป',
+  Manifest: 'ไฟล์ .json',
+  'Manifest: {error}': 'ไฟล์ .json: {error}',
+  'Uploading…': 'กำลังอัปโหลด…',
+  'Publish {v}': 'เผยแพร่ {v}',
+  Publish: 'เผยแพร่',
+  'Version {v} published. Remotes get it from "Check for updates" in the app.': 'เผยแพร่เวอร์ชัน {v} แล้ว รีโมตจะได้รับเมื่อกด "ตรวจหาอัปเดต" ในแอป',
   'Allowed video sources': 'แหล่งวิดีโอที่อนุญาต',
   'Gateways may only send browsers to media servers on this list: scheme, address and port, for example the edge PC running MediaMTX. Loopback addresses (localhost, 127.x) are refused. A gateway picks up a change when it reconnects.':
     'Gateway ส่งเบราว์เซอร์ไปดูวิดีโอได้เฉพาะ media server ที่อยู่ในรายการนี้ (scheme, ที่อยู่ และพอร์ต เช่น เครื่อง edge ที่รัน MediaMTX) ระบบไม่รับที่อยู่ loopback (localhost, 127.x) และ gateway จะใช้รายการใหม่เมื่อเชื่อมต่อใหม่',

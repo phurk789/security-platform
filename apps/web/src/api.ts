@@ -65,6 +65,25 @@ export class Api {
     return res;
   }
 
+  /** PUT a file as the raw request body (edge app APKs). Errors as for every other call. */
+  async upload<T>(path: string, file: Blob, contentType: string): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetch(`/api/v1${path}`, {
+        method: 'PUT',
+        headers: { 'content-type': contentType, ...(this.token ? { authorization: `Bearer ${this.token}` } : {}), ...(this.replay ? { 'x-console-mode': 'replay' } : {}) },
+        body: file,
+      });
+    } catch {
+      throw new ApiError(0, 'network', 'Cannot reach the server. Check the connection.');
+    }
+    if (!res.ok) {
+      const b = (await res.json().catch(() => ({}))) as ApiErrorBody;
+      throw new ApiError(res.status, b.code ?? 'error', b.error ?? `Upload failed (${res.status}).`);
+    }
+    return res.json() as Promise<T>;
+  }
+
   async json<T>(method: string, path: string, body?: unknown): Promise<T> {
     return (await this.raw(method, path, body)).json() as Promise<T>;
   }
