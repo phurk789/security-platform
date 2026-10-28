@@ -34,6 +34,10 @@ import {
 import { CommandLedger, admitCommand, type Adapter, type AdapterContext } from '../sdk';
 import type { PushState } from '../videoPush';
 import { DriveState } from '../drive';
+import { forceMainStreamH264 } from './siyiCodec';
+
+/** Try the camera codec fix at most this often (the camera restart takes several seconds). */
+export const CODEC_FIX_INTERVAL_MS = 10 * 60_000;
 
 export type VehicleProfile = 'ardupilot-rover' | 'ardupilot-copter' | 'px4-rover' | 'px4-multicopter';
 
@@ -79,6 +83,13 @@ export interface MavlinkVehicleConfig {
    * steering and throttle channels. `true` takes the defaults (TELEOP_DEFAULTS).
    */
   teleop?: true | TeleopConfig;
+  /**
+   * When the pushed camera video turns out to be H.265, switch the camera's main stream back to
+   * H.264 over the SIYI SDK (UDP 37260 on the stream's host) and restart it. Default true.
+   */
+  fixCameraCodec?: boolean;
+  /** Replaces the SIYI codec fix (tests). */
+  codecFixer?: typeof forceMainStreamH264;
 }
 
 /** Live driving from the console. Every field is optional; see TELEOP_DEFAULTS. */
@@ -263,6 +274,9 @@ export class MavlinkVehicleAdapter implements Adapter {
   private overriding = false;
   /** Overrides have gone out to an armed vehicle at least once (the part is then known to work). */
   private droveOnce = false;
+  // camera codec fix
+  private codecFixAt = 0;
+  private codecFixNote?: string;
 
   constructor(private cfg: MavlinkVehicleConfig) {
     this.proto = new MavLinkProtocolV2(cfg.gcsSystemId ?? 255, 190);
@@ -382,9 +396,38 @@ export class MavlinkVehicleAdapter implements Adapter {
   /** Pushed video: shown on the camera part (rides along with the next telemetry sample). */
   onMediaState(s: PushState) {
     const hevc = s.codec === 'hevc';
+    if (s.status === 'pushing' && hevc) this.fixCameraCodec();
     this.comps.set('cam', {
       status: s.status === 'pushing' ? (hevc ? 'warn' : 'ok') : s.status === 'missing' ? 'fault' : s.status === 'stopped' ? 'offline' : 'warn',
-      detail: s.status === 'pushing' && hevc ? 'Pushing H.265, which browsers cannot play: set the camera main stream to H.264' : s.detail,
+      detail:
+        s.status === 'pushing' && hevc
+          ? this.codecFixNote
+            ? `The camera sent H.265, which browsers cannot play. ${this.codecFixNote}`
+            : 'Pushing H.265, which browsers cannot play: switching the camera main stream to H.264'
+          : s.detail,
+    });
+  }
+
+  /**
+   * The camera sends H.265 (SIYI cameras fall back to it by themselves): switch its main stream
+   * back to H.264 and restart it. At most once per CODEC_FIX_INTERVAL_MS, so it can never loop.
+   */
+  private fixCameraCodec() {
+    if (this.cfg.fixCameraCodec === false || !this.cfg.stream?.rtsp || !this.ctx) return;
+    const now = this.ctx.now();
+    if (this.codecFixAt && now - this.codecFixAt < CODEC_FIX_INTERVAL_MS) return;
+    this.codecFixAt = now;
+    let host: string;
+    try {
+      host = new URL(this.cfg.stream.rtsp).hostname;
+    } catch {
+      return;
+    }
+    const fix = this.cfg.codecFixer ?? forceMainStreamH264;
+    void fix({ host }).then((r) => {
+      this.codecFixNote = r.detail;
+      this.ctx.log[r.changed ? 'info' : 'warn'](`${this.cfg.deviceId}: camera sent H.265. ${r.detail}`);
+      this.comps.set('cam', { status: 'warn', detail: `The camera sent H.265, which browsers cannot play. ${r.detail}` });
     });
   }
 

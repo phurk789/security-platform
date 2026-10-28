@@ -35,6 +35,8 @@ export type DeviceConfig =
       stream?: StreamInfo;
       /** UGVs: allow live driving from the console (RC override on steering/throttle). `true` = defaults. */
       teleop?: true | TeleopConfig;
+      /** Switch a SIYI camera back to H.264 when it pushes H.265 (default true). */
+      fixCameraCodec?: boolean;
     }
   | ({ type: 'ros2-nav2' } & RosNav2Config)
   | {
@@ -142,6 +144,7 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           radio: d.radio,
           stream: d.stream,
           teleop: d.teleop,
+          fixCameraCodec: d.fixCameraCodec,
         }),
       );
     else if (d.type === 'ros2-nav2') out.push(new RosNav2Adapter(d));

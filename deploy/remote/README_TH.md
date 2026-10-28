@@ -92,7 +92,7 @@ cp ~/edge/site.matek-ugv.example.json ~/edge/site.json
 
 ภาพกล้องตั้งไว้แล้วเป็น `"stream": { "rtsp": "rtsp://192.168.144.25:8554/main.264", "push": true }` คือให้ gateway ส่งภาพเข้า .13 server จะบอก gateway เองว่าส่งไปที่ไหน และบอกเบราว์เซอร์ว่าดูภาพที่ไหน **ไม่ต้องใส่ IP รีโมต และไม่ต้องทำข้อ 5**
 
-ถ้ากล้องอยู่ที่ IP หรือ path อื่น ให้แก้ `stream.rtsp` ให้ตรง กล้องต้องส่งเป็น **H.264** (ถ้าเป็น H.265 gateway จะเตือนใน log และหน้าเว็บขึ้นเตือนที่ชิ้นส่วนกล้อง)
+ถ้ากล้องอยู่ที่ IP หรือ path อื่น ให้แก้ `stream.rtsp` ให้ตรง กล้องต้องส่งเป็น **H.264** ถ้ากล้อง SIYI กลับไปส่ง H.265 เอง gateway จะสั่งให้ main stream กลับเป็น H.264 และรีสตาร์ตกล้องให้โดยอัตโนมัติ (ไม่เกิน 1 ครั้งต่อ 10 นาที ภาพหายไปราว 10–20 วินาที) ถ้าไม่ต้องการให้ทำเอง ใส่ `"fixCameraCodec": false` ที่อุปกรณ์นั้น
 
 **แบบเดิม (pull) เท่านั้น:** ใช้ `"whep": "http://REMOTE_IP:8889/ugv-01/whep"` แทน `"push": true` แก้ `webrtcAdditionalHosts: [REMOTE_IP]` ใน `nano ~/edge/mediamtx.android.yml` แล้วทำข้อ 5
 
@@ -205,7 +205,7 @@ rm -rf ~/edge-kit && cp -r ~/storage/downloads/edge-kit ~/edge-kit && bash ~/edg
 | gateway ขึ้น `the server gave no video publish address` | .13 ยังไม่ได้เปิด media server (`MEDIA_INGEST_URL` / `MEDIA_PUBLIC_URL` ใน `.env.server` และบริการ `media` ใน compose) ใช้แบบเดิม (pull) ไปก่อน |
 | gateway ขึ้น `video push stopped: ... 401 Unauthorized` | key ของ gateway ถูกยกเลิก หรือรถถูก gateway ตัวอื่นรับไป ตรวจว่ามี gateway รันอยู่ตัวเดียว |
 | gateway ขึ้น `video push stopped: ... Connection refused` / `timed out` | ถ้าเป็นที่กล้อง (`192.168.144.25`): กล้องยังบูตไม่เสร็จหรือ IP ผิด ถ้าเป็นที่ `192.168.20.13:18554`: บริการ `media` บน .13 ไม่ได้รัน gateway ลองใหม่เองทุก 2–30 วินาที |
-| ภาพจอดำ / เว็บขึ้น "เซิร์ฟเวอร์วิดีโอขัดข้อง (400)" | กล้องยังส่ง H.265 (`mediamtx.log` ขึ้น `track (H265)` และ `doesn't contain any supported codec`): ตั้ง main stream เป็น H.264 ในเมนูกล้องของ UniGCS ถ้าหาเมนูไม่เจอ สั่งผ่าน SDK ของกล้อง (คำสั่ง `0x21`) แล้วปิดเปิดรถ กล้องในโดม (รหัส 75…) ใช้ค่าใหม่หลังรีบูต |
+| ภาพจอดำ / เว็บขึ้น "เซิร์ฟเวอร์วิดีโอขัดข้อง (400)" | กล้องส่ง H.265 (media server ขึ้น `doesn't contain any supported codec`, ชิ้นส่วนกล้องบนเว็บเขียนว่า "The camera sent H.265"): gateway รุ่นใหม่สลับกลับเป็น H.264 และรีสตาร์ตกล้องให้เอง รอ 20 วินาที ถ้ายังไม่หาย (เฟิร์มแวร์กล้องไม่รับคำสั่งรีสตาร์ต) ให้ปิดเปิดรถ ใช้ gateway รุ่นเก่าอยู่: สั่งผ่าน SDK ของกล้อง (คำสั่ง `0x21`) แล้วปิดเปิดรถ |
 | UniGCS ค้าง "parameter loading" | การเชื่อมต่อใน UniGCS ต้องเป็น UDPCL `192.168.144.20:19856` เมื่อ Datalink 1 = UDP และต้องไม่มี gateway รันอยู่ |
 | UniGCS กดเปลี่ยนโหมดไม่ไป | gateway รันอยู่ด้วย: หยุด gateway หรือใช้สวิตช์โหมดบนตัวรีโมตแทน |
 | แผงอุปกรณ์บนเว็บขึ้น STALE ทั้งที่รถส่งข้อมูล | ดูด้วยบัญชี admin: admin ไม่ได้รับข้อมูลสด ให้ดูด้วยบัญชีหัวหน้าเวรหรือผู้ควบคุม |
