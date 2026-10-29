@@ -104,6 +104,15 @@ export interface Device {
   limitations: string;
   zone: string;
   pos: Point;
+  /**
+   * No position fix right now (e.g. GNSS without a 3D fix): `pos` is only the last known or registered
+   * one, so maps leave the device off rather than draw it somewhere it may not be.
+   */
+  noFix?: boolean;
+  /** Can be driven live from the console, with these adapter limits (declared by the gateway). */
+  teleop?: { maxThrottle: number; maxSteer: number; deadmanMs: number };
+  /** User driving it live right now (drive session), if any. */
+  drivenBy?: string;
   /** Altitude in metres above site datum (UAV only). */
   alt?: number;
   /** Horizontal accuracy in metres. */

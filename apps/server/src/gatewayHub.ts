@@ -1,5 +1,5 @@
 // Edge gateway connections. Commands go out here; telemetry, acks and device events come in.
-import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type SrvCamera, type SrvCommand, type SrvDemo } from '@13store/shared';
+import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type SrvCamera, type SrvCommand, type SrvDemo, type SrvDrive } from '@13store/shared';
 import type { WebSocket } from 'ws';
 import type { Accounts } from './accounts';
 import type { GatewayLink, Platform } from './platform';
@@ -46,7 +46,7 @@ export class GatewayHub implements GatewayLink {
               return;
             }
             conn.gatewayId = String(msg.gatewayId).slice(0, 64);
-            const { accepted, rejected } = this.p.gatewayHello(conn.orgId, auth.actor.siteIds, conn.gatewayId, msg.adapters ?? [], msg.geo);
+            const { accepted, rejected, media } = this.p.gatewayHello(conn.orgId, auth.actor.siteIds, conn.gatewayId, msg.adapters ?? [], msg.geo);
             for (const id of conn.devices) if (this.byDevice.get(id) === conn) this.byDevice.delete(id);
             conn.devices = new Set(accepted);
             for (const id of accepted) {
@@ -54,7 +54,7 @@ export class GatewayHub implements GatewayLink {
               if (old && old !== conn) old.devices.delete(id);
               this.byDevice.set(id, conn);
             }
-            send({ t: 'welcome', serverTime: this.p.now(), accepted, rejected });
+            send({ t: 'welcome', serverTime: this.p.now(), accepted, rejected, ...(media.length ? { media } : {}) });
             return;
           }
           case 'telemetry':
@@ -87,7 +87,7 @@ export class GatewayHub implements GatewayLink {
     });
   }
 
-  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera): boolean {
+  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera | SrvDrive): boolean {
     const c = this.byDevice.get(deviceId);
     if (!c || c.orgId !== orgId || c.ws.readyState !== c.ws.OPEN) return false;
     c.ws.send(JSON.stringify(msg));

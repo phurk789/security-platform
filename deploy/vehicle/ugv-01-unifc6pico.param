@@ -1,0 +1,99 @@
+# UGV-01 (small electric tracked UGV, CODBOT RCU-ND motor board)
+# Flight controller: SIYI UniFC 6 Pico, ArduRover V4.7.0 (1511f271). Applied on top of the board's
+# factory Rover defaults; anything not listed stays at its default. Loadable in Mission Planner.
+# Wiring and the reasons behind each value: deploy/vehicle/UGV-01_TH.md
+# Matches the board as read back on 2026-10-28 15:31 (vehicle-backups/unifc6pico-ugv-01-20261028-final.param).
+#
+# Outputs (each lead plugged upright into one output column)
+#   output 1 -> RCU-ND C7 (steering)
+#   output 3 -> RCU-ND C9 (forward / back)
+#   output 4 -> RCU-ND C6 (gear: below ~1300 off, 1500 slow, 1950 fast), from the ch11 switch
+SERVO1_FUNCTION,26
+SERVO1_MIN,1100
+SERVO1_MAX,1900
+SERVO1_TRIM,1500
+SERVO2_FUNCTION,0
+# Forward/back widened to 1000-2000 for top speed
+SERVO3_FUNCTION,70
+SERVO3_MIN,1000
+SERVO3_MAX,2000
+SERVO3_TRIM,1500
+# ch11 scaled onto C6: switch 1050 -> 1500 (slow), 1500 -> 1725 (medium), 1950 -> 2100 (fast).
+# C6 speeds up gradually above 1500; 2100 was faster than 1950 (2026-10-28 15:35).
+# With no remote signal the output stops, and the RCU-ND switches off.
+SERVO4_FUNCTION,150
+SERVO4_MIN,1500
+SERVO4_TRIM,1725
+SERVO4_MAX,2100
+# No throttle ramp on the flight controller: the RCU-ND ramps by itself; a 1 s ramp made it jerk
+MOT_SLEWRATE,0
+#
+# Stick ranges measured from the SIYI UniRC 7 Pro (1050-1950)
+RC1_MIN,1050
+RC1_MAX,1950
+RC1_TRIM,1500
+RC3_MIN,1050
+RC3_MAX,1950
+RC3_TRIM,1500
+#
+# Arm / disarm on ch12
+RC12_OPTION,153
+#
+# Mode switch on ch10: low = HOLD, middle and high = MANUAL
+MODE_CH,10
+MODE1,4
+MODE2,4
+MODE3,0
+MODE4,0
+MODE5,0
+MODE6,0
+#
+# Failsafes: remote lost -> HOLD after 1.5 s, gateway lost -> HOLD
+FS_THR_ENABLE,1
+FS_ACTION,2
+FS_GCS_ENABLE,1
+#
+# Console driving: RC overrides expire 1 s after the gateway stops sending
+RC_OVERRIDE_TIME,1
+#
+# SIYI air unit UART is on TELEM2 (SERIAL2): MAVLink 2 at 57600 (factory values, kept)
+SERIAL2_PROTOCOL,2
+SERIAL2_BAUD,57
+# Only TX/RX/GND are wired, so no flow control
+BRD_SER2_RTSCTS,0
+# Keep UniGCS from overwriting TELEM2 stream rates (the gateway uses SET_MESSAGE_INTERVAL)
+MAV3_OPTIONS,4
+#
+# TELEM1 settings from the first draft (TELEM1 is not wired; harmless)
+SERIAL1_PROTOCOL,2
+SERIAL1_BAUD,57
+BRD_SER1_RTSCTS,0
+MAV2_OPTIONS,4
+#
+# No hardware safety button on this vehicle
+BRD_SAFETY_DEFLT,0
+#
+# Compass: only the external one in the GPS module (QMC5883L). Calibrated outdoors on 2026-10-28 with the
+# large-vehicle method (nose pointed north, MAV_CMD_FIXED_MAG_CAL_YAW); offsets are vehicle-specific and not in this file.
+# The internal compass stays off: it sits near the motor and power wiring.
+COMPASS_USE,1
+COMPASS_USE2,0
+COMPASS_USE3,0
+#
+# Accelerometer: simple calibration done on the vehicle on level ground (2026-10-28 ~12:05).
+# Offsets are board-specific and are not copied by this file; redo the calibration on a new board.
+#
+# AUTO (waypoint missions), step 1 — 2026-10-28. Slow first runs; stuck or crashed in AUTO = HOLD.
+WP_SPEED,1
+FS_CRASH_CHECK,1
+# ArduPilot's own fence, a 30 m circle around the arming point, HOLD on breach.
+# Arming needs a GPS position while the fence is on.
+FENCE_ENABLE,1
+FENCE_TYPE,2
+FENCE_RADIUS,30
+FENCE_ACTION,2
+#
+# GPS: the u-blox module (with the QMC5883L compass) is plugged into the GPS2 port (SERIAL4).
+# The board takes the first GPS-protocol port as GPS 1, so the empty GPS1 port (SERIAL3) is off.
+SERIAL3_PROTOCOL,-1
+SERIAL4_PROTOCOL,5

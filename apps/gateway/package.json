@@ -9,6 +9,8 @@
     "start": "tsx src/cli.ts",
     "dev": "tsx src/cli.ts",
     "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --external:ws --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\"",
+    "build:single": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist-single/edge-gateway.mjs --external:bufferutil --external:utf-8-validate --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\"",
+    "build:android": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist-android/edge-gateway.mjs --external:bufferutil --external:utf-8-validate --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\"",
     "start:prod": "node dist/index.js"
   },
   "dependencies": {

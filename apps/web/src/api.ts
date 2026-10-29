@@ -72,6 +72,7 @@ export class Api {
   get = <T,>(p: string) => this.json<T>('GET', p);
   post = <T,>(p: string, b: unknown = {}) => this.json<T>('POST', p, b);
   patch = <T,>(p: string, b: unknown) => this.json<T>('PATCH', p, b);
+  put = <T,>(p: string, b: unknown) => this.json<T>('PUT', p, b);
   del = <T,>(p: string) => this.json<T>('DELETE', p);
 
   async blob(path: string) {

@@ -6,6 +6,7 @@ import {
   Eraser,
   Globe2,
   KeyRound,
+  MapPinned,
   Octagon,
   Plus,
   RefreshCw,
@@ -17,6 +18,7 @@ import {
   Trash2,
   Upload,
   UserPlus,
+  Video,
 } from 'lucide-react';
 import {
   GEOFENCE_KIND_LABEL,
@@ -29,6 +31,7 @@ import {
   fmtTime,
   type ApiKeyView,
   type GeoAnchor,
+  type GeofenceKind,
   type DetectionRule,
   type LicenseStatus,
   type OrgSettings,
@@ -40,6 +43,25 @@ import { useStore } from '../store';
 import { roleLabel, useT } from '../i18n';
 import { StepUpDialog } from '../components/StepUp';
 import { NotificationChannels } from '../components/NotificationChannels';
+import { EdgePairingCard } from '../components/EdgePairingCard';
+import { finishedDraft, routeDraft, useRouteDraft } from '../domain/routeDraft';
+
+interface ZoneForm {
+  name: string;
+  kind: GeofenceKind;
+  x: string;
+  y: string;
+  w: string;
+  d: string;
+  uav: boolean;
+  reason: string;
+}
+
+/** The zone form as it was when the admin went to the map to draw its outline, if coming back from it. */
+const returningZone = () => {
+  const d = routeDraft.get();
+  return d?.purpose === 'zone' && d.state === 'done' ? (d.meta as ZoneForm | undefined) : undefined;
+};
 
 interface Backup {
   id: string;
@@ -75,6 +97,24 @@ export const LICENSE_LABEL: Record<LicenseStatus['state'], string> = {
 };
 const LIMIT_LABEL = { sites: 'Sites', devices: 'Devices', users: 'Users' } as const;
 
+interface EdgeOrigin {
+  siteId: string | null;
+  origin: string;
+}
+
+/**
+ * The origin (scheme, host, port) of what the administrator typed, so a pasted WHEP URL such as
+ * http://192.168.10.50:8889/ugv-01/whep works too. The server checks the rest (loopback, metadata).
+ */
+export function edgeOriginOf(input: string): string | null {
+  try {
+    const u = new URL(input.trim());
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 export function AdminPage() {
   const { session } = useStore();
   const t = useT();
@@ -101,10 +141,22 @@ function Admin() {
   const [ret, setRet] = useState<Record<keyof OrgSettings['retention'], string>>({ telemetryDays: '90', closedIncidentDays: '0', evidenceDays: '0', detectionDays: '90' });
   const geofences = useStore().s.geofences;
   const geo = useStore().s.geo;
+  const devices = useStore().s.devices;
+  const [reloads, setReloads] = useState(0);
   const [ga, setGa] = useState<{ lat: string; lon: string; rot: string } | null>(null);
   const gaForm = ga ?? { lat: String(geo.originLat), lon: String(geo.originLon), rot: String(geo.rotationDeg ?? 0) };
   const [imp, setImp] = useState<{ imported: number; errors: string[] } | null>(null);
-  const [ng, setNg] = useState({ name: '', kind: 'keep_out' as 'keep_out' | 'caution' | 'no_fly', x: '200', y: '120', w: '40', d: '30', uav: true, reason: '' });
+  const [ng, setNg] = useState<ZoneForm>(() => returningZone() ?? { name: '', kind: 'keep_out', x: '200', y: '120', w: '40', d: '30', uav: true, reason: '' });
+  // A zone outline drawn on the real map (overview), used instead of the rectangle.
+  const outline = finishedDraft(useRouteDraft(), 'zone', '');
+  const dispatch = useStore().dispatch;
+  const drawZone = () => {
+    routeDraft.start({ purpose: 'zone', deviceId: '', points: outline?.points ?? [], returnTo: 'admin', meta: ng });
+    dispatch({ type: 'setView', view: 'overview' });
+  };
+  useEffect(() => {
+    if (returningZone()) document.getElementById('admin-geofences')?.scrollIntoView({ block: 'start' });
+  }, []);
   const [rules, setRules] = useState<DetectionRule[]>(DEFAULT_DETECTION_RULES);
   const [rulesDirty, setRulesDirty] = useState(false);
   const [pq, setPq] = useState('');
@@ -116,9 +168,12 @@ function Admin() {
   const [nu, setNu] = useState({ username: '', name: '', role: 'dispatcher' as Role, password: '' });
   const [nk, setNk] = useState({ label: '', kind: 'integration' as 'integration' | 'gateway' });
   const [nd, setNd] = useState({ id: '', kind: 'ugv' as 'ugv' | 'uav' | 'cctv', model: '' });
+  const [origins, setOrigins] = useState<EdgeOrigin[]>([]);
+  const [no, setNo] = useState('');
+  const orgOrigins = origins.filter((o) => !o.siteId).map((o) => o.origin);
 
   const load = useCallback(async () => {
-    const [u, k, g, b, a, l, st] = await Promise.all([
+    const [u, k, g, b, a, l, st, eo] = await Promise.all([
       api.get<UserAdminView[]>('/admin/users'),
       api.get<ApiKeyView[]>('/admin/keys'),
       api.get<{ gatewayId: string; devices: string[] }[]>('/admin/gateways'),
@@ -126,10 +181,13 @@ function Admin() {
       api.get<{ ok: boolean; count: number; brokenAt?: number }>('/audit/verify'),
       api.get<LicenseStatus>('/license'),
       api.get<OrgSettings>('/admin/settings'),
+      api.get<EdgeOrigin[]>('/admin/edge-origins'),
     ]);
     setUsers(u);
     setKeys(k);
+    setReloads((n) => n + 1);
     setGws(g);
+    setOrigins(eo);
     setBackups(b);
     setAudit(a);
     setLic(l);
@@ -327,6 +385,8 @@ function Admin() {
           </form>
         </section>
 
+        <EdgePairingCard api={api} act={act} registered={Object.keys(devices)} reloadKey={reloads} />
+
         <section className="card">
           <h3>
             <Router size={16} /> {t('Edge gateways and devices')}
@@ -359,6 +419,58 @@ function Admin() {
             <input id="nd-model" placeholder={t('Model')} value={nd.model} onChange={(e) => setNd({ ...nd, model: e.target.value })} />
             <button className="btn-primary" disabled={!nd.id}>
               <Plus size={16} /> {t('Register')}
+            </button>
+          </form>
+        </section>
+
+        <section className="card">
+          <h3>
+            <Video size={16} /> {t('Allowed video sources')}
+          </h3>
+          <p className="fine">
+            {t(
+              'Gateways may only send browsers to media servers on this list: scheme, address and port, for example the edge PC running MediaMTX. Loopback addresses (localhost, 127.x) are refused. A gateway picks up a change when it reconnects.',
+            )}
+          </p>
+          {origins.length === 0 && <p className="muted">{t('Nothing allowed yet: real cameras and vehicles show no video.')}</p>}
+          <ul className="list">
+            {origins.map((o) => (
+              <li key={`${o.siteId ?? ''}|${o.origin}`}>
+                <span className="mono">{o.origin}</span>
+                <span className="row gap-s">
+                  <small className="muted">{o.siteId ? t('Site {id}', { id: o.siteId }) : t('Whole organisation')}</small>
+                  {!o.siteId && (
+                    <button
+                      className="icon-btn"
+                      title={t('Remove')}
+                      aria-label={t('Remove {origin}', { origin: o.origin })}
+                      onClick={() => act(() => api.put('/admin/edge-origins', { origins: orgOrigins.filter((x) => x !== o.origin) }), t('{origin} removed.', { origin: o.origin }))}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const origin = edgeOriginOf(no);
+              if (!origin) {
+                setMsg({ tone: 'warn', text: t('Enter an address such as http://192.168.10.50:8889 (a full video link works too).') });
+                return;
+              }
+              act(
+                () => api.put('/admin/edge-origins', { origins: [...new Set([...orgOrigins, origin])] }),
+                t('{origin} allowed. Restart the gateway so it declares its video again.', { origin }),
+              ).then(() => setNo(''));
+            }}
+          >
+            <input id="eo-origin" placeholder="http://192.168.10.50:8889" value={no} onChange={(e) => setNo(e.target.value)} aria-label={t('Video source address')} />
+            <button className="btn-primary" disabled={!no.trim()}>
+              <Plus size={16} /> {t('Allow')}
             </button>
           </form>
         </section>
@@ -531,7 +643,7 @@ function Admin() {
                   })
                 }
               >
-                {t('Run now')}
+                {t('Apply retention now')}
               </button>
             </div>
           </form>
@@ -723,14 +835,15 @@ function Admin() {
           )}
         </section>
 
-        <section className="card">
+        <section className="card" id="admin-geofences">
           <h3>
             <Octagon size={16} /> {t('Geofences')}
           </h3>
           <p className="fine" style={{ marginTop: 0 }}>
             {t(
               'Keep-out zones refuse routes and raise a breach when a vehicle enters; caution zones are noted on the timeline; no-fly zones apply to aircraft. Supervisors can change them too.',
-            )}
+            )}{' '}
+            {t('An operating area is where vehicles may work: once the site has one, routes must stay inside it and leaving it during a mission raises a breach.')}
           </p>
           <ul className="list">
             {geofences.map((g) => (
@@ -773,39 +886,68 @@ function Admin() {
                     kind: ng.kind,
                     appliesTo: ng.kind === 'no_fly' ? ['uav'] : ng.uav ? ['ugv', 'uav'] : ['ugv'],
                     reason: ng.reason.trim() || undefined,
-                    poly: [
-                      { x, y },
-                      { x: x + w, y },
-                      { x: x + w, y: y + d },
-                      { x, y: y + d },
-                    ],
+                    poly: outline
+                      ? outline.points
+                      : [
+                          { x, y },
+                          { x: x + w, y },
+                          { x: x + w, y: y + d },
+                          { x, y: y + d },
+                        ],
                   }),
                 t('Geofence {name} saved.', { name: ng.name.trim() }),
-              ).then(() => setNg({ ...ng, name: '', reason: '' }));
+              ).then(() => {
+                setNg({ ...ng, name: '', reason: '' });
+                if (outline) routeDraft.clear();
+              });
             }}
           >
             <input placeholder={t('Name, e.g. Stage build-up')} value={ng.name} onChange={(e) => setNg({ ...ng, name: e.target.value })} />
-            <select value={ng.kind} onChange={(e) => setNg({ ...ng, kind: e.target.value as 'keep_out' | 'caution' | 'no_fly' })}>
+            <select value={ng.kind} onChange={(e) => setNg({ ...ng, kind: e.target.value as GeofenceKind })}>
               <option value="keep_out">{t('Keep-out')}</option>
               <option value="caution">{t('Caution')}</option>
               <option value="no_fly">{t('No-fly')}</option>
+              <option value="operating_area">{t('Operating area')}</option>
             </select>
-            <input className="num" placeholder="x" value={ng.x} onChange={(e) => setNg({ ...ng, x: e.target.value })} aria-label="x" />
-            <input className="num" placeholder="y" value={ng.y} onChange={(e) => setNg({ ...ng, y: e.target.value })} aria-label="y" />
-            <input className="num" placeholder={t('width')} value={ng.w} onChange={(e) => setNg({ ...ng, w: e.target.value })} aria-label={t('width')} />
-            <input className="num" placeholder={t('depth')} value={ng.d} onChange={(e) => setNg({ ...ng, d: e.target.value })} aria-label={t('depth')} />
+            {!outline && (
+              <>
+                <input className="num" placeholder="x" value={ng.x} onChange={(e) => setNg({ ...ng, x: e.target.value })} aria-label="x" />
+                <input className="num" placeholder="y" value={ng.y} onChange={(e) => setNg({ ...ng, y: e.target.value })} aria-label="y" />
+                <input className="num" placeholder={t('width')} value={ng.w} onChange={(e) => setNg({ ...ng, w: e.target.value })} aria-label={t('width')} />
+                <input className="num" placeholder={t('depth')} value={ng.d} onChange={(e) => setNg({ ...ng, d: e.target.value })} aria-label={t('depth')} />
+              </>
+            )}
             {ng.kind !== 'no_fly' && (
               <label className="check">
                 <input type="checkbox" checked={ng.uav} onChange={(e) => setNg({ ...ng, uav: e.target.checked })} /> {t('also aircraft')}
               </label>
             )}
             <input placeholder={t('Reason shown to operators')} value={ng.reason} onChange={(e) => setNg({ ...ng, reason: e.target.value })} />
-            <button
-              className="btn-primary"
-              disabled={!ng.name.trim() || ![ng.x, ng.y, ng.w, ng.d].every((v) => v !== '' && Number.isFinite(Number(v))) || Number(ng.w) <= 0 || Number(ng.d) <= 0}
-            >
-              <Plus size={16} /> {t('Add rectangle (site metres)')}
-            </button>
+            {outline ? (
+              <>
+                <button className="btn-primary" disabled={!ng.name.trim()}>
+                  <Plus size={16} /> {t('Add drawn zone · {n} corners', { n: outline.points.length })}
+                </button>
+                <button type="button" className="btn-secondary" onClick={drawZone}>
+                  <MapPinned size={16} /> {t('Change on the map')}
+                </button>
+                <button type="button" className="btn-ghost" onClick={() => routeDraft.clear()}>
+                  {t('Discard outline')}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="btn-primary"
+                  disabled={!ng.name.trim() || ![ng.x, ng.y, ng.w, ng.d].every((v) => v !== '' && Number.isFinite(Number(v))) || Number(ng.w) <= 0 || Number(ng.d) <= 0}
+                >
+                  <Plus size={16} /> {t('Add rectangle (site metres)')}
+                </button>
+                <button type="button" className="btn-secondary" onClick={drawZone}>
+                  <MapPinned size={16} /> {t('Draw on the map')}
+                </button>
+              </>
+            )}
           </form>
         </section>
 

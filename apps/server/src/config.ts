@@ -9,6 +9,20 @@ export interface Config {
   dbFile: string;
   /** Secret used to sign short-lived media URLs. */
   mediaSecret: string;
+  /**
+   * The platform's own media server, for gateways that push video (stream.push). Both set = push on.
+   * mediaIngestUrl: where gateways publish, rtsp://host:port (e.g. rtsp://192.168.20.13:18554).
+   * mediaPublicUrl: where browsers play from, http(s)://host:port (e.g. http://192.168.20.13:18889).
+   */
+  mediaIngestUrl?: string;
+  mediaPublicUrl?: string;
+  /**
+   * Google Maps Platform key for Google basemaps (Map Tiles API, proxied: never sent to browsers).
+   * Unset: no Google basemaps. Needs the Map Tiles API enabled, billing, and Google's terms accepted.
+   */
+  googleMapsApiKey?: string;
+  /** Map Tiles API base URL (tests point it at a fake). */
+  googleTilesUrl: string;
   /** Password given to seeded demo users (demo env only). */
   seedPassword: string;
   sessionTtlMs: number;
@@ -85,6 +99,10 @@ export function loadConfig(over: Partial<Config> = {}): Config {
     dataDir,
     dbFile: process.env.DB_FILE || resolve(dataDir, 'platform.sqlite'),
     mediaSecret: process.env.MEDIA_SECRET || (env === 'demo' ? 'demo-media-secret' : ''),
+    mediaIngestUrl: process.env.MEDIA_INGEST_URL || undefined,
+    mediaPublicUrl: process.env.MEDIA_PUBLIC_URL || undefined,
+    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY?.trim() || undefined,
+    googleTilesUrl: process.env.GOOGLE_TILES_URL || 'https://tile.googleapis.com',
     seedPassword: process.env.SEED_PASSWORD || 'demo1234',
     sessionTtlMs: Number(process.env.SESSION_TTL_MS || 12 * 60 * 60_000),
     embedGateway: (process.env.EMBED_GATEWAY ?? (env === 'demo' ? '1' : '0')) === '1',
@@ -112,7 +130,28 @@ export function loadConfig(over: Partial<Config> = {}): Config {
   };
   if (!ENV_MODES.includes(cfg.env)) throw new Error(`env must be "demo" or "pilot" (got "${cfg.env}")`);
   if (cfg.env === 'pilot' && !cfg.mediaSecret) throw new Error('MEDIA_SECRET must be set in pilot mode');
+  checkMediaServer(cfg);
   return cfg;
+}
+
+/** The two media server URLs come as a pair, each a plain scheme://host:port with nothing after it. */
+function checkMediaServer(cfg: Config) {
+  const { mediaIngestUrl: ingest, mediaPublicUrl: pub } = cfg;
+  if (!ingest && !pub) return;
+  if (!ingest || !pub) throw new Error('Set MEDIA_INGEST_URL and MEDIA_PUBLIC_URL together (or neither): pushed video needs both.');
+  const plain = (raw: string, schemes: string[], name: string) => {
+    let u: URL;
+    try {
+      u = new URL(raw);
+    } catch {
+      throw new Error(`${name} is not a URL: "${raw}"`);
+    }
+    if (!schemes.includes(u.protocol)) throw new Error(`${name} must start with ${schemes.join(' or ')}// (got "${raw}")`);
+    if (u.username || u.password || (u.pathname !== '/' && u.pathname !== '') || u.search || u.hash) throw new Error(`${name} must be scheme://host:port only (got "${raw}")`);
+    return `${u.protocol}//${u.host}`;
+  };
+  cfg.mediaIngestUrl = plain(ingest, ['rtsp:', 'rtsps:'], 'MEDIA_INGEST_URL');
+  cfg.mediaPublicUrl = plain(pub, ['http:', 'https:'], 'MEDIA_PUBLIC_URL');
 }
 
 function oidcFromEnv(): Config['oidc'] {

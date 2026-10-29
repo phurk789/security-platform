@@ -8,6 +8,7 @@ import {
   type Assignment,
   type AuditEvent,
   type Command,
+  type ConsoleDrive,
   type ConsoleMessage,
   type Device,
   type Evidence,
@@ -17,6 +18,7 @@ import {
   type Patrol,
   type Point,
   type Mission,
+  type OperationalMode,
   type SessionUser,
   type Snapshot,
   type TelemetrySample,
@@ -128,6 +130,8 @@ export function RemoteProvider({
   sRef.current = s;
   const [stepUp, setStepUp] = useState<null | { retry: () => void }>(null);
   const [online, setOnline] = useState(false);
+  /** The live connection once signed in (stick samples go over it). */
+  const wsRef = useRef<WebSocket | null>(null);
 
   const toast = useCallback((tone: 'info' | 'warn' | 'error' | 'ok', text: string) => setS((p) => reducer(p, { type: 'toast', tone, text })), []);
 
@@ -197,7 +201,11 @@ export function RemoteProvider({
               temperatureC: m.temperatureC ?? d.temperatureC,
               gimbal: m.gimbal ?? d.gimbal,
               stats: m.stats ?? d.stats,
+              noFix: m.noFix || undefined,
+              components: m.components ?? d.components,
             };
+            // No fix: the device is alive but its position unknown, so it adds nothing to the trail.
+            if (m.noFix) return { ...p, devices: { ...p.devices, [m.deviceId]: nd } };
             const sample: TelemetrySample = {
               deviceId: m.deviceId,
               at: m.lastSeen,
@@ -232,6 +240,7 @@ export function RemoteProvider({
         const m = JSON.parse(ev.data) as ConsoleMessage;
         if (m.type === 'hello') {
           delay = 500;
+          wsRef.current = ws;
           setOnline(true);
           void reloadRef.current().catch((e) => toast('error', e.message));
           return;
@@ -239,6 +248,7 @@ export function RemoteProvider({
         apply(m);
       };
       ws.onclose = (ev) => {
+        wsRef.current = null;
         if (stopped) return;
         setOnline(false);
         if (ev.code === 4401) {
@@ -522,6 +532,30 @@ export function RemoteProvider({
           },
           () => void session.recordService(deviceId, note),
         ),
+      startDriving: (deviceId: string) =>
+        guarded(
+          () => api.post<Device>(`/devices/${encodeURIComponent(deviceId)}/drive`, { action: 'start' }),
+          () => void session.startDriving(deviceId),
+        ).then((d) => d !== undefined),
+      async stopDriving(deviceId: string) {
+        try {
+          await api.post(`/devices/${encodeURIComponent(deviceId)}/drive`, { action: 'stop' });
+        } catch (e) {
+          // The server also ends the drive when this console disconnects, and the gateway stops on its own.
+          toast('warn', e instanceof Error ? e.message : String(e));
+        }
+      },
+      driveSample(deviceId: string, seq: number, throttle: number, steer: number) {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+        ws.send(JSON.stringify({ type: 'drive', deviceId, seq, throttle, steer } satisfies ConsoleDrive));
+        return true;
+      },
+      setDeviceMode: (deviceId: string, to: OperationalMode, reason: string) =>
+        guarded(
+          () => api.post<{ device: Device }>(`/devices/${encodeURIComponent(deviceId)}/mode-transitions`, { to, reason }),
+          () => void session.setDeviceMode(deviceId, to, reason),
+        ).then((d) => d !== undefined),
       recordings(deviceId: string, from: number, to: number) {
         return api.get<Recordings>(`/media/${encodeURIComponent(deviceId)}/recordings?from=${Math.round(from)}&to=${Math.round(to)}`);
       },

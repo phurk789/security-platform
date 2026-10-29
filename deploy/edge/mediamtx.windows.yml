@@ -1,0 +1,33 @@
+# MediaMTX on the Windows edge laptop (started by Start-Edge.ps1 next to this file).
+# Pulls RTSP from the SIYI camera on the vehicle (through the UniRC 7 Pro's LAN port) and serves
+# WebRTC (WHEP) to browsers. Every viewer brings a 60-second token that MediaMTX checks with the
+# platform server, so only signed-in users who may see video get a picture.
+logLevel: info
+
+rtsp: no
+rtmp: no
+srt: no
+hls: no
+webrtc: yes
+webrtcAddress: :8889
+
+authMethod: http
+authHTTPAddress: http://192.168.20.13:8090/api/v1/media/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+
+# No recording on the laptop for the first tests (disk space). Clips come later.
+record: no
+
+pathDefaults:
+  rtspTransport: tcp
+  # Pull from the camera only while someone watches; drop it 10 s after the last viewer leaves.
+  sourceOnDemand: yes
+  sourceOnDemandStartTimeout: 10s
+  sourceOnDemandCloseAfter: 10s
+
+paths:
+  # Path name = the last part of stream.whep in site.json (http://LAPTOP_IP:8889/ugv-01/whep).
+  ugv-01:
+    source: rtsp://192.168.144.25:8554/main.264

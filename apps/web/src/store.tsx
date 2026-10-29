@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react';
-import type { AppState, CameraAction, Geofence, Meta, Patrol, Point, SessionUser } from '@13store/shared';
+import type { AppState, CameraAction, Geofence, Meta, OperationalMode, Patrol, Point, SessionUser } from '@13store/shared';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
 import type { Api } from './api';
 
@@ -38,6 +38,14 @@ export interface Session {
   deletePatrol(id: string): Promise<unknown>;
   runPatrol(id: string): Promise<unknown>;
   recordService(deviceId: string, note: string): Promise<unknown>;
+  /** Live driving: open a drive session (also takes control). False when refused (the reason is shown as a toast). */
+  startDriving(deviceId: string): Promise<boolean>;
+  /** End this console's drive session; the vehicle stops and the remote gets its sticks back. */
+  stopDriving(deviceId: string): Promise<void>;
+  /** One stick sample (−1…1) over the live connection. False while the connection is down. */
+  driveSample(deviceId: string, seq: number, throttle: number, steer: number): boolean;
+  /** Change a device's operating mode (supervisors promote, with a reason and a password check). */
+  setDeviceMode(deviceId: string, to: OperationalMode, reason: string): Promise<boolean>;
   reload(): Promise<void>;
 }
 

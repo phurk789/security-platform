@@ -65,6 +65,16 @@ export interface AdapterDeclaration {
   indoor?: IndoorState;
   /** Equipment on the device. Status starts `pending` until the adapter has talked to the part. */
   components?: DeviceComponent[];
+  /** The device can be driven live from the console (ground vehicles); limits applied by the adapter. */
+  teleop?: TeleopLimits;
+}
+
+/** Live driving from the console: the adapter's own caps (fractions of full stick, 0–1). */
+export interface TeleopLimits {
+  maxThrottle: number;
+  maxSteer: number;
+  /** The vehicle stops when no stick update arrived for this long (ms). */
+  deadmanMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +96,11 @@ export interface GwTelemetry {
   seq: number;
   /** Time measured at the device/adapter. */
   sourceTime: number;
-  pos: Point;
+  /**
+   * Position on the site grid. Missing when the device has no position fix (GNSS without a 3D fix):
+   * the sample still proves the device is alive; the server keeps the last position and sets `noFix`.
+   */
+  pos?: Point;
   alt?: number;
   accuracyM: number;
   battery?: number;
@@ -298,9 +312,39 @@ export interface SrvWelcome {
   /** Device ids this gateway is registered for. Unknown devices are ignored. */
   accepted: string[];
   rejected: { deviceId: string; reason: string }[];
+  /**
+   * Push mode: where each accepted device that declared `stream.push` publishes its camera
+   * (RTSP URL with a publish credential). Missing when the server has no media server for pushes.
+   */
+  media?: MediaPublish[];
 }
 
-export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera;
+export interface MediaPublish {
+  deviceId: string;
+  /** e.g. rtsp://pub:<token>@media.site:18554/ugv-01 — the credential is valid only while this gateway holds the device. */
+  publish: string;
+}
+
+/**
+ * Live driving: one stick sample from the operator who holds the drive session. Sent about ten
+ * times a second; the adapter stops the vehicle when they stop coming (dead-man), never replays
+ * old ones, and hands the sticks back to the remote on `release`.
+ */
+export interface SrvDrive {
+  t: 'drive';
+  deviceId: string;
+  seq: number;
+  /** −1 (full reverse) … 1 (full forward), before the adapter's own cap. */
+  throttle: number;
+  /** −1 (full left) … 1 (full right), before the adapter's own cap. */
+  steer: number;
+  /** Server time when it was forwarded (ms). */
+  at: number;
+  /** Stop now and give control back to the remote control. */
+  release?: boolean;
+}
+
+export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera | SrvDrive;
 
 // ---------------------------------------------------------------------------
 // Client API
@@ -462,6 +506,10 @@ export type ConsoleEvent =
       temperatureC?: number;
       gimbal?: GimbalState;
       stats?: DeviceStats;
+      /** The device reports no position fix: `pos` is the last known one (or the registered default). */
+      noFix?: boolean;
+      /** Equipment status, sent when it changed (flight mode, GNSS fix, camera push…). */
+      components?: DeviceComponent[];
     }
   | { type: 'geofence'; geofence: Geofence; deleted?: boolean }
   | { type: 'site'; site: SiteInfo }
@@ -483,6 +531,15 @@ export interface ConsoleHello {
 
 export type ConsoleMessage = ConsoleEvent | ConsoleHello;
 
+/** Console → server over the same WebSocket: one stick sample while driving (see SrvDrive). */
+export interface ConsoleDrive {
+  type: 'drive';
+  deviceId: string;
+  seq: number;
+  throttle: number;
+  steer: number;
+}
+
 export interface UserAdminView extends User {
   username: string;
   siteIds: string[];
@@ -498,4 +555,74 @@ export interface ApiKeyView {
   prefix: string;
   createdAt: number;
   revoked: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Edge pairing (CLEANUP_PLAN E-3): an administrator creates a one-time code, the edge app sends it
+// to POST /api/v1/edge/pair and receives its gateway key and site configuration. No one types or sees the key.
+// ---------------------------------------------------------------------------
+
+/** Minutes a pairing code stays valid. */
+export const PAIRING_CODE_TTL_MIN = 10;
+
+export interface PairingCodeView {
+  id: string;
+  label: string;
+  gatewayId: string;
+  siteId: string;
+  /** Device ids in the configuration the edge receives. */
+  deviceIds: string[];
+  createdAt: number;
+  createdBy: string;
+  expiresAt: number;
+  status: 'waiting' | 'paired' | 'expired' | 'cancelled';
+  pairedAt?: number;
+  /** What the edge said about itself when it paired (app version, phone or remote model). */
+  pairedBy?: string;
+  /** The 6 digits: only in the response that created the code. */
+  code?: string;
+}
+
+export interface CreatePairingCode {
+  label?: string;
+  gatewayId: string;
+  siteId?: string;
+  /** Gateway device list, as in a site.json (apps/gateway/src/real/config.ts DeviceConfig). */
+  devices: unknown[];
+}
+
+export interface EdgePairRequest {
+  code: string;
+  /** Free text about the edge, for the audit log (e.g. "Edge app 0.1.0 · SIYI UniRC 7 Pro · Android 13"). */
+  client?: string;
+}
+
+/** What the edge receives once. Everything a site.json holds, the key included. */
+export interface EdgePairResponse {
+  gatewayId: string;
+  key: string;
+  /** ws:// or wss:// address of this server as the edge reached it. */
+  serverUrl: string;
+  site: { id: string; name: string };
+  geo: GeoAnchor;
+  devices: unknown[];
+}
+
+/** QR text for a pairing code: the edge app reads the server address and the code from it. */
+export function pairingLink(serverOrigin: string, code: string) {
+  return `psedge://pair?server=${encodeURIComponent(serverOrigin)}&code=${code}`;
+}
+
+/** Server address and code from a scanned QR text or what a person typed; null when it is neither. */
+export function parsePairingLink(text: string): { server?: string; code: string } | null {
+  const t = text.trim();
+  const digits = t.replace(/[\s-]/g, '');
+  if (/^\d{6}$/.test(digits)) return { code: digits };
+  const m = /^psedge:\/\/pair\?(.*)$/i.exec(t);
+  if (!m) return null;
+  const q = new URLSearchParams(m[1]);
+  const code = (q.get('code') ?? '').replace(/[\s-]/g, '');
+  const server = q.get('server') ?? undefined;
+  if (!/^\d{6}$/.test(code) || (server !== undefined && !/^https?:\/\/[^\s/]+$/i.test(server))) return null;
+  return { server, code };
 }

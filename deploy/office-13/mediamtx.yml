@@ -1,0 +1,40 @@
+# The platform's own media server on .13 (compose service "media"). Edge gateways push camera video
+# in over RTSP; browsers watch over WebRTC (WHEP). MediaMTX asks the platform server about every
+# publish and every viewer (POST /api/v1/media/auth): a gateway may publish only its own device's
+# path while it is connected, a viewer needs a 60-second token from the console.
+# Ports are not LCOT's (8554/8889/8189): 18554 RTSP in, 18889 WHEP, 18189 WebRTC media (UDP + TCP).
+logLevel: info
+
+rtsp: yes
+rtspAddress: :18554
+# The gateway sends "pub:<token>"; digest auth cannot pass the token on to the platform.
+rtspAuthMethods: [basic]
+rtmp: no
+hls: no
+srt: no
+
+webrtc: yes
+webrtcAddress: :18889
+webrtcLocalUDPAddress: :18189
+webrtcLocalTCPAddress: :18189
+# Inside Docker the container's addresses mean nothing to browsers: announce the server's LAN address.
+webrtcIPsFromInterfaces: no
+webrtcAdditionalHosts: [192.168.20.13]
+
+authMethod: http
+authHTTPAddress: http://server:8080/api/v1/media/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+api: no
+metrics: no
+playback: no
+
+pathDefaults:
+  record: no
+
+paths:
+  # Any path the platform lets a gateway publish (the device id in lower case, e.g. ugv-01).
+  all_others:

@@ -9,6 +9,7 @@ import {
   Hand,
   Lock,
   MapPin,
+  MapPinned,
   Merge,
   RotateCcw,
   Users,
@@ -25,7 +26,8 @@ import {
 import { ageMs, can, currentUser, fmtTime, freshness, isReady, userName } from '../domain/policy';
 import { isTerminal, missionForIncident } from '../domain/reducer';
 import { constraintChecks } from '../domain/policy';
-import { DEFAULT_ROUTE, planFor, rankUnits } from '@13store/shared';
+import { finishedDraft, routeDraft, useRouteDraft } from '../domain/routeDraft';
+import { DEFAULT_ROUTE, planFor, rankUnits, routeLength } from '@13store/shared';
 import type { AppState, CommandType, Device, Incident, Mission, Point } from '@13store/shared';
 import { LatLon } from './LatLon';
 import { useStore } from '../store';
@@ -580,7 +582,7 @@ function DeviceCard({
 }
 
 function PrepareMission({ inc }: { inc: Incident }) {
-  const { s, dispatch } = useStore();
+  const { s, dispatch, mode } = useStore();
   const t = useT();
   const me = currentUser(s);
   const [open, setOpen] = useState(false);
@@ -588,6 +590,12 @@ function PrepareMission({ inc }: { inc: Incident }) {
   const [route, setRoute] = useState('direct');
   const picked = s.devices[deviceId];
   const indoorPlan = picked?.indoor ? floorPlan(picked.indoor.buildingId, picked.indoor.level) : undefined;
+  // Checkpoints clicked on the real map (only the real map can be drawn on; indoor vehicles keep the floor plan).
+  const draft = useRouteDraft();
+  const canDraw = mode === 'remote' && !indoorPlan && !!picked && (picked.kind === 'ugv' || picked.kind === 'uav');
+  const drawn = finishedDraft(draft, 'mission-new', deviceId);
+  const drawingHere = draft?.state === 'drawing' && draft.purpose === 'mission-new' && draft.deviceId === deviceId;
+  const startDrawing = () => routeDraft.start({ purpose: 'mission-new', deviceId, points: drawn?.points ?? [] });
   // Route planned around buildings and keep-out zones from where the vehicle is now to the alert.
   const autoPlan = useMemo(
     () => (picked && (picked.kind === 'ugv' || picked.kind === 'uav') ? planFor(picked, inc.pos, { fences: s.geofences }) : undefined),
@@ -634,7 +642,13 @@ function PrepareMission({ inc }: { inc: Incident }) {
           <span>
             <RouteIcon size={14} /> {t('Route')}
           </span>
-          <select value={route} onChange={(e) => setRoute(e.target.value)}>
+          <select
+            value={route}
+            onChange={(e) => {
+              setRoute(e.target.value);
+              if (e.target.value === 'draw' && !drawn) startDrawing();
+            }}
+          >
             {autoPlan?.ok && (
               <option value="auto">
                 {t('Auto-planned to the alert · {k} checkpoints · {m} m · ETA {eta}', { k: autoPlan.checkpoints.length, m: autoPlan.lengthM, eta: fmtEta(autoPlan.etaS) })}
@@ -655,8 +669,26 @@ function PrepareMission({ inc }: { inc: Incident }) {
                   {t(r.label)}
                 </option>
               ))}
+            {canDraw && (
+              <option value="draw">
+                {drawn
+                  ? t('Drawn on the map · {k} checkpoints · {m} m', { k: drawn.points.length, m: Math.round(routeLength(drawn.points, picked?.noFix ? undefined : picked?.pos)) })
+                  : t('Draw checkpoints on the map…')}
+              </option>
+            )}
           </select>
         </label>
+        {route === 'draw' && canDraw && (
+          <div className="row gap-s">
+            {drawingHere ? (
+              <small className="muted">{t('Drawing on the map — finish with “Use this route” in the map panel.')}</small>
+            ) : (
+              <button className="btn-secondary small" onClick={startDrawing}>
+                <MapPinned size={14} /> {drawn ? t('Change on the map') : t('Draw on the map')}
+              </button>
+            )}
+          </div>
+        )}
         {indoorPlan && !autoPlan?.ok && (
           <p className="banner warn" style={{ margin: '4px 0 0' }}>
             {t('{id} works inside {b} only (level {n}, LiDAR SLAM) and cannot reach this alert. The floor patrol checks the building; send an outdoor vehicle to the alert.', {
@@ -679,26 +711,35 @@ function PrepareMission({ inc }: { inc: Incident }) {
           </select>
         </label>
         <div className="row gap-s">
-          <button className="btn-secondary" onClick={() => setOpen(false)}>
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              if (routeDraft.get()?.purpose === 'mission-new') routeDraft.clear();
+              setOpen(false);
+            }}
+          >
             {t('Cancel')}
           </button>
           <button
             className="btn-primary grow"
-            disabled={!allowed || !deviceId}
-            onClick={() =>
+            disabled={!allowed || !deviceId || (route === 'draw' && !drawn)}
+            onClick={() => {
               dispatch({
                 type: 'createMission',
                 incidentId: inc.id,
                 deviceId,
                 operatorId: op,
                 checkpoints:
-                  route === 'indoor' && indoorPlan
-                    ? indoorPlan.patrolRoute
-                    : route === 'auto' && autoPlan?.ok
-                      ? autoPlan.checkpoints
-                      : (ROUTES.find((r) => r.id === route) ?? ROUTES[0]).pts,
-              })
-            }
+                  route === 'draw' && drawn
+                    ? drawn.points
+                    : route === 'indoor' && indoorPlan
+                      ? indoorPlan.patrolRoute
+                      : route === 'auto' && autoPlan?.ok
+                        ? autoPlan.checkpoints
+                        : (ROUTES.find((r) => r.id === route) ?? ROUTES[0]).pts,
+              });
+              if (drawn) routeDraft.clear();
+            }}
           >
             {t('Save draft & run checks')}
           </button>
@@ -709,10 +750,13 @@ function PrepareMission({ inc }: { inc: Incident }) {
 }
 
 function Planner({ m }: { m: Mission }) {
-  const { s, dispatch } = useStore();
+  const { s, dispatch, mode } = useStore();
   const t = useT();
   const me = currentUser(s);
   const [dlg, setDlg] = useState(false);
+  const draft = useRouteDraft();
+  const editingHere = draft?.state === 'drawing' && draft.purpose === 'mission-edit' && draft.missionId === m.id;
+  const editable = ['draft', 'pending_approval', 'approved', 'assigned', 'rejected'].includes(m.status);
   const checks = constraintChecks(s, m);
   const hardFail = checks.some((c) => c.hard && !c.ok);
   const canPrep = can(me.role, 'mission.prepare') && !s.replay.active;
@@ -779,6 +823,20 @@ function Planner({ m }: { m: Mission }) {
             {rid === 'custom' && <option value="custom">{t('Custom route')}</option>}
           </select>
         </label>
+        {mode === 'remote' && canPrep && editable && (
+          <div className="row gap-s">
+            {editingHere ? (
+              <small className="muted">{t('Editing on the map — finish with “Use this route” in the map panel.')}</small>
+            ) : (
+              <button
+                className="btn-secondary small"
+                onClick={() => routeDraft.start({ purpose: 'mission-edit', missionId: m.id, deviceId: m.deviceId, points: m.checkpoints })}
+              >
+                <MapPinned size={14} /> {t('Edit the route on the map')}
+              </button>
+            )}
+          </div>
+        )}
       </section>
       <section className="step">
         <h4>{t('Constraint checks')}</h4>
@@ -822,6 +880,11 @@ function Planner({ m }: { m: Mission }) {
             <Hand size={18} /> {t('Accept mission & take control')}
           </button>
         )}
+        {(m.status === 'pending_approval' || m.status === 'approved') && canPrep && (
+          <button className="btn-secondary wide" onClick={() => dispatch({ type: 'cancelMission', missionId: m.id })}>
+            <X size={16} /> {t('Cancel mission')}
+          </button>
+        )}
       </section>
       {dlg && (
         <ReasonDialog
@@ -855,6 +918,9 @@ export function LiveMission({ m }: { m: Mission }) {
   const holder = d.controlOwner;
   const iHold = holder === me.id;
   const off = s.replay.active;
+  const canPrep = can(me.role, 'mission.prepare') && !off;
+  // The newest command was refused or failed: say why where the next press would happen.
+  const refused = cmds[0] && (cmds[0].status === 'rejected' || cmds[0].status === 'failed') && cmds[0].detail ? cmds[0] : undefined;
 
   const send = (type: CommandType) => {
     const n = s.commands.filter((c) => c.missionId === m.id && c.type === type && isTerminal(c)).length;
@@ -920,10 +986,23 @@ export function LiveMission({ m }: { m: Mission }) {
             )}
           </p>
         )}
+        {refused && (
+          <p className="banner warn" role="alert">
+            <b>{t('{type} was not carried out:', { type: refused.type.toUpperCase() })}</b> {t(refused.detail!)}
+          </p>
+        )}
         {m.status === 'assigned' && has('start') && (
-          <button className="btn-primary wide big" disabled={!iHold || off} onClick={() => send('start')}>
+          <button className="btn-primary wide big" disabled={!iHold || off || !!pending} onClick={() => send('start')}>
             <Play size={18} /> {pending?.type === 'start' ? t('Start requested — waiting for vehicle') : t('Send start request')}
           </button>
+        )}
+        {m.status === 'assigned' && canPrep && (
+          <>
+            <button className="btn-secondary wide" disabled={!!pending} onClick={() => dispatch({ type: 'cancelMission', missionId: m.id })}>
+              <X size={16} /> {t('Cancel mission')}
+            </button>
+            <p className="fine">{t('Cancelling releases control and frees {id} for another mission. It has not started moving.', { id: d.id })}</p>
+          </>
         )}
         {(m.status === 'executing' || m.status === 'paused') && (
           <div className="ctl-grid">
@@ -965,7 +1044,7 @@ export function LiveMission({ m }: { m: Mission }) {
                   key: c.idempotencyKey.split(':').slice(1).join(':'),
                 })}
               </small>
-              {c.detail && <small className={c.status === 'succeeded' ? 'muted' : 'warn-text'}>{c.detail}</small>}
+              {c.detail && <small className={c.status === 'succeeded' ? 'muted' : 'warn-text'}>{t(c.detail)}</small>}
             </li>
           ))}
         </ul>

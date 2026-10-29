@@ -9,9 +9,11 @@ import { createBackup, listBackups, verifyBackup } from './backup';
 import type { Config } from './config';
 import type { DB } from './db';
 import { GatewayHub } from './gatewayHub';
+import { GOOGLE_STYLES, GoogleTiles, tileXYZ } from './googleTiles';
 import { Metrics } from './metrics';
 import { OidcClient, OidcError } from './oidc';
 import { openapi } from './openapi';
+import { EdgePairing } from './pairing';
 import { ApiError, Platform, type Actor, type BusMessage } from './platform';
 import { PushService, initVapid, registerPushRoutes } from './push';
 import { DEMO_ORG, resetDemo } from './seed';
@@ -39,6 +41,7 @@ const PUBLIC = new Set([
   '/api/v1/gateway',
   '/api/v1/ws',
   '/api/v1/media/auth',
+  '/api/v1/edge/pair',
 ]);
 
 function bearer(req: FastifyRequest) {
@@ -51,6 +54,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   if (secrets.source === 'generated') console.log(`[server] generated secrets key at ${secrets.file}; keep it with the backups`);
   const p = new Platform(db, cfg);
   const accounts = new Accounts(db, p, cfg.sessionTtlMs);
+  const pairing = new EdgePairing(db, p, accounts, (orgId) => (cfg.env === 'pilot' ? 'pilot' : orgEnv(db, orgId)));
   const hub = new GatewayHub(p, accounts);
   p.gateways = hub;
   const metrics = new Metrics();
@@ -117,7 +121,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.addHook('onRequest', async (req, reply) => {
     const path = req.url.split('?')[0];
     if (!path.startsWith('/api/v1/')) return;
-    const isAuth = path === '/api/v1/auth/login' || path === '/api/v1/auth/step-up' || path.startsWith('/api/v1/auth/sso');
+    const isAuth = path === '/api/v1/auth/login' || path === '/api/v1/auth/step-up' || path.startsWith('/api/v1/auth/sso') || path === '/api/v1/edge/pair';
     const wait = isAuth ? limiter.hit(`auth:${req.ip}`, cfg.rateLimitAuthPerMin, Date.now()) : limiter.hit(`api:${req.ip}`, cfg.rateLimitPerMin, Date.now());
     if (wait) {
       metrics.inc('ps_rate_limited_total', { kind: isAuth ? 'auth' : 'api' });
@@ -364,6 +368,13 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.post('/api/v1/devices/:id/service', async (req: Req) => p.recordService(A(req), req.params.id, String(body(req).note ?? '')));
   app.patch('/api/v1/devices/:id/stats', async (req: Req) => p.updateDeviceStats(A(req), req.params.id, body(req) as any));
   app.post('/api/v1/devices/:id/release', async (req: Req) => p.release(A(req), req.params.id));
+  // Live driving: start / stop a drive session. Stick samples then go over the console WebSocket.
+  app.post('/api/v1/devices/:id/drive', async (req: Req) => {
+    const action = body(req).action;
+    if (action === 'start') return p.startDriving(A(req), req.params.id);
+    if (action === 'stop') return p.stopDriving(A(req), req.params.id);
+    throw new ApiError(400, 'invalid', 'action must be start or stop.');
+  });
   app.get('/api/v1/devices/:id/telemetry', async (req: Req) => p.telemetryHistory(A(req), req.params.id, num(req.query.from, p.now() - 3600_000)!, num(req.query.to, p.now())!));
   app.post('/api/v1/devices/:id/camera', async (req: Req) => p.cameraControl(A(req), req.params.id, body(req)));
   app.post('/api/v1/devices/:id/aim', async (req: Req) => p.aimCamera(A(req), req.params.id, body(req)));
@@ -375,6 +386,44 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     reply.header('Content-Type', 'image/svg+xml').header('Cache-Control', 'private, max-age=60');
     return svg;
   });
+  // ---- server-proxied basemaps (Google Map Tiles API; the key stays here) ----------------------
+  const google = cfg.googleMapsApiKey ? new GoogleTiles(cfg.googleMapsApiKey, cfg.googleTilesUrl, { log: (m) => console.warn(m) }) : undefined;
+  const googleStyle = (id: string) => {
+    if (!google || !GOOGLE_STYLES[id]) throw new ApiError(404, 'not_found', `Basemap ${id} is not offered by this server.`);
+    return google;
+  };
+  app.get('/api/v1/basemaps', async () => google?.basemaps() ?? []);
+  app.get('/api/v1/basemaps/:id/tiles/:z/:x/:y', async (req: Req, reply: FastifyReply) => {
+    const g = googleStyle(req.params.id);
+    const t = tileXYZ(req.params.z, req.params.x, req.params.y);
+    if (!t) throw new ApiError(400, 'invalid', 'Tile z/x/y out of range.');
+    let r;
+    try {
+      r = await g.tile(req.params.id, t.z, t.x, t.y);
+    } catch (e) {
+      console.warn(`[google] ${req.params.id}: ${(e as Error).message}`);
+      return reply.status(502).send({ error: 'The map provider did not answer.', code: 'invalid' });
+    }
+    if (r.status >= 400) return reply.status(r.status === 404 ? 404 : 502).header('Cache-Control', 'no-store').send();
+    // Google's cache rules apply as given (no longer than they allow).
+    reply.header('Content-Type', r.contentType).header('Cache-Control', r.cacheControl ?? 'private, max-age=3600');
+    if (r.etag) reply.header('ETag', r.etag);
+    return reply.send(r.body);
+  });
+  app.get('/api/v1/basemaps/:id/attribution', async (req: Req) => {
+    const g = googleStyle(req.params.id);
+    const n = (k: string) => Number(req.query[k]);
+    const v = { zoom: Math.round(n('zoom')), north: n('north'), south: n('south'), east: n('east'), west: n('west') };
+    if (!(v.zoom >= 0 && v.zoom <= 22) || !(v.north < 90 && v.south > -90 && v.north > v.south) || !(v.east <= 180 && v.west >= -180))
+      throw new ApiError(400, 'invalid', 'zoom, north, south, east and west are needed.');
+    try {
+      return { copyright: await g.attribution(req.params.id, v) };
+    } catch (e) {
+      console.warn(`[google] attribution ${req.params.id}: ${(e as Error).message}`);
+      return { copyright: '' };
+    }
+  });
+
   // Site media server (MediaMTX authMethod: http) asks here before serving video. 200 = allow.
   app.post('/api/v1/media/auth', async (req: Req, reply: FastifyReply) => {
     const ok = p.mediaAuth(body(req));
@@ -421,6 +470,17 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.get('/api/v1/admin/gateways', async (req) => {
     p.require(A(req), 'admin.devices', 'gateways', { mutating: false });
     return hub.connected(A(req).orgId);
+  });
+  // One-time codes that let an edge app fetch its gateway key and configuration (E-3).
+  app.get('/api/v1/admin/pairing-codes', async (req) => pairing.list(A(req)));
+  app.post('/api/v1/admin/pairing-codes', async (req: Req) => pairing.create(A(req), body(req) as any));
+  app.delete('/api/v1/admin/pairing-codes/:id', async (req: Req) => {
+    pairing.cancel(A(req), req.params.id);
+    return { ok: true };
+  });
+  app.post('/api/v1/edge/pair', async (req: Req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return pairing.pair(body(req) as any, { ip: req.ip, serverUrl: `${req.protocol === 'https' ? 'wss' : 'ws'}://${req.host}` });
   });
   // Edge media origins that gateway-declared stream URLs must match (per site, or the whole org).
   app.get('/api/v1/admin/edge-origins', async (req) => p.listEdgeOrigins(A(req)));
@@ -560,7 +620,16 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
       if (actor && !accounts.authenticate(token)) socket.close(4401, 'session ended');
     }, 30_000);
     socket.on('message', (raw) => {
-      if (actor) return;
+      if (actor) {
+        // After sign-in the console sends only stick samples while driving (ConsoleDrive).
+        try {
+          const msg = JSON.parse(String(raw)) as { type?: string };
+          if (msg.type === 'drive') p.drive(actor, msg as Record<string, unknown>);
+        } catch {
+          /* ignore malformed samples; the vehicle stops on its own when they stop */
+        }
+        return;
+      }
       try {
         const msg = JSON.parse(String(raw)) as { type: string; token?: string };
         const auth = msg.type === 'auth' ? accounts.authenticate(msg.token) : null;
@@ -576,7 +645,15 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
       }
     });
     socket.on('close', () => {
-      if (actor) wsClients--;
+      if (actor) {
+        wsClients--;
+        // A driver whose console disconnects stops driving at once.
+        try {
+          p.stopAllDriving(actor, 'console disconnected');
+        } catch (e) {
+          console.warn('[drive] stop on disconnect failed:', e instanceof Error ? e.message : e);
+        }
+      }
       clearTimeout(timer);
       clearInterval(recheck);
       p.bus.off('event', onEvent);
@@ -603,9 +680,11 @@ function orgEnv(db: DB, orgId: string): 'demo' | 'sandbox' | 'pilot' {
 export type { Role };
 
 /** Content-Security-Policy for the hosted console and field app. Scripts only from this origin;
- *  video and WebSockets to this origin plus the configured media servers (default: any https/wss). */
-export function cspHeader(cfg: Pick<Config, 'cspConnectSrc'>) {
-  const remote = cfg.cspConnectSrc.length ? cfg.cspConnectSrc.join(' ') : 'https: wss:';
+ *  video and WebSockets to this origin plus the configured media servers (default: any https/wss).
+ *  The platform's own media server (MEDIA_PUBLIC_URL) is always allowed, also over plain http. */
+export function cspHeader(cfg: Pick<Config, 'cspConnectSrc'> & Partial<Pick<Config, 'mediaPublicUrl'>>) {
+  const base = cfg.cspConnectSrc.length ? cfg.cspConnectSrc : ['https:', 'wss:'];
+  const remote = [...base, ...(cfg.mediaPublicUrl && !base.includes(cfg.mediaPublicUrl) ? [cfg.mediaPublicUrl] : [])].join(' ');
   return [
     "default-src 'self'",
     "script-src 'self'",

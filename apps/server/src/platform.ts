@@ -22,6 +22,7 @@ import {
   isTerminalCommand,
   type Action,
   type AdapterDeclaration,
+  type MediaPublish,
   type Assignment,
   type AuditEvent,
   type Command,
@@ -47,6 +48,7 @@ import {
   type SrvCommand,
   type SrvDemo,
   type SrvCamera,
+  type SrvDrive,
   type GwCameraResult,
   sanitizeCameraAction,
   describeCameraAction,
@@ -79,11 +81,15 @@ import {
   type DeviceStats,
   DEFAULT_GEOFENCES,
   GEOFENCE_KIND_LABEL,
+  GEOFENCE_KINDS,
   fencesAt,
+  insideSite,
+  operatingAreas,
+  routeOutsideSite,
+  type FencedKind,
   planRoute,
   rankUnits,
   routeViolations,
-  insideDemoArea,
   type Playbook,
   type SlaStage,
   type NotificationChannel,
@@ -164,7 +170,31 @@ export interface BusMessage {
 
 /** Transport to edge gateways, implemented by the gateway hub. */
 export interface GatewayLink {
-  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera): boolean;
+  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera | SrvDrive): boolean;
+  /** Gateways connected right now and the devices each holds. */
+  connected?(orgId: string): { gatewayId: string; devices: string[] }[];
+}
+
+/** Stick samples closer together than this are dropped (25 per second at most). */
+export const DRIVE_MIN_INTERVAL_MS = 40;
+
+/** A gateway's credential to publish one device's video into the platform's media server. */
+export const MEDIA_PUBLISH_TTL_MS = 7 * 24 * 3600_000;
+
+/** A gateway's declared drive limits, kept only when they make sense (caps 0–1, dead-man 100 ms–3 s). */
+export function sanitizeTeleop(raw: unknown): Device['teleop'] {
+  const t = raw as { maxThrottle?: unknown; maxSteer?: unknown; deadmanMs?: unknown } | undefined;
+  if (!t || typeof t !== 'object') return undefined;
+  const frac = (v: unknown) => (typeof v === 'number' && v > 0 && v <= 1 ? v : undefined);
+  const maxThrottle = frac(t.maxThrottle);
+  const maxSteer = frac(t.maxSteer);
+  const deadmanMs = typeof t.deadmanMs === 'number' && t.deadmanMs >= 100 && t.deadmanMs <= 3000 ? t.deadmanMs : undefined;
+  return maxThrottle && maxSteer && deadmanMs ? { maxThrottle, maxSteer, deadmanMs } : undefined;
+}
+
+/** Path of a device's pushed stream on the platform's media server: UGV-01 → ugv-01. */
+export function pushPath(deviceId: string) {
+  return deviceId.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
 }
 
 /** How long to wait for the gateway to answer a camera request. */
@@ -196,10 +226,14 @@ export class Platform {
   private devices = new Map<string, Device & { orgId: string; siteId: string }>();
   private lastFresh = new Map<string, Freshness>();
   private lastSeq = new Map<string, number>();
+  /** Live drive sessions by device id (memory only: a restart ends them). */
+  private driving = new Map<string, { userId: string; orgId: string; since: number; seq: number; lastAt: number; ownedBefore: boolean }>();
   /** Geofences per site (loaded on first use; defaults seeded for a new site). */
   private fenceCache = new Map<string, Geofence[]>();
   /** Fence ids each vehicle is currently inside of. */
   private insideFences = new Map<string, Set<string>>();
+  /** Devices last seen outside every operating area of their site. */
+  private outsideArea = new Set<string>();
   /** Last telemetry position per vehicle, for odometer and runtime. */
   private lastFix = new Map<string, { pos: Point; at: number }>();
   private lastStatsSave = new Map<string, number>();
@@ -386,7 +420,9 @@ export class Platform {
     for (const r of rows) {
       const d = JSON.parse(r.data) as Device;
       // A restart never raises a mode: a missing or unknown value reads as SHADOW (ADR-006 §5).
-      this.devices.set(d.id, { ...d, mode: modeOf(d), orgId: r.org_id, siteId: r.site_id });
+      // Nobody drives a vehicle across a restart: drive sessions live in memory only.
+      const { drivenBy: _drivenBy, ...rest } = d;
+      this.devices.set(d.id, { ...rest, mode: modeOf(d), orgId: r.org_id, siteId: r.site_id });
     }
   }
 
@@ -889,6 +925,8 @@ export class Platform {
       limitations: input.limitations ?? 'Not yet declared by an adapter.',
       zone: input.zone ?? 'Zone A',
       pos: input.pos ?? { x: 210, y: 140 },
+      // No position until the device reports one (maps leave it off instead of at the default).
+      ...(input.pos ? {} : { noFix: true }),
       accuracyM: 5,
       lastSeen: 0,
       rateMs: 1000,
@@ -991,6 +1029,8 @@ export class Platform {
       this.saveDevice(d);
       auditId = this.audit(a, 'device.mode_change', d.id, 'ok', `${from} → ${to}: ${reason}`).id;
     });
+    // Live driving needs LIVE_MANUAL: any demotion ends it at once.
+    if (this.driving.has(d.id) && to !== 'LIVE_MANUAL') this.endDrive(d.id, a, `mode changed to ${to}`);
     const running = to === 'SHADOW' && this.activeMission(d.id)?.status === 'executing';
     this.publish({
       orgId: d.orgId,
@@ -1033,7 +1073,50 @@ export class Platform {
   /** Allowed edge origins for one device's site: the org-wide list plus the site's own. */
   private edgeOriginsFor(orgId: string, siteId: string): string[] {
     const rows = this.db.prepare("SELECT origin FROM edge_origins WHERE org_id = ? AND (site_id = '' OR site_id = ?)").all(orgId, siteId) as { origin: string }[];
-    return rows.map((r) => r.origin);
+    // The platform's own media server (pushed video) is always allowed: the server set those URLs, not a gateway.
+    return [...rows.map((r) => r.origin), ...(this.cfg.mediaPublicUrl ? [this.cfg.mediaPublicUrl] : [])];
+  }
+
+  /** Push mode on this server: the platform runs a media server that gateways publish into. */
+  private get pushEnabled() {
+    return !!(this.cfg.mediaIngestUrl && this.cfg.mediaPublicUrl);
+  }
+
+  /**
+   * A declared stream with `push` becomes a stream on the platform's media server: the server, not
+   * the gateway, decides the browser address. Without a media server the push flag is dropped.
+   */
+  private pushedStream<T extends { push?: boolean; whep?: string } | undefined>(st: T, deviceId: string): T {
+    if (!st || typeof st !== 'object' || st.push !== true) return st;
+    const { push: _push, whep: _whep, ...rest } = st;
+    if (!this.pushEnabled) return rest as T;
+    return { ...rest, whep: `${this.cfg.mediaPublicUrl}/${pushPath(deviceId)}/whep` } as T;
+  }
+
+  private publishToken(orgId: string, deviceId: string, gatewayId: string, exp: number) {
+    const body = Buffer.from(`${deviceId}|${gatewayId}|${exp}`).toString('base64url');
+    return `p1.${body}.${hmac(this.cfg.mediaSecret, `pub|${orgId}|${body}`)}`;
+  }
+
+  /** Where a gateway publishes one device's video: rtsp://pub:<token>@ingest-host:port/<path>. */
+  private publishUrl(orgId: string, deviceId: string, gatewayId: string) {
+    const u = new URL(this.cfg.mediaIngestUrl!);
+    return `${u.protocol}//pub:${this.publishToken(orgId, deviceId, gatewayId, this.now() + MEDIA_PUBLISH_TTL_MS)}@${u.host}/${pushPath(deviceId)}`;
+  }
+
+  /** May this credential publish to this path? Only the gateway that holds the device, while it is connected. */
+  private mayPublish(token: string, path: string): boolean {
+    const [ver, body, sig] = token.split('.');
+    if (ver !== 'p1' || !body || !sig) return false;
+    const [deviceId, gatewayId, expStr] = Buffer.from(body, 'base64url').toString().split('|');
+    if (!(Number(expStr) > this.now())) return false;
+    const d = this.devices.get(deviceId);
+    if (!d || !safeEqual(sig, hmac(this.cfg.mediaSecret, `pub|${d.orgId}|${body}`))) return false;
+    if (path !== pushPath(d.id)) return false;
+    const holder = (this.db.prepare('SELECT gateway_id FROM devices WHERE id = ?').get(d.id) as { gateway_id: string | null } | undefined)?.gateway_id;
+    if (holder !== gatewayId) return false;
+    const live = this.gateways.connected?.(d.orgId);
+    return !live || live.some((g) => g.gatewayId === gatewayId && g.devices.includes(d.id));
   }
 
   listEdgeOrigins(a: Actor) {
@@ -1377,6 +1460,8 @@ export class Platform {
           ? `${d.id} is ${mode}. Automatic ${type} needs LIVE_ASSISTED.`
           : `${d.id} is in ${mode} mode. A supervisor must promote it to LIVE_MANUAL before ${type}. Stop and pause still work.`,
       );
+    // A route and a person on the sticks would both steer the vehicle.
+    if ((type === 'start' || type === 'resume') && this.driving.has(d.id)) deny('conflict', `${d.id} is being driven from the console. End the drive first.`);
     if (d.controlOwner !== a.userId)
       deny(
         'control_held',
@@ -1479,6 +1564,7 @@ export class Platform {
   gatewayHello(orgId: string, siteIds: string[], gatewayId: string, decls: AdapterDeclaration[], geo?: GeoAnchor) {
     const accepted: string[] = [];
     const rejected: { deviceId: string; reason: string }[] = [];
+    const media: MediaPublish[] = [];
     const notes: string[] = [];
     const sys = this.systemActor(orgId, 'gateway', gatewayId);
     if (geo && Number.isFinite(geo.originLat) && Number.isFinite(geo.originLon)) this.checkGatewayAnchor(sys, siteIds, gatewayId, geo);
@@ -1499,10 +1585,15 @@ export class Platform {
         rejected.push({ deviceId: decl.deviceId, reason: 'Registered as a simulated device, but a real adapter declared it. Register it as a real device first.' });
         continue;
       }
+      // Push mode: the server sets the browser address of a pushed stream (on its own media server).
+      const declStream = this.pushedStream(decl.stream, d.id);
+      const declComps = Array.isArray(decl.components)
+        ? decl.components.map((c) => (c && typeof c === 'object' && c.stream ? { ...c, stream: this.pushedStream(c.stream, d.id) } : c))
+        : decl.components;
       // Stream URLs must sit on an edge origin allowed for the device's site (SSRF guard).
       const allowed = this.edgeOriginsFor(orgId, d.siteId);
-      const st = vetStream(decl.stream, allowed);
-      const comps = sanitizeComponents(decl.components, allowed);
+      const st = vetStream(declStream, allowed);
+      const comps = sanitizeComponents(declComps, allowed);
       const refused = [...st.rejected, ...(comps?.rejected ?? [])];
       if (refused.length) this.audit(sys, 'gateway.stream_rejected', d.id, 'denied', `${refused.join('; ')}. Allow the origin under edge origins, then reconnect the gateway.`);
       if (decl.integration !== d.integration) notes.push(`${d.id} declared ${String(decl.integration).slice(0, 20)}, kept ${d.integration}`);
@@ -1523,6 +1614,7 @@ export class Platform {
         indoor: sanitizeIndoor(decl.indoor) ?? d.indoor,
         payloads: Array.isArray(decl.payloads) ? decl.payloads.filter((p) => typeof p === 'string' && PAYLOAD_CATALOG[p]) : d.payloads,
         components: comps?.components ?? d.components,
+        teleop: d.kind === 'ugv' ? sanitizeTeleop(decl.teleop) : undefined,
       });
       d.mode = modeOf(d);
       this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
@@ -1531,6 +1623,10 @@ export class Platform {
       // The same gateway reconnecting keeps the mode; a different one is a new control path.
       if (prevGateway && prevGateway !== gatewayId) this.demoteBySystem(d.id, `control path changed: gateway ${prevGateway} → ${gatewayId}`);
       accepted.push(d.id);
+      if (decl.stream?.push === true) {
+        if (this.pushEnabled) media.push({ deviceId: d.id, publish: this.publishUrl(orgId, d.id, gatewayId) });
+        else this.audit(sys, 'gateway.stream_rejected', d.id, 'denied', 'The gateway wants to push video, but this server has no media server for it (set MEDIA_INGEST_URL and MEDIA_PUBLIC_URL).');
+      }
     }
     // Anything never delivered before this (re)connect is dropped, never replayed (F09).
     for (const id of accepted) this.expireUndelivered(id, 'Not delivered before the gateway reconnected. Not replayed.');
@@ -1547,11 +1643,100 @@ export class Platform {
       'ok',
       `accepted ${accepted.join(', ') || 'none'}${rejected.length ? `; rejected ${rejected.map((r) => r.deviceId).join(', ')}` : ''}${notes.length ? `; ignored ${notes.join(', ')}` : ''}`,
     );
-    return { accepted, rejected };
+    return { accepted, rejected, media };
   }
 
   gatewayClosed(orgId: string, gatewayId: string) {
-    this.audit(this.systemActor(orgId, 'gateway', gatewayId), 'gateway.disconnect', gatewayId);
+    const sys = this.systemActor(orgId, 'gateway', gatewayId);
+    for (const id of [...this.driving.keys()]) {
+      const holder = (this.db.prepare('SELECT gateway_id FROM devices WHERE id = ?').get(id) as { gateway_id: string | null } | undefined)?.gateway_id;
+      if (holder === gatewayId) this.endDrive(id, sys, 'gateway disconnected');
+    }
+    this.audit(sys, 'gateway.disconnect', gatewayId);
+  }
+
+  // ---- live driving from the console --------------------------------------------------
+  //
+  // A vehicle in LIVE_MANUAL (simulators in SIMULATION) that declares `teleop` can be driven by the
+  // operator who takes a drive session: it also takes control of the device (F08). Stick samples
+  // come over the console WebSocket and go straight to the gateway, which caps them, turns them into
+  // RC overrides and stops the vehicle when they stop coming. Start, stop and refusals are audited;
+  // the samples themselves are not (ten a second).
+
+  /** Opens a drive session: the caller holds control and may send stick samples. */
+  startDriving(a: Actor, deviceId: string) {
+    this.require(a, 'device.command', deviceId);
+    const d = this.getDevice(a, deviceId);
+    const deny = (status: number, code: string, why: string): never => {
+      this.audit(a, 'drive.start', d.id, 'denied', why);
+      return fail(status, code, why);
+    };
+    if (d.kind !== 'ugv' || !d.teleop) return deny(409, 'not_enabled', `${d.id} cannot be driven from the console (its gateway does not offer it).`);
+    const mode = modeOf(d);
+    if (mode !== 'LIVE_MANUAL' && mode !== 'SIMULATION')
+      return deny(409, 'mode_locked', `${d.id} is in ${mode}. A supervisor must promote it to LIVE_MANUAL before anyone drives it.`);
+    const fresh = freshnessAt(this.now(), d);
+    if (fresh !== 'live') return deny(409, 'stale_telemetry', `${d.id} telemetry is ${fresh}. Drive only a vehicle reporting live data.`);
+    const m = this.activeMission(d.id);
+    if (m && ['assigned', 'executing', 'paused'].includes(m.status)) return deny(409, 'conflict', `${d.id} is on mission ${m.id}. Stop or finish it first.`);
+    const cur = this.driving.get(d.id);
+    if (cur && cur.userId !== a.userId) return deny(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
+    if (d.controlOwner && d.controlOwner !== a.userId) return deny(409, 'control_held', `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`);
+    if (!cur) this.driving.set(d.id, { userId: a.userId!, orgId: d.orgId, since: this.now(), seq: -1, lastAt: 0, ownedBefore: d.controlOwner === a.userId });
+    d.controlOwner = a.userId;
+    d.drivenBy = a.userId;
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, 'drive.start', d.id, 'ok', `${mode} · limits throttle ${Math.round(d.teleop!.maxThrottle * 100)}% steer ${Math.round(d.teleop!.maxSteer * 100)}%`);
+    });
+    return this.publicDevice(d);
+  }
+
+  /** Ends a drive session: the driver, or a supervisor/administrator stopping someone else's. */
+  stopDriving(a: Actor, deviceId: string) {
+    const d = this.getDevice(a, deviceId);
+    const cur = this.driving.get(d.id);
+    if (!cur) return this.publicDevice(d);
+    if (cur.userId !== a.userId && a.role !== 'supervisor' && a.role !== 'admin') fail(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
+    this.endDrive(d.id, a, cur.userId === a.userId ? 'driver stopped' : `stopped by ${a.name}`);
+    return this.publicDevice(d);
+  }
+
+  /** One stick sample from the driver (WebSocket). False when it is not theirs to send or too soon. */
+  drive(a: Actor, msg: { deviceId?: unknown; seq?: unknown; throttle?: unknown; steer?: unknown }): boolean {
+    const id = String(msg.deviceId ?? '');
+    const cur = this.driving.get(id);
+    if (!cur || cur.userId !== a.userId || cur.orgId !== a.orgId) return false;
+    const seq = Number(msg.seq);
+    if (!Number.isInteger(seq) || seq <= cur.seq) return false;
+    const now = this.now();
+    if (now - cur.lastAt < DRIVE_MIN_INTERVAL_MS) return false;
+    const clamp = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0);
+    cur.seq = seq;
+    cur.lastAt = now;
+    return this.gateways.send(cur.orgId, id, { t: 'drive', deviceId: id, seq, throttle: clamp(msg.throttle), steer: clamp(msg.steer), at: now });
+  }
+
+  /** The driver's console went away: stop everything they were driving. */
+  stopAllDriving(a: Actor, why: string) {
+    for (const [id, cur] of [...this.driving]) if (cur.userId === a.userId && cur.orgId === a.orgId) this.endDrive(id, a, why);
+  }
+
+  private endDrive(deviceId: string, a: Actor, why: string) {
+    const cur = this.driving.get(deviceId);
+    if (!cur) return;
+    this.driving.delete(deviceId);
+    // Tell the gateway at once (it would also stop on its own when samples stop coming).
+    this.gateways.send(cur.orgId, deviceId, { t: 'drive', deviceId, seq: cur.seq + 1, throttle: 0, steer: 0, at: this.now(), release: true });
+    const d = this.devices.get(deviceId);
+    if (!d) return;
+    d.drivenBy = undefined;
+    const m = this.activeMission(deviceId);
+    if (!cur.ownedBefore && !m && d.controlOwner === cur.userId) d.controlOwner = undefined;
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, 'drive.stop', d.id, 'ok', `${this.userName(cur.orgId, cur.userId)} · ${why}`);
+    });
   }
 
   private expireUndelivered(deviceId: string, why: string) {
@@ -1573,7 +1758,12 @@ export class Platform {
     if (t.seq <= last) return; // duplicate or out of order
     this.lastSeq.set(d.id, t.seq);
     const now = this.now();
-    d.pos = { x: t.pos.x, y: t.pos.y };
+    // A sample without a position (no GNSS fix) keeps the device alive but its position unknown.
+    const pos = t.pos && Number.isFinite(t.pos.x) && Number.isFinite(t.pos.y) ? { x: t.pos.x, y: t.pos.y } : undefined;
+    if (pos) {
+      d.pos = pos;
+      delete d.noFix;
+    } else d.noFix = true;
     if (t.alt !== undefined) d.alt = t.alt;
     d.accuracyM = t.accuracyM;
     if (t.battery !== undefined) d.battery = t.battery;
@@ -1602,13 +1792,15 @@ export class Platform {
     // Source → received delay. Clamp at 0 in case the device clock runs slightly ahead.
     d.latencyMs = Math.max(0, now - t.sourceTime);
     d.lastSeen = now;
-    if (d.kind === 'ugv' || d.kind === 'uav') {
+    if (pos && (d.kind === 'ugv' || d.kind === 'uav')) {
       this.trackStats(d, now);
       this.trackFences(d, now);
     }
     this.devices.set(d.id, d);
     this.db.prepare('UPDATE devices SET data = ? WHERE id = ?').run(JSON.stringify(this.publicDevice(d)), d.id);
-    this.db
+    // Position history: only samples that have a position (a replay must not show a guessed one).
+    if (pos)
+      this.db
       .prepare(
         'INSERT INTO telemetry (device_id, seq, source_time, received_time, x, y, alt, accuracy, battery, speed, quality, heading, signal, satellites, temperature) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       )
@@ -1617,8 +1809,8 @@ export class Platform {
         t.seq,
         t.sourceTime,
         now,
-        t.pos.x,
-        t.pos.y,
+        pos.x,
+        pos.y,
         t.alt ?? null,
         t.accuracyM,
         t.battery ?? null,
@@ -1656,6 +1848,8 @@ export class Platform {
         temperatureC: d.temperatureC,
         gimbal: d.gimbal,
         stats: d.stats,
+        noFix: d.noFix,
+        ...(Array.isArray(t.components) && t.components.length ? { components: d.components } : {}),
       },
     });
   }
@@ -2176,6 +2370,8 @@ export class Platform {
       const f = freshnessAt(now, d);
       const before = this.lastFresh.get(d.id);
       this.lastFresh.set(d.id, f);
+      // A driver who cannot see live data must not keep driving.
+      if (f !== 'live' && this.driving.has(d.id)) this.endDrive(d.id, this.systemActor(d.orgId, 'system', 'Safety stop'), `telemetry ${f}`);
       if (before === undefined || before === f) continue;
       this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'device', device: this.publicDevice(d) } });
       if (f === 'offline')
@@ -2414,8 +2610,10 @@ export class Platform {
    * issued to a user who is still active in the device's organisation.
    */
   mediaAuth(req: { action?: string; path?: string; query?: string; token?: string; password?: string }): boolean {
-    if (req.action !== 'read' && req.action !== 'playback') return false;
     const q = new URLSearchParams(String(req.query ?? ''));
+    // A gateway pushing a device's camera into the platform's media server (RTSP basic auth: pub / token).
+    if (req.action === 'publish') return this.pushEnabled && this.mayPublish(String(req.password || q.get('token') || ''), String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
+    if (req.action !== 'read' && req.action !== 'playback') return false;
     const token = q.get('token') || req.token || req.password || '';
     const [b64, sig] = token.split('.');
     if (!b64 || !sig) return false;
@@ -2642,7 +2840,7 @@ export class Platform {
     const name = String(input.name ?? existing?.name ?? '').trim();
     if (!name || name.length > 80) fail(400, 'invalid', 'A name of up to 80 characters is required.');
     const kind = (input.kind ?? existing?.kind ?? 'keep_out') as Geofence['kind'];
-    if (!['keep_out', 'caution', 'no_fly'].includes(kind)) fail(400, 'invalid', 'kind must be keep_out, caution or no_fly.');
+    if (!GEOFENCE_KINDS.includes(kind)) fail(400, 'invalid', 'kind must be keep_out, caution, no_fly or operating_area.');
     const poly = (input.poly ?? existing?.poly ?? []) as Point[];
     if (
       !Array.isArray(poly) ||
@@ -2651,7 +2849,9 @@ export class Platform {
       poly.some((p) => typeof p?.x !== 'number' || typeof p?.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y))
     )
       fail(400, 'invalid', 'poly needs 3–30 {x, y} points.');
-    if (!poly.some(insideDemoArea)) fail(400, 'invalid', 'The zone must touch the site.');
+    // An operating area defines the site; any other zone must touch it (or the demo boundary when there is none).
+    const others = this.geofencesOf(a.orgId, site.id).filter((g) => g.id !== id);
+    if (kind !== 'operating_area' && !poly.some((p) => insideSite(p, others, 'ugv') || insideSite(p, others, 'uav'))) fail(400, 'invalid', 'The zone must touch the site.');
     const appliesTo = ((input.appliesTo ?? existing?.appliesTo ?? ['ugv', 'uav']) as string[]).filter((k) => k === 'ugv' || k === 'uav') as Geofence['appliesTo'];
     if (!appliesTo.length) fail(400, 'invalid', 'appliesTo must include ugv and/or uav.');
     const g: Geofence = {
@@ -2686,13 +2886,17 @@ export class Platform {
     return { ok: true };
   }
 
-  /** Live geofence tracking: entering a keep-out or no-fly zone is a breach; caution zones are noted. */
+  /**
+   * Live geofence tracking: entering a keep-out or no-fly zone is a breach; caution zones are noted.
+   * Leaving the operating area is a breach during a mission and a warning otherwise.
+   */
   private trackFences(d: Device & { orgId: string; siteId: string }, now: number) {
     if (d.kind !== 'ugv' && d.kind !== 'uav') return;
     const fences = this.geofencesOf(d.orgId, d.siteId);
-    const nowIn = new Set(fencesAt(d.pos, fences, d.kind).map((f) => f.id));
-    const was = this.insideFences.get(d.id) ?? new Set<string>();
     const m = this.activeMission(d.id);
+    this.trackArea(d, d.kind, fences, m, now);
+    const nowIn = new Set(fencesAt(d.pos, fences, d.kind).filter((f) => f.kind !== 'operating_area').map((f) => f.id));
+    const was = this.insideFences.get(d.id) ?? new Set<string>();
     for (const id of nowIn) {
       if (was.has(id)) continue;
       const f = fences.find((x) => x.id === id)!;
@@ -2718,6 +2922,29 @@ export class Platform {
       if (f && f.kind !== 'caution') this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: 'info', text: `${d.id} left zone "${f.name}".` } });
     }
     this.insideFences.set(d.id, nowIn);
+  }
+
+  /** Outside every operating area of its site (only sites that have one, only with a position fix). */
+  private trackArea(d: Device & { orgId: string; siteId: string }, kind: FencedKind, fences: Geofence[], m: Mission | undefined, now: number) {
+    const areas = operatingAreas(fences, kind);
+    const out = areas.length > 0 && !d.noFix && !insideSite(d.pos, areas, kind);
+    const wasOut = this.outsideArea.has(d.id);
+    if (out === wasOut) return;
+    if (!out) {
+      this.outsideArea.delete(d.id);
+      this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: 'info', text: `${d.id} is back inside the operating area.` } });
+      return;
+    }
+    this.outsideArea.add(d.id);
+    const breach = !!m;
+    const text = `${d.id} is outside the operating area${m ? ` during ${m.id}` : ''}`;
+    if (m) this.event(null, d.orgId, d.siteId, m.incidentId, text, { actor: d.id, tone: 'alert', at: now });
+    this.audit(this.systemActor(d.orgId, 'system', 'Geofence'), 'geofence.breach', d.id, breach ? 'error' : 'ok', `${text} (${areas.map((f) => f.name).join(', ')})`);
+    this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: breach ? 'error' : 'warn', text: `${text}.` } });
+    if (breach) {
+      this.bus.emit('geofence', { orgId: d.orgId, deviceId: d.id, fence: areas[0], breach });
+      this.notify(d.orgId, { event: 'geofence.breach', title: text, text: 'Left the operating area', severity: 'high', incidentId: m.incidentId, data: { deviceId: d.id, fenceId: areas[0].id, pos: d.pos } });
+    }
   }
 
   // ---- usage counters, service, docking ---------------------------------------------
@@ -2806,7 +3033,7 @@ export class Platform {
     if (ih !== undefined) st.serviceIntervalH = ih;
     if (patch.dock === null) st.dock = undefined;
     else if (patch.dock) {
-      if (!Number.isFinite(patch.dock.x) || !Number.isFinite(patch.dock.y) || !insideDemoArea(patch.dock)) fail(400, 'invalid', 'dock must be {x, y} inside the site.');
+      if (!Number.isFinite(patch.dock.x) || !Number.isFinite(patch.dock.y) || !insideSite(patch.dock, this.geofencesOf(a.orgId, d.siteId), d.kind === 'uav' ? 'uav' : 'ugv')) fail(400, 'invalid', 'dock must be {x, y} inside the site.');
       st.dock = { x: patch.dock.x, y: patch.dock.y };
     }
     this.saveStats(d, true);
@@ -2907,6 +3134,9 @@ export class Platform {
     const raw = this.validRoute((input.route ?? prev?.route ?? []) as Point[]);
     // Indoor vehicles get the floor-plan checks below instead of the outdoor obstacle check.
     const route = d.indoor ? raw : this.clearRoute(a.orgId, d, raw);
+    // Outdoors the route has to stay on the site (its operating area when it has one), as approval requires.
+    const outside = d.indoor ? [] : routeOutsideSite(route, this.geofencesOf(a.orgId, d.siteId), d.kind as FencedKind);
+    if (outside.length) fail(400, 'invalid', `Checkpoints ${outside.join(', ')} are outside the site.`);
     if (d.indoor) {
       // Indoor vehicles patrol their floor: the route has to pass the same checks as an indoor mission.
       const bad = indoorRouteChecks(d, { checkpoints: route } as Mission).filter((c) => c.hard && !c.ok);
@@ -3014,6 +3244,8 @@ export class Platform {
     if (!isReadyAt(now, d, this.allMissions(orgId))) return skip(`${d.id} is on another mission.`);
     const hits = routeViolations(p.route, d.pos, this.geofencesOf(orgId, siteId), d.kind as 'ugv' | 'uav');
     if (hits.length) return skip(`route enters keep-out zone "${hits[0].name}".`);
+    const outside = d.indoor ? [] : routeOutsideSite(p.route, this.geofencesOf(orgId, siteId), d.kind as FencedKind);
+    if (outside.length) return skip(`checkpoints ${outside.join(', ')} are outside the site.`);
     const operator = this.db.prepare('SELECT name FROM users WHERE id = ? AND org_id = ? AND active = 1').get(p.operatorId, orgId) as { name: string } | undefined;
     if (!operator) return skip('the assigned operator is no longer active.');
     const source = trigger === 'schedule' ? 'Patrol scheduler' : a.name;

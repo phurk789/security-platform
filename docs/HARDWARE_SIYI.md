@@ -167,7 +167,9 @@ Arm, mode-switch and kill switches stay on the UniRC 7 Pro channels as usual.
   PC but no MAVLink decodes.
 - The PC's own UDP port must not be 19856, or it clashes with the server.
 - Plug the edge PC into the **LAN** port. Give the PC a static address on `192.168.144.0/24`
-  (for example `192.168.144.50`), not one already used by the link (`.11`, `.12`, `.20`, `.25`…).
+  (for example `192.168.144.100`), not one SIYI reserves (A8 mini manual §4.6): `.11` air unit,
+  `.12` ground unit, `.20` remote, `.25` gimbal camera, `.26` second IP67 camera, `.50` HDMI output
+  converter, `.60` AI camera.
 - Check from the PC: `ping 192.168.144.25` (camera). QGroundControl on the PC with a UDP link to
   server `192.168.144.20:19856` should show the vehicle; close QGroundControl before starting the
   gateway, or use different ports.
@@ -207,8 +209,31 @@ deletes it. See [ADAPTER_CONTRACT.md §7](ADAPTER_CONTRACT.md).
 `site.json` fields: `geo` (origin latitude/longitude of the site grid and rotation), and per
 device `type` (`mavlink` / `siyi-camera` / `simulated`), `deviceId`, `profile`
 (`ardupilot-rover`, `ardupilot-copter`, `px4-rover`, `px4-multicopter`), `link`, `pos` for a
-fixed camera, `stream.whep` for the browser video URL, and `yawSign: -1` if "pan right" turns
-the camera left (SIYI yaw sign can differ by model and mounting; check it in test 11).
+fixed camera, `stream.whep` for the browser video URL (also on a `mavlink` vehicle, for the
+onboard camera's video; that is video only, gimbal control needs a `siyi-camera` device), and the
+yaw signs of a SIYI camera. The
+platform treats positive yaw as a turn to the right. SIYI models differ, and one camera can use
+different signs for different SDK messages, so check both in test 11:
+
+- `yawSpeedSign`: speed commands ("pan right" must turn right).
+- `yawAngleSign`: the attitude the camera reports and absolute angle commands ("point at alert").
+- `yawSign`: the older single setting, used for both when the two above are not set.
+
+**A8 mini, measured 2026-10-26** (camera firmware 0.3.7, gimbal 0.4.10, hanging mount): speed +60
+turned it right, but it reports right as negative and an absolute +30° went left. Use
+`"yawSpeedSign": 1, "yawAngleSign": -1`.
+
+**A8 mini bench notes (same day)**
+
+- Power it hanging, lens down, as it is mounted on a vehicle. Powered while standing on its base it
+  reported "upside down" mounting and pitch 180°, and yaw would not respond.
+- Speed commands below about 30 % barely move the yaw axis (about 1°/s at 20, 45°/s at 60).
+- The main stream `rtsp://192.168.144.25:8554/main.264` is **H.265** despite the name. Switch it to
+  H.264 in UniGCS (main/sub stream settings) before serving it to browsers over WebRTC.
+- Photo and recording need a TF card (gimbal info reports record status 2 without one).
+- The remote's dial and joystick reach the gimbal only through S.Bus (gimbal control port). Default
+  gimbal channels are yaw 4 and pitch 7; channel 7 is the Rover arm/disarm switch
+  (`RC7_OPTION`), so move the gimbal to free channels before wiring the S.Bus Y cable.
 
 ### 5. Catalogue vehicles (D50 / D100 / D200) and the 4-in-1 module
 
@@ -244,7 +269,7 @@ physical E-stop in reach. Record firmware versions in the device's "firmware tes
 | 10  | Physical E-stop              | Works with the platform disconnected                                                                                                       |
 | 11a | Point at alert               | Inject or trigger an alert at a surveyed point: camera centres on it (record the error in degrees); correct `bearingDeg` if needed         |
 | 10a | 4-in-1 module                | Searchlight and warning light switch from the console and the state shows on the unit card; relays confirmed by the flight controller      |
-| 11  | Camera control               | Pan/tilt/zoom/photo/record each confirmed by the camera; "pan right" turns right (else set `yawSign: -1`); pitch limits respected          |
+| 11  | Camera control               | Pan/tilt/zoom/photo/record each confirmed by the camera; "pan right" turns right (`yawSpeedSign`); "point at" an angle to the right turns right and the shown yaw grows (`yawAngleSign`); pitch limits respected |
 | 12  | Video                        | Browser shows live video; an expired link is refused; another org cannot view                                                              |
 | 13  | Latency                      | Measure command → acknowledgement and glass-to-glass video delay; record both                                                              |
 

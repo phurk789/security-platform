@@ -1,26 +1,43 @@
-# thermalplatform on the office test server 192.168.20.13 — demo mode on port 8090.
+# thermalplatform on the office test server 192.168.20.13, port 8090.
 # Kept apart from the VMS stack (8080) and LCOT: own project name, network and data volume.
-# The image is built on the server (see README.md here); compose never builds or pulls.
+# The image is built on the server (see README.md here); compose never builds or pulls it.
 #
-# The simulated gateway runs inside the server (EMBED_GATEWAY=1, the demo default). The separate
-# edge-gateway container from the root docker-compose.yml is left out: in image 406d410 the
-# standalone gateway bundle crashes on start ('Dynamic require of "events" is not supported').
-# The apps/gateway build now has the createRequire banner; images built after that fix can run
-# a separate gateway again.
+# Which environment runs is set in two files next to this one on the server (not in git):
+#   .env         THERMAL_TAG (image) and THERMAL_DATA_VOLUME (which data)
+#   .env.server  ENV_MODE, MEDIA_SECRET, TRUST_PROXY, CSP_CONNECT_SRC, MEDIA_INGEST_URL,
+#                MEDIA_PUBLIC_URL (the server's settings)
+# Pilot (real devices): THERMAL_DATA_VOLUME=thermal_pilot-data, ENV_MODE=pilot.
+# Demo (simulated):     THERMAL_DATA_VOLUME=thermal_thermal-data, ENV_MODE=demo.
+# Each environment keeps its own volume, so switching never mixes demo and real data.
 name: thermal
 
 services:
   server:
     image: thermal-platform:${THERMAL_TAG:?set THERMAL_TAG in .env}
     pull_policy: never
-    environment:
-      ENV_MODE: demo
-      EMBED_GATEWAY: "1"
+    env_file: .env.server
     ports:
       - "8090:8080"
     volumes:
-      - thermal-data:/data
+      - data:/data
+    restart: unless-stopped
+
+  # The platform's media server: gateways push camera video in, browsers watch (mediamtx.yml).
+  # Turn pushed video on in the server with MEDIA_INGEST_URL=rtsp://192.168.20.13:18554 and
+  # MEDIA_PUBLIC_URL=http://192.168.20.13:18889 in .env.server.
+  media:
+    image: bluenviron/mediamtx:1.9.3
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      - "18554:18554" # RTSP: gateways publish here
+      - "18889:18889" # WebRTC signalling (WHEP): browsers
+      - "18189:18189/udp" # WebRTC media
+      - "18189:18189/tcp" # WebRTC media over TCP when UDP is blocked
+    depends_on:
+      - server
     restart: unless-stopped
 
 volumes:
-  thermal-data:
+  data:
+    name: ${THERMAL_DATA_VOLUME:?set THERMAL_DATA_VOLUME in .env}

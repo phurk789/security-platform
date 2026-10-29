@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type GeoAnchor } from '@13store/shared';
 import { CommandLedger, ledgerFile, type LedgerOptions } from './ledger';
 import { consoleLogger, type Adapter, type AdapterContext, type Logger } from './sdk';
+import { VideoPusher, type Pusher, type VideoPushOptions } from './videoPush';
 
 /** Messages dropped because the server link was down, by type. */
 export type DroppedCounts = Record<Exclude<GatewayToServer['t'], 'hello'>, number>;
@@ -32,6 +33,10 @@ export interface GatewayOptions {
   dataDir?: string;
   /** Ledger retention tuning. Defaults suit the 10 s command TTL. */
   ledger?: Pick<LedgerOptions, 'retainMs' | 'maxEntries' | 'clockSkewMs'>;
+  /** ffmpeg used to push video for devices declaring `stream.push` (default `ffmpeg` on PATH). */
+  ffmpegPath?: string;
+  /** Replaces the ffmpeg pusher (tests). */
+  createPusher?: (o: VideoPushOptions) => Pusher;
 }
 
 export interface GatewayHandle {
@@ -41,7 +46,34 @@ export interface GatewayHandle {
   readonly accepted: ReadonlySet<string>;
   /** Messages dropped (never buffered) because the server link was down, since start. */
   readonly dropped: Readonly<DroppedCounts>;
+  /** Snapshot for an operator screen (the Android edge app shows it). */
+  status(): GatewayStatus;
   stop(): Promise<void>;
+}
+
+/** What a person at the edge needs to see: is the server reached, is each device alive, is video going out. */
+export interface GatewayStatus {
+  at: number;
+  gatewayId: string;
+  server: {
+    url: string;
+    connected: boolean;
+    /** The server closed the link because it does not accept the gateway key. */
+    refused: boolean;
+    /** When the link last came up or went down. */
+    since: number;
+  };
+  devices: {
+    deviceId: string;
+    kind: string;
+    accepted: boolean;
+    /** Why the server refused this device in its last welcome. */
+    rejected?: string;
+    /** Last telemetry the adapter produced (a MAVLink vehicle reports only while its heartbeat is fresh). */
+    lastTelemetryAt?: number;
+    video?: { status: string; detail: string; codec?: string };
+  }[];
+  dropped: DroppedCounts;
 }
 
 export function startGateway(opts: GatewayOptions): GatewayHandle {
@@ -58,6 +90,38 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
   let outage = noDrops(); // since the link last went down
   let offlineSince = now();
   let everConnected = false;
+  let linkSince = now();
+  let refused = false;
+  const rejected = new Map<string, string>();
+  const lastTelemetry = new Map<string, number>();
+  /** Video pushes by device id. They outlive server reconnects: each welcome only refreshes the credential. */
+  const pushers = new Map<string, Pusher>();
+  const createPusher = opts.createPusher ?? ((o: VideoPushOptions) => new VideoPusher(o));
+
+  const updatePushes = (accepted: string[], media: { deviceId: string; publish: string }[]) => {
+    for (const m of media) {
+      const a = byId.get(m.deviceId);
+      const source = a?.declaration.stream?.push ? a.declaration.stream.rtsp : undefined;
+      if (!a || !source || !accepted.includes(m.deviceId)) {
+        log.warn(`server sent a video publish address for ${m.deviceId}, which has no camera to push here; ignored`);
+        continue;
+      }
+      const p = pushers.get(m.deviceId);
+      if (p) p.setTarget(m.publish);
+      else pushers.set(m.deviceId, createPusher({ deviceId: m.deviceId, source, target: m.publish, ffmpeg: opts.ffmpegPath, log, onState: (s) => a.onMediaState?.(s) }));
+    }
+    for (const a of opts.adapters) {
+      const id = a.declaration.deviceId;
+      if (!a.declaration.stream?.push) continue;
+      if (!accepted.includes(id)) {
+        // No longer this gateway's device: stop publishing it.
+        pushers.get(id)?.stop();
+        pushers.delete(id);
+      } else if (!media.some((m) => m.deviceId === id)) {
+        log.warn(`${id}: the server gave no video publish address (it has no media server for pushed video); video stays off`);
+      }
+    }
+  };
 
   const send = (msg: GatewayToServer) => {
     if (ws?.readyState !== WebSocket.OPEN) {
@@ -90,7 +154,10 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
       now,
       log,
       ledger: new CommandLedger({ ...opts.ledger, file: opts.dataDir ? ledgerFile(opts.dataDir, deviceId) : undefined, deviceId, now, log }),
-      telemetry: (t) => send({ t: 'telemetry', deviceId, ...t }),
+      telemetry: (t) => {
+        lastTelemetry.set(deviceId, now());
+        send({ t: 'telemetry', deviceId, ...t });
+      },
       commandUpdate: (u) => {
         if (!accepted.has(deviceId)) return;
         send({ t: 'cmd', ...u, at: u.at ?? now() });
@@ -112,8 +179,13 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
     switch (msg.t) {
       case 'welcome':
         accepted = new Set(msg.accepted);
-        for (const r of msg.rejected) log.warn(`server rejected ${r.deviceId}: ${r.reason}`);
+        rejected.clear();
+        for (const r of msg.rejected) {
+          rejected.set(r.deviceId, r.reason);
+          log.warn(`server rejected ${r.deviceId}: ${r.reason}`);
+        }
         log.info(`registered ${msg.accepted.length} device(s)`);
+        updatePushes(msg.accepted, msg.media ?? []);
         return;
       case 'command': {
         const a = byId.get(msg.deviceId);
@@ -130,6 +202,13 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
           return;
         }
         a.onCamera(requestId, action as Parameters<NonNullable<Adapter['onCamera']>>[1]);
+        return;
+      }
+      case 'drive': {
+        const a = byId.get(msg.deviceId);
+        if (!a || !accepted.has(msg.deviceId)) return;
+        if (!a.onDrive) return log.warn(`drive sample for ${msg.deviceId}, which cannot be driven live; ignored`);
+        a.onDrive(msg);
         return;
       }
       case 'demo': {
@@ -150,6 +229,8 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
     let opened = false;
     sock.on('open', () => {
       opened = true;
+      refused = false;
+      linkSince = now();
       delay = backoff.initialMs;
       accepted = new Set();
       log.info(`connected to ${opts.serverUrl} as ${opts.gatewayId}`);
@@ -172,8 +253,11 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
       accepted = new Set();
       if (stopped) return;
       // A link that was up starts an outage; a failed reconnect attempt only extends it.
-      if (opened) offlineSince = now();
-      if (code === 4401 || code === 1008) log.error('server refused the gateway credential');
+      if (opened) offlineSince = linkSince = now();
+      if (code === 4401 || code === 1008) {
+        refused = true;
+        log.error('server refused the gateway credential');
+      }
       retry = setTimeout(connect, delay);
       delay = Math.min(backoff.maxMs, delay * 2);
     });
@@ -191,9 +275,31 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
     get dropped() {
       return { ...dropped };
     },
+    status() {
+      return {
+        at: now(),
+        gatewayId: opts.gatewayId,
+        server: { url: opts.serverUrl, connected: ws?.readyState === WebSocket.OPEN, refused, since: linkSince },
+        devices: opts.adapters.map((a) => {
+          const id = a.declaration.deviceId;
+          const push = pushers.get(id)?.state;
+          return {
+            deviceId: id,
+            kind: a.declaration.kind,
+            accepted: accepted.has(id),
+            ...(rejected.has(id) ? { rejected: rejected.get(id) } : {}),
+            ...(lastTelemetry.has(id) ? { lastTelemetryAt: lastTelemetry.get(id) } : {}),
+            ...(push ? { video: { status: push.status, detail: push.detail, ...(push.codec ? { codec: push.codec } : {}) } } : {}),
+          };
+        }),
+        dropped: { ...dropped },
+      };
+    },
     async stop() {
       stopped = true;
       if (retry) clearTimeout(retry);
+      for (const p of pushers.values()) p.stop();
+      pushers.clear();
       for (const a of opts.adapters) a.stop();
       const s = ws;
       ws = null;

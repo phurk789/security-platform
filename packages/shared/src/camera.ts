@@ -114,6 +114,11 @@ export interface StreamInfo {
   hlsSub?: string;
   /** Media server playback (recordings) base URL, e.g. https://edge.example:9996 (MediaMTX playback server). */
   playback?: string;
+  /**
+   * Push mode (gateway declaration only): the gateway pushes `rtsp` into the platform's media server
+   * and the server fills in `whep`. The gateway needs no reachable address of its own.
+   */
+  push?: boolean;
 }
 
 export const CAMERA_ACTIONS: CameraAction['action'][] = ['gimbal_speed', 'gimbal_angle', 'center', 'zoom', 'zoom_to', 'photo', 'record'];

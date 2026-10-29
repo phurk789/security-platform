@@ -1,0 +1,37 @@
+# MediaMTX on the SIYI UniRC 7 Pro (Android, inside Termux), started by start.sh.
+# Pulls RTSP from the A8 mini on the vehicle and serves WebRTC (WHEP) to browsers on the office
+# Wi-Fi. Every viewer brings a 60-second token that MediaMTX checks with the platform server.
+logLevel: info
+
+rtsp: no
+rtmp: no
+srt: no
+hls: no
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+# Android 11+ does not let apps list network interfaces (Go programs fail with "netlink ...
+# permission denied"), so do not look them up: announce the remote's Wi-Fi address instead.
+webrtcIPsFromInterfaces: no
+webrtcAdditionalHosts: [REMOTE_IP]
+
+authMethod: http
+authHTTPAddress: http://192.168.20.13:8090/api/v1/media/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+
+# No recording on the remote (storage, heat).
+record: no
+
+pathDefaults:
+  rtspTransport: tcp
+  sourceOnDemand: yes
+  sourceOnDemandStartTimeout: 10s
+  sourceOnDemandCloseAfter: 10s
+
+paths:
+  # Path name = the last part of stream.whep in site.json (http://REMOTE_IP:8889/ugv-01/whep).
+  # The A8 mini allows few parallel streams: MediaMTX 1 + UniGCS 1. Set it to H.264 in UniGCS.
+  ugv-01:
+    source: rtsp://192.168.144.25:8554/main.264

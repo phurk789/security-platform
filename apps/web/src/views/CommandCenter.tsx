@@ -12,6 +12,7 @@ import { useStore } from '../store';
 import { CommandBadge, MissionBadge } from '../components/Badges';
 import { CameraFeed } from '../components/CameraFeed';
 import { CameraControls } from '../components/CameraControls';
+import { DrivePanel } from '../components/DrivePanel';
 import { FleetCard } from '../components/Hud';
 import { LiveMission } from '../components/IncidentPanel';
 import { TelemetryPanel } from '../components/TelemetryPanel';
@@ -24,7 +25,7 @@ import './command-center.css';
 const OPEN_MISSION = ['draft', 'pending_approval', 'approved', 'assigned', 'executing', 'paused'];
 
 export function CommandCenter() {
-  const { s, dispatch } = useStore();
+  const { s, dispatch, mode } = useStore();
   const t = useT();
   const [filter, setFilter] = useState<'all' | 'ugv' | 'uav'>('all');
   const units = Object.values(s.devices)
@@ -99,6 +100,7 @@ export function CommandCenter() {
           </section>
 
           <aside className="cc-side">
+            {mode === 'remote' && d.kind === 'ugv' && d.teleop && <DrivePanel d={d} />}
             <section className="panel cc-box">
               <div className="panel-head">
                 <h2>{t('Mission control')}</h2>

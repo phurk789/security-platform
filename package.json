@@ -16,6 +16,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "smoke": "node scripts/smoke-dist.mjs",
+    "kit:remote": "npm run build:single -w @13store/gateway && node scripts/build-remote-kit.mjs",
     "build:vercel": "npm run build:single -w @13store/web && rm -rf vercel-out && mkdir -p vercel-out && cp apps/web/dist-single/index.html vercel-out/index.html && cp -r apps/web/public/media vercel-out/media"
   },
   "devDependencies": {
