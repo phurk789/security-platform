@@ -35,7 +35,8 @@ export function PatrolsCard() {
   // Coming back from drawing on the map: reopen the form as it was.
   const [open, setOpen] = useState(() => !!returningForm());
   const vehicles = Object.values(s.devices).filter((d) => (d.kind === 'ugv' || d.kind === 'uav') && d.commands.includes('start'));
-  const operators = s.users.filter((u) => u.role === 'operator');
+  // Whoever sets up the patrol approves its runs, so someone else operates it (two-person rule).
+  const operators = s.users.filter((u) => can(u.role, 'mission.accept') && u.id !== me.id);
   const [form, setForm] = useState<PatrolForm>(
     () =>
       returningForm() ?? {

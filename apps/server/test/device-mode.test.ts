@@ -249,7 +249,8 @@ describe('per-device operational mode', () => {
     const path = `/devices/${DEV}/mode-transitions`;
     const body = { to: 'LIVE_MANUAL', reason: 'E-stop and link-loss failsafe tested; pilot holds the UniRC; cordon set' };
     expect((await op.post(path, body)).status).toBe(403);
-    expect((await admin.post(path, body)).status).toBe(403); // administrators manage devices, they do not put them live
+    // Administrators have every supervisor permission: past the permission check, the missing reason is refused.
+    expect((await admin.post(path, { to: 'LIVE_MANUAL' })).status).toBe(400);
     expect((await sup.post(path, { to: 'LIVE_MANUAL' })).status).toBe(400);
     expect((await sup.post(path, { to: 'TURBO', reason: 'x' })).status).toBe(400);
 

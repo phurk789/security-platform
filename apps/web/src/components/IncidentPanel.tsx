@@ -28,7 +28,7 @@ import { isTerminal, missionForIncident } from '../domain/reducer';
 import { constraintChecks } from '../domain/policy';
 import { finishedDraft, routeDraft, useRouteDraft } from '../domain/routeDraft';
 import { DEFAULT_ROUTE, planFor, rankUnits, routeLength } from '@13store/shared';
-import type { AppState, CommandType, Device, Incident, Mission, Point } from '@13store/shared';
+import type { AppState, CommandType, Device, Incident, Mission, Point, Role } from '@13store/shared';
 import { LatLon } from './LatLon';
 import { useStore } from '../store';
 import { CameraFeed } from './CameraFeed';
@@ -223,20 +223,22 @@ function IncidentPanel({ inc }: { inc: Incident }) {
         <button className="btn-outline" onClick={() => dispatch({ type: 'setView', view: 'evidence' })}>
           <FileText size={18} /> {t('View evidence')}
         </button>
-        <RoleHint s={s} inc={inc} m={m} role={me.role} />
+        <RoleHint s={s} inc={inc} m={m} meId={me.id} role={me.role} />
       </div>
     </aside>
   );
 }
 
-function RoleHint({ s, inc, m, role }: { s: AppState; inc: Incident; m?: Mission; role: string }) {
+function RoleHint({ s, inc, m, meId, role }: { s: AppState; inc: Incident; m?: Mission; meId: string; role: Role }) {
   const t = useT();
   let text: string | null = null;
   if (s.replay.active) text = 'You are viewing replay. Device control is off.';
   else if (role === 'auditor') text = 'Read-only role. Actions are disabled.';
-  else if (m?.status === 'pending_approval' && role !== 'supervisor') text = 'Waiting for supervisor approval. (Demo: switch role to Supervisor.)';
-  else if (m?.status === 'approved' && role !== 'operator') text = 'Approved. Waiting for the operator to accept. (Demo: switch role to Operator.)';
-  else if (m?.status === 'assigned' && role !== 'operator') text = 'Operator holds control. Only they can start the mission.';
+  else if (m?.status === 'pending_approval' && m.operatorId === meId) text = 'You are the operator of this mission, so another supervisor approves it (two-person rule).';
+  else if (m?.status === 'pending_approval' && !can(role, 'mission.approve')) text = 'Waiting for supervisor approval. (Demo: switch role to Supervisor.)';
+  else if ((m?.status === 'approved' || m?.status === 'assigned') && m.approvedBy === meId) text = 'You approved this mission, so another person operates it (two-person rule).';
+  else if (m?.status === 'approved' && m.operatorId !== meId) text = 'Approved. Waiting for the operator to accept. (Demo: switch role to Operator.)';
+  else if (m?.status === 'assigned' && s.devices[m.deviceId]?.controlOwner !== meId) text = 'Operator holds control. Only they can start the mission.';
   else if (inc.status === 'confirmed' && !m) text = 'Approval required before dispatch.';
   if (!text) return null;
   return (
@@ -609,7 +611,8 @@ function PrepareMission({ inc }: { inc: Incident }) {
     else if (!indoorPlan && autoPlan?.ok && route === 'direct') setRoute('auto');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
-  const operators = s.users.filter((u) => u.role === 'operator');
+  // Anyone who may operate a vehicle: operators, supervisors, administrators.
+  const operators = s.users.filter((u) => can(u.role, 'mission.accept'));
   const [op, setOp] = useState(operators[0]?.id ?? '');
   const allowed = can(me.role, 'mission.prepare') && !s.replay.active;
 
@@ -866,7 +869,7 @@ function Planner({ m }: { m: Mission }) {
             <button className="btn-secondary grow" disabled={!canApprove} onClick={() => setDlg(true)}>
               {t('Reject')}
             </button>
-            <button className="btn-primary grow" disabled={!canApprove || hardFail} onClick={() => dispatch({ type: 'approveMission', missionId: m.id })}>
+            <button className="btn-primary grow" disabled={!canApprove || hardFail || m.operatorId === me.id} onClick={() => dispatch({ type: 'approveMission', missionId: m.id })}>
               <ShieldCheck size={18} /> {t('Approve plan v{v}', { v: m.planVersion })}
             </button>
           </div>
@@ -874,7 +877,7 @@ function Planner({ m }: { m: Mission }) {
         {m.status === 'approved' && (
           <button
             className="btn-primary wide big"
-            disabled={me.role !== 'operator' || me.id !== m.operatorId || s.replay.active}
+            disabled={!can(me.role, 'mission.accept') || me.id !== m.operatorId || me.id === m.approvedBy || s.replay.active}
             onClick={() => dispatch({ type: 'acceptMission', missionId: m.id })}
           >
             <Hand size={18} /> {t('Accept mission & take control')}
@@ -992,7 +995,7 @@ export function LiveMission({ m }: { m: Mission }) {
           </p>
         )}
         {m.status === 'assigned' && has('start') && (
-          <button className="btn-primary wide big" disabled={!iHold || off || !!pending} onClick={() => send('start')}>
+          <button className="btn-primary wide big" disabled={!iHold || off || !!pending || m.approvedBy === me.id} onClick={() => send('start')}>
             <Play size={18} /> {pending?.type === 'start' ? t('Start requested — waiting for vehicle') : t('Send start request')}
           </button>
         )}

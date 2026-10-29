@@ -7,6 +7,7 @@ describe('Thai for server and vehicle messages', () => {
   it('translates exact messages from the dictionary and messages with names by pattern', () => {
     expect(th('Vehicle is disarmed. Arm it on the remote after the safety check, then send start again.')).toMatch(/^รถยังไม่ได้ arm/);
     expect(th('UGV-01 is on another mission.')).toBe('UGV-01 ติดภารกิจอื่นอยู่');
+    expect(th('UGV-01 is not ready.')).toBe('UGV-01 ยังไม่พร้อม');
     expect(th('UGV-01 is in SHADOW mode. A supervisor must promote it to LIVE_MANUAL before start. Stop and pause still work.')).toBe(
       'UGV-01 อยู่โหมด SHADOW หัวหน้าเวรต้องเปลี่ยนเป็น LIVE_MANUAL ก่อนจึงจะเริ่มได้ (สั่งหยุดและพักยังใช้ได้)',
     );

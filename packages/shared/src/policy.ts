@@ -79,45 +79,47 @@ const DISPATCH: Action[] = [
   'demo.control',
 ];
 
+/** Operators accept missions and command the vehicle they hold. */
+const OPERATE: Action[] = ['mission.accept', 'device.command', 'media.view', 'camera.control', 'payload.control', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'];
+
+const uniq = (...lists: Action[][]): Action[] => [...new Set(lists.flat())];
+
+/** Supervisors do everything dispatchers and operators do, plus approvals, live mode, patrols and zones. */
+const SUPERVISE: Action[] = uniq(DISPATCH, OPERATE, [
+  'mission.approve',
+  'control.handover',
+  'evidence.export',
+  'audit.view',
+  'site.geofences',
+  'patrol.manage',
+  'device.mode.promote',
+  'device.mode.demote',
+]);
+
 /**
- * Role → allowed actions (PRD §3). Viewing video, exporting evidence and controlling devices
- * are separate permissions (F13). Administrators see everything (incidents, missions, video,
- * evidence, reports, audit) but do not command devices, approve missions or handle incidents.
+ * Role → allowed actions (PRD §3). Roles are levels: a supervisor can do everything a dispatcher
+ * and an operator can, an administrator everything a supervisor can plus running the system.
+ * Viewing video, exporting evidence and controlling devices stay separate permissions (F13), and
+ * the two-person rule (whoever approves a mission does not operate it) is enforced on the
+ * mission itself, not by role.
  */
 export const MATRIX: Record<Role, Action[]> = {
   dispatcher: DISPATCH,
-  supervisor: [
-    ...DISPATCH,
-    'mission.approve',
-    'control.handover',
-    'evidence.export',
-    'audit.view',
-    'site.geofences',
-    'patrol.manage',
-    'device.mode.promote',
-    'device.mode.demote',
-  ],
-  operator: ['mission.accept', 'device.command', 'media.view', 'camera.control', 'payload.control', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'],
+  supervisor: SUPERVISE,
+  operator: OPERATE,
   responder: ['incident.create', 'field.update', 'evidence.view', 'evidence.add'],
-  auditor: ['evidence.view', 'evidence.export', 'report.view', 'audit.view'],
-  admin: [
-    'media.view',
-    'evidence.view',
-    'report.view',
+  auditor: ['media.view', 'evidence.view', 'evidence.export', 'report.view', 'audit.view'],
+  admin: uniq(SUPERVISE, [
     'admin.users',
     'admin.devices',
     'admin.keys',
     'admin.backup',
     'admin.settings',
     'admin.privacy',
-    'site.geofences',
     'site.manage',
     'device.service',
-    'device.mode.demote',
     'admin.edge_origins',
-    'audit.view',
-    'demo.control',
-  ],
+  ]),
 };
 
 /** Actions that require a recent password check. */
