@@ -425,6 +425,9 @@ export default function RealMap() {
   const fitSite = () => {
     const map = sm.current?.map;
     if (!map) return;
+    // A real site is its operating area; the demo site is its drawn grid.
+    const area = s.geofences.filter((z) => z.active && z.kind === 'operating_area').flatMap((z) => z.poly);
+    if (area.length) return zoomTo(area);
     const g = s.geo;
     const pts = [lngLat(g, { x: 0, y: 0 }), lngLat(g, { x: SITE.width, y: 0 }), lngLat(g, { x: SITE.width, y: SITE.height }), lngLat(g, { x: 0, y: SITE.height })];
     const lons = pts.map((p) => p[0]);
@@ -437,6 +440,19 @@ export default function RealMap() {
       { padding: 40, duration: 800, pitch: 0, bearing: 0 },
     );
   };
+
+  // Each site opens on its operating area once its zones have loaded (the demo site keeps its view).
+  const fitted = useRef<string | undefined>(undefined);
+  const siteKey = s.site?.id;
+  const hasArea = s.geofences.some((z) => z.active && z.kind === 'operating_area');
+  useEffect(() => {
+    if (!ready || !siteKey || fitted.current === siteKey) return;
+    fitted.current = siteKey;
+    // The site and its zones come in the same snapshot, so this runs once the zones are known.
+    if (hasArea) fitSite();
+    else if (!s.site?.demo) sm.current?.map.jumpTo({ center: lngLat(s.geo, { x: 0, y: 0 }) as [number, number], zoom: 17 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, siteKey, hasArea]);
 
   /** Fit a zone (site metres) into view, clear of the HUD panels. */
   const zoomTo = (poly: { x: number; y: number }[]) => {
@@ -468,7 +484,7 @@ export default function RealMap() {
 
   return (
     <div className={`map map-real${s.replay.active ? ' replay' : ''}`}>
-      <div ref={el} className="map-real-canvas" aria-label={t('Live map of {site}', { site: SITE.name })} role="region" />
+      <div ref={el} className="map-real-canvas" aria-label={t('Live map of {site}', { site: s.site?.name ?? SITE.name })} role="region" />
       {error ? (
         <div className="map-error" role="alert">
           {error}

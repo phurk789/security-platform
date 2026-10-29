@@ -18,6 +18,9 @@ object EdgeState {
     /** Why the gateway last stopped on its own, for the screen. */
     @Volatile var lastProblem: String? = null
         private set
+    /** When the gateway last reached RUNNING (elapsedRealtime ms), for "online for"; null when not running. */
+    @Volatile var runningSince: Long? = null
+        private set
 
     private val main = Handler(Looper.getMainLooper())
     private val listeners = mutableSetOf<() -> Unit>()
@@ -28,6 +31,8 @@ object EdgeState {
     private fun changed() = main.post { listeners.toList().forEach { it() } }
 
     fun setPhase(p: Phase, problem: String? = lastProblem) {
+        if (p == Phase.RUNNING && phase != Phase.RUNNING) runningSince = android.os.SystemClock.elapsedRealtime()
+        if (p != Phase.RUNNING) runningSince = null
         phase = p
         lastProblem = problem
         if (p == Phase.STOPPED) status = null
@@ -83,6 +88,10 @@ object Prefs {
     /** The person pressed Start and not yet Stop: the service brings the gateway back after a crash or restart. */
     fun wantRunning(ctx: Context) = p(ctx).getBoolean("wantRunning", false)
     fun setWantRunning(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("wantRunning", v).apply()
+
+    /** The gateway was running when an update started: start it again once the new version is installed (or the update fails). */
+    fun resumeAfterUpdate(ctx: Context) = p(ctx).getBoolean("resumeAfterUpdate", false)
+    fun setResumeAfterUpdate(ctx: Context, v: Boolean) = p(ctx).edit().putBoolean("resumeAfterUpdate", v).commit()
 
     fun lastServer(ctx: Context): String = p(ctx).getString("lastServer", DEFAULT_SERVER) ?: DEFAULT_SERVER
     fun setLastServer(ctx: Context, v: String) = p(ctx).edit().putString("lastServer", v).apply()

@@ -385,6 +385,15 @@ export const DEFAULT_LAYERS: Layers = {
   labels: true,
 };
 
+/** A site as the console lists it. */
+export interface SiteRef {
+  id: string;
+  name: string;
+  demo: boolean;
+  /** Device ids on the site (the admin list). */
+  devices?: string[];
+}
+
 export interface AppState {
   now: number;
   userId: string;
@@ -419,6 +428,10 @@ export interface AppState {
   geofences: Geofence[];
   /** WGS 84 anchor of the site grid (from the server's site record; the demo anchor offline). */
   geo: GeoAnchor;
+  /** The site on screen (server consoles). demo: the drawn demo site with its plan of buildings. */
+  site?: SiteRef;
+  /** Sites this user may switch to. */
+  sites?: SiteRef[];
   /** Recent AI / sensor detections (newest first, bounded) for feed overlays and lists. */
   detections: Detection[];
   /** Scheduled patrols (server only; empty in the offline demo). */

@@ -2,8 +2,9 @@
 # Builds the field APK on Linux (WSL Ubuntu or CI).
 #   1. on the PC, in the repository:  npm run build:android -w @13store/gateway
 #   2. here (once):                   tools/setup-toolchain.sh && tools/build-natives.sh arm64-v8a
-#   3. here:                          tools/build-apk.sh                 → dist/13store-edge-<version>.apk
+#   3. here:                          tools/build-apk.sh                 → dist/13store-edge-<version>.apk + .json
 #      for the emulator as well:      tools/build-apk.sh arm64-v8a,x86_64   (needs build-natives.sh x86_64)
+# Publish an update: Admin → "Edge app updates", choose the .apk and its .json (raise versionCode first).
 # Signing: the first run creates a field signing key in ~/.13store/ (outside the repository). Keep a copy
 # of that folder: an update must be signed with the same key, or the remote refuses it (uninstall + pair again).
 set -euo pipefail
@@ -32,11 +33,27 @@ if [ ! -f "$EDGE_SIGNING_PROPS" ]; then
   echo "created the field signing key in $SIGN_DIR: back it up"
 fi
 
-./gradlew --no-daemon -q -PedgeAbis="$ABIS" :app:testReleaseUnitTest :app:assembleRelease
-version="$(grep -m1 'versionName' app/build.gradle.kts | sed -E 's/.*"(.*)".*/\1/')"
-mkdir -p dist
+# Test builds only: EDGE_VERSION_CODE / EDGE_VERSION_NAME override app/build.gradle.kts; EDGE_OUT_DIR the output folder.
+props=(-PedgeAbis="$ABIS")
+[ -z "${EDGE_VERSION_CODE:-}" ] || props+=(-PedgeVersionCode="$EDGE_VERSION_CODE")
+[ -z "${EDGE_VERSION_NAME:-}" ] || props+=(-PedgeVersionName="$EDGE_VERSION_NAME")
+./gradlew --no-daemon -q "${props[@]}" :app:testReleaseUnitTest :app:assembleRelease
+
+apk=app/build/outputs/apk/release/app-release.apk
+badging="$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$apk")"
+badging="${badging%%$'\n'*}" # first line: package name, versionCode, versionName
+package="$(sed -E "s/^package: name='([^']*)'.*/\1/" <<<"$badging")"
+code="$(sed -E "s/.* versionCode='([^']*)'.*/\1/" <<<"$badging")"
+version="$(sed -E "s/.* versionName='([^']*)'.*/\1/" <<<"$badging")"
+[ "$package" = com.store13.edge ] || { echo "unexpected package in the APK: $package"; exit 1; }
+outdir="${EDGE_OUT_DIR:-dist}"
+mkdir -p "$outdir"
 suffix=""
 [ "$ABIS" = "arm64-v8a" ] || suffix="-${ABIS//,/-}"
-out="dist/13store-edge-$version$suffix.apk"
-cp app/build/outputs/apk/release/app-release.apk "$out"
-echo "APK: $HERE/$out ($(du -h "$out" | cut -f1))"
+out="$outdir/13store-edge-$version$suffix.apk"
+cp "$apk" "$out"
+# Build manifest for Admin → Edge app updates: upload it together with the APK.
+printf '{\n  "packageName": "%s",\n  "versionCode": %s,\n  "versionName": "%s",\n  "sha256": "%s",\n  "size": %s,\n  "abis": "%s",\n  "builtAt": "%s"\n}\n' \
+  "$package" "$code" "$version" "$(sha256sum "$out" | cut -d' ' -f1)" "$(stat -c %s "$out")" "$ABIS" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${out%.apk}.json"
+echo "APK: $HERE/$out ($(du -h "$out" | cut -f1)), version $version ($code)"
+echo "manifest: $HERE/${out%.apk}.json"

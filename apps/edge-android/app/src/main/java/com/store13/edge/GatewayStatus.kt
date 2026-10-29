@@ -19,6 +19,8 @@ data class GatewayStatus(
         val rejected: String?,
         val lastTelemetryAt: Long?,
         val video: Video?,
+        /** UniGCS relayed through the gateway (gcsRelay), when the vehicle has one. */
+        val relay: Relay? = null,
     ) {
         /** Seconds since the device last reported, by the gateway's clock; null if it never did. */
         fun ageSeconds(statusAt: Long): Double? = lastTelemetryAt?.let { (statusAt - it).coerceAtLeast(0) / 1000.0 }
@@ -26,6 +28,9 @@ data class GatewayStatus(
 
     /** status: starting | pushing | retrying | missing | stopped (apps/gateway/src/videoPush.ts). */
     data class Video(val status: String, val detail: String, val codec: String?)
+
+    /** listen: host:port UniGCS connects to (apps/gateway/src/real/gcsRelay.ts). */
+    data class Relay(val listen: String, val connected: Boolean)
 
     companion object {
         /** A device that reported within this many seconds counts as alive (the MAVLink adapter reports every second). */
@@ -45,6 +50,7 @@ data class GatewayStatus(
                 devices = (0 until (devices?.length() ?: 0)).map { i ->
                     val d = devices!!.getJSONObject(i)
                     val v = d.optJSONObject("video")
+                    val r = d.optJSONObject("relay")
                     Device(
                         id = d.getString("deviceId"),
                         kind = d.optString("kind"),
@@ -52,6 +58,7 @@ data class GatewayStatus(
                         rejected = if (d.has("rejected")) d.getString("rejected") else null,
                         lastTelemetryAt = if (d.has("lastTelemetryAt")) d.getLong("lastTelemetryAt") else null,
                         video = v?.let { Video(it.optString("status"), it.optString("detail"), if (it.has("codec")) it.getString("codec") else null) },
+                        relay = r?.let { Relay(it.optString("listen"), it.optBoolean("connected")) },
                     )
                 },
             )

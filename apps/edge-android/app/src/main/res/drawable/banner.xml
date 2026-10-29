@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Update banner: a card with a blue edge so it stands out from the status cards. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FF132338" />
+    <stroke android:width="2dp" android:color="@color/primary" />
+    <corners android:radius="14dp" />
+</shape>

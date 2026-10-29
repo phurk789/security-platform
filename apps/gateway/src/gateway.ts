@@ -72,6 +72,8 @@ export interface GatewayStatus {
     /** Last telemetry the adapter produced (a MAVLink vehicle reports only while its heartbeat is fresh). */
     lastTelemetryAt?: number;
     video?: { status: string; detail: string; codec?: string };
+    /** UniGCS (or another ground station) relayed through the gateway. */
+    relay?: { listen: string; connected: boolean; peer?: string; lastSeenAt?: number; sysid?: number };
   }[];
   dropped: DroppedCounts;
 }
@@ -283,6 +285,7 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
         devices: opts.adapters.map((a) => {
           const id = a.declaration.deviceId;
           const push = pushers.get(id)?.state;
+          const relay = a.relayState?.();
           return {
             deviceId: id,
             kind: a.declaration.kind,
@@ -290,6 +293,7 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
             ...(rejected.has(id) ? { rejected: rejected.get(id) } : {}),
             ...(lastTelemetry.has(id) ? { lastTelemetryAt: lastTelemetry.get(id) } : {}),
             ...(push ? { video: { status: push.status, detail: push.detail, ...(push.codec ? { codec: push.codec } : {}) } } : {}),
+            ...(relay ? { relay } : {}),
           };
         }),
         dropped: { ...dropped },
