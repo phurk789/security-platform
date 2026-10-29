@@ -85,6 +85,7 @@ import {
   fencesAt,
   insideSite,
   operatingAreas,
+  polygonSelfIntersects,
   routeOutsideSite,
   type FencedKind,
   planRoute,
@@ -2850,6 +2851,7 @@ export class Platform {
       poly.some((p) => typeof p?.x !== 'number' || typeof p?.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y))
     )
       fail(400, 'invalid', 'poly needs 3–30 {x, y} points.');
+    if (polygonSelfIntersects(poly)) fail(400, 'invalid', 'The outline crosses itself. Move the corners so no two edges cross.');
     // An operating area defines the site; any other zone must touch it (or the demo boundary when there is none).
     const others = this.geofencesOf(a.orgId, site.id).filter((g) => g.id !== id);
     if (kind !== 'operating_area' && !poly.some((p) => insideSite(p, others, 'ugv') || insideSite(p, others, 'uav'))) fail(400, 'invalid', 'The zone must touch the site.');

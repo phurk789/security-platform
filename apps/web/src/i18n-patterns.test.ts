@@ -19,6 +19,9 @@ describe('Thai for server and vehicle messages', () => {
     expect(th('Patrol "Gggg" skipped: UGV-01 is on another mission.')).toBe('ข้ามรอบลาดตระเวน "Gggg": UGV-01 ติดภารกิจอื่นอยู่');
     expect(th('Patrol "Night" skipped: checkpoints 2, 3 are outside the site.')).toBe('ข้ามรอบลาดตระเวน "Night": จุดตรวจ 2, 3 อยู่นอกพื้นที่ไซต์');
     expect(th('UGV-01 is outside the operating area during MSN-0002.')).toBe('UGV-01 ออกนอกพื้นที่ปฏิบัติงานระหว่างภารกิจ MSN-0002');
+    expect(th('UGV-01 entered keep-out zone "Test crane zone".')).toBe('UGV-01 เข้าโซนห้ามเข้า "Test crane zone"');
+    expect(th('UAV-02 entered no-fly zone "Roof". Offices below.')).toBe('UAV-02 เข้าโซนห้ามบิน "Roof" Offices below.');
+    expect(th('UGV-01 left zone "Test crane zone".')).toBe('UGV-01 ออกจากโซน "Test crane zone" แล้ว');
     expect(th('Something new from the server.')).toBe('Something new from the server.');
     expect(tr('UGV-01 is on another mission.', undefined, 'en')).toBe('UGV-01 is on another mission.');
   });
