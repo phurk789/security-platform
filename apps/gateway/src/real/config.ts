@@ -21,6 +21,8 @@ export type DeviceConfig =
       link?: { mode: 'client'; host: string; port: number } | { mode: 'listen'; port: number };
       missionAltM?: number;
       allowRemoteArm?: boolean;
+      /** ArduPilot: geofence on for each route, off after disarm (keep FENCE_ENABLE = 0 on the board). */
+      missionFence?: boolean;
       firmwareTested?: string;
       /** Names shown in the Equipment tab (e.g. "SIYI UniFC 6 Pico", "SIYI MK32 air unit"). */
       flightController?: string;
@@ -89,6 +91,10 @@ export function parseSiteConfig(json: unknown): SiteConfig {
     if (d.type === 'mavlink' && d.payload && !PAYLOAD_CATALOG[d.payload.module]) throw new ConfigError(`${d.deviceId}: unknown payload module ${d.payload.module}`);
     if (d.type === 'mavlink' && !['ardupilot-rover', 'ardupilot-copter', 'px4-rover', 'px4-multicopter'].includes(d.profile))
       throw new ConfigError(`${d.deviceId}: unknown profile ${d.profile}`);
+    if (d.type === 'mavlink' && d.missionFence !== undefined && typeof d.missionFence !== 'boolean')
+      throw new ConfigError(`${d.deviceId}: missionFence must be true or false.`);
+    if (d.type === 'mavlink' && d.missionFence && !d.profile.startsWith('ardupilot'))
+      throw new ConfigError(`${d.deviceId}: missionFence works with ArduPilot profiles only (PX4 uses its own geofence parameters).`);
     if (d.type === 'mavlink' && d.teleop) {
       if (d.kind !== 'ugv') throw new ConfigError(`${d.deviceId}: teleop is for ground vehicles (kind "ugv") only.`);
       const problem = teleopProblem(d.teleop);
@@ -136,6 +142,7 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           geo: c.geo,
           missionAltM: d.missionAltM,
           allowRemoteArm: d.allowRemoteArm,
+          missionFence: d.missionFence,
           firmwareTested: d.firmwareTested,
           catalogId: d.catalogId,
           payload: d.payload,

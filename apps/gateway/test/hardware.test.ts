@@ -167,6 +167,11 @@ function fakeRover(opts: { armed?: boolean } = {}) {
     fixType: undefined as number | undefined,
     /** Report 0,0 in GLOBAL_POSITION_INT, as autopilots do before the first fix. */
     zero: false,
+    /** Geofence state from MAV_CMD_DO_FENCE_ENABLE; refuse it with MAV_RESULT_FAILED when fenceRefuse. */
+    fence: 0,
+    fenceRefuse: false,
+    /** COMMAND_LONG ids in the order they arrived. */
+    commands: [] as number[],
   };
   const send = (m: unknown) => gcs && !st.silent && sock.send(proto.serialize(m as never, seq++ & 0xff), gcs.port, gcs.address);
   input
@@ -211,6 +216,12 @@ function fakeRover(opts: { armed?: boolean } = {}) {
         }
         if (d.command === 193) st.speed = d._param1 ? 2 : 0;
         if (d.command === 181) st.relays[d._param1] = d._param2; // DO_SET_RELAY
+        if (d.command === 207) {
+          // DO_FENCE_ENABLE
+          if (st.fenceRefuse) ack.result = 4 as never;
+          else st.fence = d._param1;
+        }
+        if (d.command !== 511) st.commands.push(d.command);
         send(ack);
       }
     });
@@ -365,6 +376,68 @@ describe('MAVLink vehicle adapter (UniFC 6 Pico class, via UniRC datalink)', () 
     expect(got.updates[0].detail).toMatch(/disarmed/);
     expect(rover.st.received).not.toContain(44); // no mission upload attempted
   }, 10_000);
+
+  it('missionFence: turns the geofence on before AUTO and off again once the pilot disarms', async () => {
+    const rover = await fakeRover();
+    const a = new MavlinkVehicleAdapter({
+      deviceId: 'UGV-01',
+      kind: 'ugv',
+      profile: 'ardupilot-rover',
+      missionFence: true,
+      link: { mode: 'client', host: '127.0.0.1', port: rover.port },
+      geo: GEO,
+    });
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), rover.close);
+    await until(() => got.telemetry.length > 0);
+    a.onCommand(cmd('start', { deviceId: 'UGV-01', route: [{ x: 262, y: 218 }] }));
+    await until(() => got.updates.some((u) => u.status === 'executing'), 8000);
+    expect(rover.st.fence).toBe(1);
+    const cmds = rover.st.commands;
+    expect(cmds.indexOf(207)).toBeGreaterThanOrEqual(0);
+    expect(cmds.indexOf(207)).toBeLessThan(cmds.indexOf(176)); // fence on, then AUTO
+    // The pilot disarms on the remote: the platform turns the fence off so the next arming needs no GPS.
+    rover.st.armed = false;
+    await until(() => rover.st.fence === 0, 4000);
+    expect(cmds.filter((c) => c === 207)).toHaveLength(2);
+  }, 20_000);
+
+  it('missionFence: does not start the route when the vehicle refuses to turn the geofence on', async () => {
+    const rover = await fakeRover();
+    rover.st.fenceRefuse = true;
+    const a = new MavlinkVehicleAdapter({
+      deviceId: 'UGV-01',
+      kind: 'ugv',
+      profile: 'ardupilot-rover',
+      missionFence: true,
+      link: { mode: 'client', host: '127.0.0.1', port: rover.port },
+      geo: GEO,
+    });
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), rover.close);
+    await until(() => got.telemetry.length > 0);
+    a.onCommand(cmd('start', { deviceId: 'UGV-01', route: [{ x: 262, y: 218 }] }));
+    await until(() => got.updates.some((u) => u.status === 'failed'), 8000);
+    expect(got.updates.find((u) => u.status === 'failed')!.detail).toMatch(/Geofence could not be turned on/);
+    expect(rover.st.commands).not.toContain(176); // never asked for AUTO
+    expect(rover.st.mode).toBe(4); // still HOLD
+  }, 15_000);
+
+  it('without missionFence the geofence is left alone', async () => {
+    const rover = await fakeRover();
+    const a = new MavlinkVehicleAdapter({ deviceId: 'UGV-05', kind: 'ugv', profile: 'ardupilot-rover', link: { mode: 'client', host: '127.0.0.1', port: rover.port }, geo: GEO });
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), rover.close);
+    await until(() => got.telemetry.length > 0);
+    a.onCommand(cmd('start', { deviceId: 'UGV-05', route: [{ x: 262, y: 218 }] }));
+    await until(() => got.updates.some((u) => u.status === 'executing'), 8000);
+    rover.st.armed = false;
+    await wait(1500);
+    expect(rover.st.commands).not.toContain(207);
+  }, 15_000);
 
   it('switches the 4-in-1 module through flight-controller relays and declares the catalogue model', async () => {
     const rover = await fakeRover();
