@@ -105,7 +105,7 @@ export interface MavlinkVehicleConfig {
    * everything else (a mode change to HOLD, a disarm) goes through. The gateway then uses component id 191, so replies
    * meant for the ground station (190) are not taken for its own. `true` takes the defaults.
    */
-  gcsRelay?: true | { host?: string; port?: number };
+  gcsRelay?: boolean | { host?: string; port?: number };
   /** How long a silent ground station counts as connected (tests). */
   gcsRelayStaleMs?: number;
 }

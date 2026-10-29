@@ -40,7 +40,7 @@ export type DeviceConfig =
       /** Switch a SIYI camera back to H.264 when it pushes H.265 (default true). */
       fixCameraCodec?: boolean;
       /** Let UniGCS on the same machine run alongside: it connects to 127.0.0.1:19857 (or host/port) through the gateway. */
-      gcsRelay?: true | { host?: string; port?: number };
+      gcsRelay?: boolean | { host?: string; port?: number };
     }
   | ({ type: 'ros2-nav2' } & RosNav2Config)
   | {
@@ -102,9 +102,9 @@ export function parseSiteConfig(json: unknown): SiteConfig {
       const problem = teleopProblem(d.teleop);
       if (problem) throw new ConfigError(`${d.deviceId}: ${problem}`);
     }
-    if (d.type === 'mavlink' && d.gcsRelay !== undefined && d.gcsRelay !== true) {
+    if (d.type === 'mavlink' && d.gcsRelay !== undefined && typeof d.gcsRelay !== 'boolean') {
       const r = d.gcsRelay as { host?: unknown; port?: unknown };
-      if (!r || typeof r !== 'object') throw new ConfigError(`${d.deviceId}: gcsRelay must be true or { host, port }.`);
+      if (!r || typeof r !== 'object') throw new ConfigError(`${d.deviceId}: gcsRelay must be true, false or { host, port }.`);
       if (r.port !== undefined && (!Number.isInteger(r.port) || (r.port as number) < 1 || (r.port as number) > 65535)) throw new ConfigError(`${d.deviceId}: gcsRelay.port must be a UDP port (1–65535).`);
       if (r.host !== undefined && (typeof r.host !== 'string' || !/^\d{1,3}(\.\d{1,3}){3}$/.test(r.host)))
         throw new ConfigError(`${d.deviceId}: gcsRelay.host must be an IPv4 address such as 127.0.0.1 (the relay accepts anyone who can reach it).`);

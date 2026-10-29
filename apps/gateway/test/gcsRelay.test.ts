@@ -85,6 +85,7 @@ describe('MAVLink frames (relay)', () => {
   it('checks gcsRelay in a site config', () => {
     const site = (gcsRelay: unknown) => ({ geo: GEO, devices: [{ type: 'mavlink', deviceId: 'UGV-09', kind: 'ugv', profile: 'ardupilot-rover', gcsRelay }] });
     expect(() => parseSiteConfig(site(true))).not.toThrow();
+    expect(() => parseSiteConfig(site(false))).not.toThrow();
     expect(() => parseSiteConfig(site({ port: 19860 }))).not.toThrow();
     expect(() => parseSiteConfig(site({ port: 70000 }))).toThrow(ConfigError);
     expect(() => parseSiteConfig(site({ host: 'remote.local' }))).toThrow(/IPv4/);
