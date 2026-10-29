@@ -10,6 +10,7 @@ const RULES: Rule[] = [
   // Messages that wrap another message come first, so the inner one is not matched as a whole.
   [/^Patrol "(.+?)" skipped: (.+)$/, (m, inner) => `ข้ามรอบลาดตระเวน "${m[1]}": ${inner(m[2])}`],
   [/^(.+) is on another mission\.$/, (m) => `${m[1]} ติดภารกิจอื่นอยู่`],
+  [/^(.+) is not ready\.$/, (m) => `${m[1]} ยังไม่พร้อม`],
   [
     /^(.+) is in (\w+) mode\. A supervisor must promote it to LIVE_MANUAL before (\w+)\. Stop and pause still work\.$/,
     (m) => `${m[1]} อยู่โหมด ${m[2]} หัวหน้าเวรต้องเปลี่ยนเป็น LIVE_MANUAL ก่อนจึงจะ${VERB[m[3]] ?? m[3]}ได้ (สั่งหยุดและพักยังใช้ได้)`,

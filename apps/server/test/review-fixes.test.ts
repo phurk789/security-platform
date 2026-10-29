@@ -16,10 +16,10 @@ beforeAll(async () => {
 afterAll(() => srv?.close());
 
 describe('access rules', () => {
-  it('administrators read an incident by id but do not change it', async () => {
+  it('administrators read and handle an incident like a supervisor', async () => {
     const inc = await alex.post('/incidents', { title: 'Private', place: 'Gate' });
     expect((await ploy.get(`/incidents/${inc.body.id}`)).status).toBe(200);
-    expect((await ploy.post(`/incidents/${inc.body.id}/triage`)).status).toBe(403);
+    expect((await ploy.post(`/incidents/${inc.body.id}/triage`)).status).toBe(200);
     expect((await alex.get(`/incidents/${inc.body.id}`)).status).toBe(200);
   });
 

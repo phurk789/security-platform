@@ -392,8 +392,6 @@ export const TH: Record<string, string> = {
   // --- admin ----------------------------------------------------------------
   'Administration needs a connection to the platform server.': 'การดูแลระบบต้องเชื่อมต่อเซิร์ฟเวอร์แพลตฟอร์ม',
   Administration: 'การดูแลระบบ',
-  'Users, access, connections and backups. Administrators see every page; commanding vehicles, approving missions and handling incidents stay with the operational roles.':
-    'ผู้ใช้ สิทธิ์ การเชื่อมต่อ และการสำรองข้อมูล ผู้ดูแลระบบเห็นข้อมูลทุกหน้า ส่วนการสั่งงานรถ อนุมัติภารกิจ และจัดการเหตุ ยังเป็นหน้าที่ของบทบาทปฏิบัติงาน',
   Refresh: 'รีเฟรช',
   'Users ({n})': 'ผู้ใช้ ({n})',
   Name: 'ชื่อ',
@@ -1298,11 +1296,22 @@ export const TH: Record<string, string> = {
   // Role guide on the admin users card
   'What each role can do': 'แต่ละบทบาททำอะไรได้บ้าง',
   'Receives and verifies alerts, prepares missions, watches and turns cameras.': 'รับแจ้งและยืนยันเหตุ เตรียมภารกิจ ดูวิดีโอและหมุนกล้อง',
-  'Everything a dispatcher does, plus approving missions, putting vehicles live, patrols, keep-out zones, exporting evidence and the audit log.':
-    'ทำได้ทุกอย่างของเจ้าหน้าที่รับแจ้ง เพิ่มเติมคืออนุมัติภารกิจ เปิดรถเป็น LIVE ตั้งตารางลาดตระเวน กำหนดเขตหวงห้าม ส่งออกหลักฐาน และดูบันทึกตรวจสอบ',
   'Accepts missions and commands the vehicle: start, pause, stop, drive, camera.': 'รับภารกิจและสั่งงานรถ: เริ่ม พัก หยุด ขับ และควบคุมกล้อง',
   'Field team: sees only the incidents assigned to them, in the field app.': 'ทีมภาคสนาม: เห็นเฉพาะเหตุที่ได้รับมอบหมาย ผ่านแอปภาคสนาม',
-  'Reads reports, evidence and the audit log; changes nothing.': 'ดูรายงาน หลักฐาน และบันทึกตรวจสอบ ไม่แก้ไขอะไร',
-  'Sees everything; manages users, devices, keys, zones, settings and backups. Does not command vehicles or approve missions.':
-    'เห็นทุกอย่าง จัดการผู้ใช้ อุปกรณ์ คีย์ โซน การตั้งค่า และการสำรองข้อมูล แต่ไม่สั่งงานรถและไม่อนุมัติภารกิจ',
+  // Roles as levels and the two-person rule
+  'Everything a dispatcher and an operator do, plus approving missions, putting vehicles live, patrols, zones, exporting evidence and the audit log.':
+    'ทำได้ทุกอย่างของเจ้าหน้าที่รับแจ้งและผู้ควบคุมอุปกรณ์ เพิ่มเติมคืออนุมัติภารกิจ เปิดรถเป็น LIVE ตั้งตารางลาดตระเวน กำหนดโซน ส่งออกหลักฐาน และดูบันทึกตรวจสอบ',
+  'Sees every page, video, reports, evidence and the audit log; changes nothing.': 'เห็นทุกหน้า วิดีโอ รายงาน หลักฐาน และบันทึกตรวจสอบ ไม่แก้ไขอะไร',
+  'Everything a supervisor does, plus users, devices, keys, settings and backups.': 'ทำได้ทุกอย่างของหัวหน้าเวร เพิ่มเติมคือจัดการผู้ใช้ อุปกรณ์ คีย์ การตั้งค่า และการสำรองข้อมูล',
+  'Users, access, connections and backups. Administrators can also do everything a supervisor can.': 'ผู้ใช้ สิทธิ์ การเชื่อมต่อ และการสำรองข้อมูล ผู้ดูแลระบบทำได้ทุกอย่างของหัวหน้าเวรด้วย',
+  'Two-person rule: whoever approves a mission does not operate it, and whoever sets up a patrol is not its operator.':
+    'กฎ 2 คน: คนที่อนุมัติภารกิจจะเป็นคนขับภารกิจนั้นไม่ได้ และคนที่ตั้งตารางลาดตระเวนจะเป็นผู้ควบคุมของตารางนั้นไม่ได้',
+  'You are the operator of this mission, so another supervisor approves it (two-person rule).': 'คุณเป็นผู้ควบคุมของภารกิจนี้ จึงต้องให้หัวหน้าเวรคนอื่นอนุมัติ (กฎ 2 คน)',
+  'You approved this mission, so another person operates it (two-person rule).': 'คุณเป็นคนอนุมัติภารกิจนี้ จึงต้องให้คนอื่นเป็นผู้ควบคุม (กฎ 2 คน)',
+  'You are the operator of this mission. Another supervisor must approve it (two-person rule).': 'คุณเป็นผู้ควบคุมของภารกิจนี้ ต้องให้หัวหน้าเวรคนอื่นอนุมัติ (กฎ 2 คน)',
+  'You approved this mission. Another person must operate it (two-person rule).': 'คุณเป็นคนอนุมัติภารกิจนี้ ต้องให้คนอื่นเป็นผู้ควบคุม (กฎ 2 คน)',
+  'You approved this mission. Another person must start it (two-person rule).': 'คุณเป็นคนอนุมัติภารกิจนี้ ต้องให้คนอื่นเป็นคนกดเริ่ม (กฎ 2 คน)',
+  'Choose someone else as the operator: whoever sets up a patrol approves its runs (two-person rule).': 'เลือกผู้ควบคุมเป็นคนอื่น คนที่ตั้งตารางลาดตระเวนคือคนอนุมัติทุกรอบ (กฎ 2 คน)',
+  'its operator also approved it (two-person rule).': 'ผู้ควบคุมเป็นคนเดียวกับคนอนุมัติ (กฎ 2 คน)',
+  'Control can only go to someone who may command vehicles.': 'ส่งต่อสิทธิ์ควบคุมได้เฉพาะคนที่สั่งงานรถได้',
 };

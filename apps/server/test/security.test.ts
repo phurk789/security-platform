@@ -113,7 +113,7 @@ describe('field responders', () => {
     expect((await kitti.post(`/assignments/${asg.id}/report`, rep)).status).toBe(200);
   });
 
-  it('administrators see everything and manage users, but do not handle incidents or command devices', async () => {
+  it('administrators see everything, act like a supervisor and manage users', async () => {
     const ploy = await Client.login(srv.url, 'ploy');
     // Read: incidents, missions, video permission and live data, like a supervisor.
     const inc = (await ploy.get('/incidents')).body as { id: string; status: string }[];
@@ -122,15 +122,14 @@ describe('field responders', () => {
     const snap = (await ploy.get('/snapshot')).body as { incidents: unknown[]; missions: unknown[]; devices: unknown[] };
     expect(snap.incidents.length).toBeGreaterThan(0);
     expect(snap.devices.length).toBeGreaterThan(0);
-    // Act: no incident handling and no mission approval.
-    expect((await ploy.post(`/incidents/${inc[0].id}/triage`)).status).toBe(403);
-    expect((await ploy.post('/missions/MSN-0001/approve')).status).toBe(403);
+    // Act like a supervisor: past the permission check, an unknown mission is simply not found.
+    expect((await ploy.post('/missions/MSN-9999/approve')).status).toBe(404);
     const u = await ploy.post('/admin/users', { username: 'op2', name: 'Second Operator', role: 'operator', password: 'correct-horse-1' });
     expect(u.status).toBe(200);
     expect((await Client.login(srv.url, 'op2', 'correct-horse-1')).token).toMatch(/^ses_/);
     const key = await ploy.post('/admin/keys', { label: 'Sensors', kind: 'integration' });
     expect(key.body.secret).toMatch(/^sk_demo_/);
-    expect((await ploy.post('/commands', { missionId: 'x', type: 'start', idempotencyKey: 'k' })).status).toBe(403);
+    expect((await ploy.post('/commands', { missionId: 'x', type: 'start', idempotencyKey: 'k' })).status).toBe(404);
   });
 });
 

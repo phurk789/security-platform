@@ -733,6 +733,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       const m = mission(s, msg.missionId);
       if (!m || !guard(s, 'mission.approve', msg.missionId)) return s;
       if (m.status !== 'pending_approval') return (reject(s, 'mission.approve', m.id, 'Mission is not awaiting approval.'), s);
+      if (m.operatorId === me.id) return (reject(s, 'mission.approve', m.id, 'You are the operator of this mission. Another supervisor must approve it (two-person rule).'), s);
       const failed = constraintChecks(s, m).filter((c) => c.hard && !c.ok);
       if (failed.length) return (reject(s, 'mission.approve', m.id, `Cannot approve: ${failed.map((f) => f.label).join(', ')}.`), s);
       m.status = 'approved';
@@ -769,6 +770,7 @@ export function reducer(prev: AppState, msg: Msg): AppState {
       const m = mission(s, msg.missionId);
       if (!m || !guard(s, 'mission.accept', msg.missionId)) return s;
       if (m.operatorId !== me.id) return (reject(s, 'mission.accept', m.id, 'This mission is assigned to another operator.'), s);
+      if (m.approvedBy === me.id) return (reject(s, 'mission.accept', m.id, 'You approved this mission. Another person must operate it (two-person rule).'), s);
       if (m.status !== 'approved' || m.approvedVersion !== m.planVersion) return (reject(s, 'mission.accept', m.id, 'Mission needs an approved plan first.'), s);
       const d = s.devices[m.deviceId];
       if (d.controlOwner && d.controlOwner !== me.id)

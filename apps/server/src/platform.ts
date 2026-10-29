@@ -945,7 +945,7 @@ export class Platform {
     const to = this.db.prepare('SELECT id, name, role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(toUserId, a.orgId) as
       | { id: string; name: string; role: Role }
       | undefined;
-    if (!to || (!can(to.role, 'device.command') && to.role !== 'supervisor')) fail(400, 'invalid', 'Control can only go to an operator or supervisor.');
+    if (!to || !can(to.role, 'device.command')) fail(400, 'invalid', 'Control can only go to someone who may command vehicles.');
     const from = d.controlOwner;
     tx(this.db, () => {
       d.controlOwner = toUserId;
@@ -1249,7 +1249,7 @@ export class Platform {
     const d = this.getDevice(a, input.deviceId);
     if (!isReadyAt(this.now(), d, this.allMissions(a.orgId))) fail(409, 'conflict', `${d.id} is not ready.`);
     const op = this.db.prepare('SELECT role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(input.operatorId, a.orgId) as { role: Role } | undefined;
-    if (!op || op.role !== 'operator') fail(400, 'invalid', 'Choose an active operator.');
+    if (!op || !can(op.role, 'mission.accept')) fail(400, 'invalid', 'Choose an active operator.');
     const m: Mission = {
       id: `${this.prefix(a.orgId)}MSN-${String(nextNumber(this.db, a.orgId, 'mission')).padStart(4, '0')}`,
       incidentId: inc.id,
@@ -1318,6 +1318,7 @@ export class Platform {
     this.require(a, 'mission.approve', id);
     const { m, siteId } = this.getMission(a, id);
     if (m.status !== 'pending_approval') fail(409, 'conflict', 'Mission is not awaiting approval.');
+    if (m.operatorId === a.userId) fail(409, 'two_person', 'You are the operator of this mission. Another supervisor must approve it (two-person rule).');
     const failed = this.checks(a, id).filter((c) => c.hard && !c.ok);
     if (failed.length) fail(409, 'conflict', `Cannot approve: ${failed.map((f) => f.label).join(', ')}.`);
     tx(this.db, () => {
@@ -1369,6 +1370,7 @@ export class Platform {
     this.require(a, 'mission.accept', id);
     const { m, siteId } = this.getMission(a, id);
     if (m.operatorId !== a.userId) fail(403, 'forbidden', 'This mission is assigned to another operator.');
+    if (m.approvedBy === a.userId) fail(409, 'two_person', 'You approved this mission. Another person must operate it (two-person rule).');
     if (m.status !== 'approved' || m.approvedVersion !== m.planVersion) fail(409, 'conflict', 'Mission needs an approved plan first.');
     const d = this.getDevice(a, m.deviceId);
     if (d.controlOwner && d.controlOwner !== a.userId)
@@ -1467,6 +1469,7 @@ export class Platform {
           ? `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`
           : `You do not hold control of ${d.id}. Accept the mission first.`,
       );
+    if ((type === 'start' || type === 'resume') && m.approvedBy === a.userId) deny('two_person', 'You approved this mission. Another person must start it (two-person rule).');
     const valid: Record<CommandType, MissionStatus[]> = { start: ['assigned'], pause: ['executing'], resume: ['paused'], stop: ['executing', 'paused'] };
     if (!valid[type].includes(m.status)) deny('conflict', `Cannot ${type} while mission is ${m.status.replace('_', ' ')}.`);
     if (type === 'start' && m.approvedVersion !== m.planVersion) deny('conflict', 'Plan changed since approval. Re-approval required.');
@@ -1695,7 +1698,7 @@ export class Platform {
     const d = this.getDevice(a, deviceId);
     const cur = this.driving.get(d.id);
     if (!cur) return this.publicDevice(d);
-    if (cur.userId !== a.userId && a.role !== 'supervisor' && a.role !== 'admin') fail(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
+    if (cur.userId !== a.userId && !can(a.role as Role, 'control.handover')) fail(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
     this.endDrive(d.id, a, cur.userId === a.userId ? 'driver stopped' : `stopped by ${a.name}`);
     return this.publicDevice(d);
   }
@@ -3128,7 +3131,9 @@ export class Platform {
     if ((d.kind !== 'ugv' && d.kind !== 'uav') || !d.commands.includes('start')) fail(400, 'invalid', `${d.id} cannot run patrols (no start command).`);
     const operatorId = String(input.operatorId ?? prev?.operatorId ?? '');
     const op = this.db.prepare('SELECT role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(operatorId, a.orgId) as { role: Role } | undefined;
-    if (!op || op.role !== 'operator') fail(400, 'invalid', 'Choose an active operator.');
+    if (!op || !can(op.role, 'mission.accept')) fail(400, 'invalid', 'Choose an active operator.');
+    // The patrol's standing approval is its creator's: they cannot also be its operator (two-person rule).
+    if (operatorId === (prev?.createdBy ?? a.userId)) fail(400, 'invalid', 'Choose someone else as the operator: whoever sets up a patrol approves its runs (two-person rule).');
     const raw = this.validRoute((input.route ?? prev?.route ?? []) as Point[]);
     // Indoor vehicles get the floor-plan checks below instead of the outdoor obstacle check.
     const route = d.indoor ? raw : this.clearRoute(a.orgId, d, raw);
@@ -3246,6 +3251,7 @@ export class Platform {
     if (outside.length) return skip(`checkpoints ${outside.join(', ')} are outside the site.`);
     const operator = this.db.prepare('SELECT name FROM users WHERE id = ? AND org_id = ? AND active = 1').get(p.operatorId, orgId) as { name: string } | undefined;
     if (!operator) return skip('the assigned operator is no longer active.');
+    if (p.operatorId === p.createdBy) return skip('its operator also approved it (two-person rule).');
     const source = trigger === 'schedule' ? 'Patrol scheduler' : a.name;
     const inc: Incident = {
       id: `${this.prefix(orgId)}INC-${String(nextNumber(this.db, orgId, 'incident', 1)).padStart(3, '0')}`,

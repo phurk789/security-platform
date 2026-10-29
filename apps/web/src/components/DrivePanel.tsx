@@ -186,7 +186,7 @@ export function DrivePanel({ d }: { d: Device }) {
         ) : driver ? (
           <>
             <p>{t('{who} is driving {id}.', { who: driver, id: d.id })}</p>
-            {(role === 'supervisor' || role === 'admin') && (
+            {can(role, 'control.handover') && (
               <button className="btn-secondary wide" disabled={busy} onClick={() => void session.stopDriving(d.id)}>
                 <OctagonX size={16} /> {t('Stop their drive')}
               </button>
