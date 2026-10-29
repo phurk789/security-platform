@@ -121,8 +121,9 @@ test_() {
   age() { curl -sS "${auth[@]}" $API/devices/UGV-01 | python3 -c 'import json,sys,time; print(round(time.time()-json.load(sys.stdin)["lastSeen"]/1000,1))'; }
   curl -sS "${auth[@]}" -d '{"id":"UGV-01","kind":"ugv","model":"Bench rover (fake MAVLink)"}' $API/devices >/dev/null
   code="$(curl -fsS "${auth[@]}" -d '{"label":"Emulator bench","gatewayId":"edge-emu-01","devices":[{"type":"mavlink","deviceId":"UGV-01","kind":"ugv","profile":"ardupilot-rover","model":"Bench rover","link":{"mode":"client","host":"10.0.2.2","port":19856},"allowRemoteArm":false,"teleop":true,"stream":{"rtsp":"rtsp://10.0.2.2:8554/main.264","push":true}}]}' $API/admin/pairing-codes | python3 -c 'import json,sys; print(json.load(sys.stdin)["code"])')"
-  "$ADB" install -r -g "$APK" | tail -1
-  "$ADB" shell pm clear com.store13.edge >/dev/null # unpaired, as on a new remote
+  # A fresh install, as on a new remote: an earlier test may have left a newer version code (Android refuses a downgrade).
+  "$ADB" uninstall com.store13.edge >/dev/null 2>&1 || true
+  echo "installing $(basename "$APK"): $("$ADB" install -g "$APK" | tail -1)"
   "$ADB" shell am start -W -a android.intent.action.VIEW -d "'psedge://pair?server=http%3A%2F%2F10.0.2.2%3A8099&code=$code'" com.store13.edge >/dev/null
   sleep 6
   "$ADB" exec-out screencap -p >shots/paired.png
