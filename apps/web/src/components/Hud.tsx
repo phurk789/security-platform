@@ -1,7 +1,7 @@
 // "Twin HUD" theme: full-screen 3D city with glass panels floating around it, focused on the
 // UGV and drone fleet (live onboard video, battery, speed/altitude, link, mission progress).
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Drone, LayoutDashboard, LayoutPanelLeft, Moon, Satellite, Sun, Truck } from 'lucide-react';
+import { Drone, Moon, Satellite, Sun, Truck } from 'lucide-react';
 import type { Device } from '@13store/shared';
 import { ageMs, can, currentUser, freshness, userName } from '../domain/policy';
 import { ago, useT } from '../i18n';
@@ -12,42 +12,17 @@ import { vehicleThumb } from '../twin/thumbs';
 import './hud.css';
 
 // ---------------------------------------------------------------------------
-// Theme preference (per browser)
+// Layout: the Twin HUD is the only layout (since 29 Oct 2026; the classic switch was removed).
+// Screens too narrow for panels around the map still get the one-pane layout (useWide).
 // ---------------------------------------------------------------------------
 
-export type Theme = 'hud' | 'classic';
-const KEY = 'ps-theme';
-const listeners = new Set<() => void>();
-
-function readTheme(): Theme {
-  try {
-    return localStorage.getItem(KEY) === 'classic' ? 'classic' : 'hud';
-  } catch {
-    return 'hud';
-  }
-}
-
-export function setTheme(t: Theme) {
-  try {
-    localStorage.setItem(KEY, t);
-  } catch {
-    /* private mode: keep it for this page only */
-  }
-  current = t;
-  listeners.forEach((l) => l());
-}
-
-let current: Theme = readTheme();
+export type Theme = 'hud';
 
 export function useTheme(): Theme {
-  return useSyncExternalStore(
-    (cb) => (listeners.add(cb), () => listeners.delete(cb)),
-    () => current,
-    () => current,
-  );
+  return 'hud';
 }
 
-/** The HUD layout needs room for panels around the map; narrower screens keep the classic layout. */
+/** The HUD needs room for panels around the map; narrower screens get the one-pane layout. */
 export function useWide(min = 1200) {
   const q = `(min-width: ${min}px)`;
   const [wide, setWide] = useState(() => typeof matchMedia === 'undefined' || matchMedia(q).matches);
@@ -112,23 +87,6 @@ export function AppearanceToggle() {
       aria-label={a === 'dark' ? t('Switch to the light theme') : t('Switch to the dark theme')}
     >
       {a === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-    </button>
-  );
-}
-
-export function ThemeToggle() {
-  const t = useT();
-  const theme = useTheme();
-  const next = theme === 'hud' ? 'classic' : 'hud';
-  return (
-    <button
-      className="theme-toggle"
-      onClick={() => setTheme(next)}
-      title={theme === 'hud' ? t('Switch to the classic layout') : t('Switch to the Twin HUD layout')}
-      aria-label={t('Layout')}
-    >
-      {theme === 'hud' ? <LayoutDashboard size={16} /> : <LayoutPanelLeft size={16} />}
-      <span>{theme === 'hud' ? 'HUD' : t('Classic')}</span>
     </button>
   );
 }

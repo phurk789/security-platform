@@ -41,7 +41,7 @@ import { IncidentBadge } from './Badges';
 import { CameraFeed } from './CameraFeed';
 import { SceneSnapshot } from './SceneSnapshot';
 import { webglAvailable } from '../twin/world';
-import { AppearanceToggle, ThemeToggle } from './Hud';
+import { AppearanceToggle } from './Hud';
 import { SoundToggle } from './SoundEffects';
 import { setWall } from './Wall';
 import { SlaBadge } from './Sla';
@@ -99,7 +99,6 @@ export function TopBar() {
         <span className="clock">
           <Calendar size={16} /> {fmtDate(s.now)} &nbsp; {fmtTime(s.now)}
         </span>
-        <ThemeToggle />
         <AppearanceToggle />
         <SoundToggle />
         <LangToggle />
