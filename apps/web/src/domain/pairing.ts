@@ -41,6 +41,8 @@ export function remoteDevices(f: RemoteForm): Record<string, unknown>[] {
       // Driving from the console (RC override, dead-man, gateway caps). Still gated by the platform: a supervisor
       // promotes the vehicle to LIVE_MANUAL and an operator starts the drive.
       teleop: true,
+      // UniGCS on the remote runs alongside the gateway: it connects to 127.0.0.1:19857 instead of the datalink (E-5).
+      gcsRelay: true,
       ...(camera ? { stream: { rtsp: camera, push: true } } : {}),
     },
   ];

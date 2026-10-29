@@ -119,7 +119,7 @@
 | **E-2** | ส่งภาพเข้า media server บน .13 (แบบ DJI Dock): gateway รัน ffmpeg ส่ง RTSP, server ให้ที่อยู่และสิทธิ์ส่งต่อรถ, เบราว์เซอร์ดูจาก .13 ไม่ต้องรู้ IP รีโมตและไม่ต้องตั้ง "แหล่งวิดีโอที่อนุญาต" | ทำแล้ว รอ deploy บน .13 และลองกับรถ | M |
 | **E-3** | รหัสจับคู่จากหน้าเว็บ: admin สร้างรหัส 6 หลัก/QR, edge ใส่รหัสแล้วได้ config + key เอง (key ไม่ผ่านมือคน) | ทำแล้ว: การ์ด "จับคู่รีโมต (Edge)" + `POST /api/v1/edge/pair` (`apps/server/src/pairing.ts`) รอ deploy บน .13 | M |
 | **E-4** | ผลตรวจบนหน้าเว็บ: link, GPS, codec กล้อง พร้อมปุ่มแก้ (เช่นเปลี่ยนกล้องเป็น H.264 ผ่าน SDK `0x21`) | ยังไม่เริ่ม | M |
-| **E-5** | gateway เป็น MAVLink router ให้ UniGCS ใช้พร้อมกันได้ทั้งดูและสั่ง + เลขประจำตัว (`gcsSystemId`) ไม่ซ้ำ UniGCS | ยังไม่เริ่ม (ต้องลองกับรถ) | M |
+| **E-5** | gateway เป็น MAVLink router ให้ UniGCS ใช้พร้อมกันได้ทั้งดูและสั่ง + เลขประจำตัว (`gcsSystemId`) ไม่ซ้ำ UniGCS | ทำแล้ว: `gcsRelay` (`apps/gateway/src/real/gcsRelay.ts`) UniGCS ต่อ `127.0.0.1:19857` gateway ใช้ component 191 ระหว่างเว็บขับไม่ส่งคันของ UniGCS ต่อ รอลองกับรถ (`deploy/remote/README_TH.md` §8.3) | M |
 | **E-6** | แอป APK บนรีโมต (เปลือก: จับคู่, เริ่ม/หยุด, บริการเบื้องหลัง) แทน Termux | ทำแล้ว: `apps/edge-android` (Node 18 + ffmpeg LGPL ในตัว) ผ่านทดสอบบน emulator Android 13 รอทดสอบบนรีโมตจริง | L |
 
 ## ลำดับที่แนะนำ

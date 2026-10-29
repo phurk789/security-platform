@@ -35,6 +35,7 @@ import { CommandLedger, admitCommand, type Adapter, type AdapterContext } from '
 import type { PushState } from '../videoPush';
 import { DriveState } from '../drive';
 import { forceMainStreamH264 } from './siyiCodec';
+import { GCS_RELAY_DEFAULT, GcsRelay } from './gcsRelay';
 
 /** Try the camera codec fix at most this often (the camera restart takes several seconds). */
 export const CODEC_FIX_INTERVAL_MS = 10 * 60_000;
@@ -97,6 +98,16 @@ export interface MavlinkVehicleConfig {
   fixCameraCodec?: boolean;
   /** Replaces the SIYI codec fix (tests). */
   codecFixer?: typeof forceMainStreamH264;
+  /**
+   * Relay for a ground station on the same machine (UniGCS on the SIYI remote, E-5): the gateway stays the only client
+   * of the datalink and forwards everything between it and the ground station, which connects to host:port (default
+   * 127.0.0.1:19857) instead of the datalink. While the console drives, the ground station's stick input is held back;
+   * everything else (a mode change to HOLD, a disarm) goes through. The gateway then uses component id 191, so replies
+   * meant for the ground station (190) are not taken for its own. `true` takes the defaults.
+   */
+  gcsRelay?: true | { host?: string; port?: number };
+  /** How long a silent ground station counts as connected (tests). */
+  gcsRelayStaleMs?: number;
 }
 
 /** Live driving from the console. Every field is optional; see TELEOP_DEFAULTS. */
@@ -175,6 +186,8 @@ const MSG = {
   RADIO_STATUS: 109,
   STATUSTEXT: 253,
 };
+/** Answers the vehicle addresses to one ground station (target_component). */
+const REPLIES = new Set([MSG.COMMAND_ACK, MSG.MISSION_REQUEST, MSG.MISSION_REQUEST_INT, MSG.MISSION_ACK]);
 const CMD = {
   NAV_WAYPOINT: 16,
   DO_SET_RELAY: 181,
@@ -296,9 +309,16 @@ export class MavlinkVehicleAdapter implements Adapter {
   // camera codec fix
   private codecFixAt = 0;
   private codecFixNote?: string;
+  // local ground station relay (UniGCS)
+  private relayCfg?: { host: string; port: number };
+  private relay?: GcsRelay;
+  /** Our component id: 190 like any GCS, 191 when a relayed ground station uses 190. */
+  private readonly myComp: number;
 
   constructor(private cfg: MavlinkVehicleConfig) {
-    this.proto = new MavLinkProtocolV2(cfg.gcsSystemId ?? 255, 190);
+    this.relayCfg = cfg.gcsRelay ? { ...GCS_RELAY_DEFAULT, ...(cfg.gcsRelay === true ? {} : cfg.gcsRelay) } : undefined;
+    this.myComp = this.relayCfg ? 191 : 190;
+    this.proto = new MavLinkProtocolV2(cfg.gcsSystemId ?? 255, this.myComp);
     const uav = cfg.kind === 'uav';
     if (cfg.teleop && !uav) {
       const problem = teleopProblem(cfg.teleop);
@@ -339,6 +359,17 @@ export class MavlinkVehicleAdapter implements Adapter {
             },
           ]
         : []),
+      ...(this.relayCfg
+        ? [
+            {
+              id: 'gcs',
+              name: 'Ground station on the remote (UniGCS, relayed)',
+              kind: 'remote' as const,
+              status: 'pending' as const,
+              detail: `Not connected · UniGCS: UDPCL ${this.relayCfg.host} port ${this.relayCfg.port}`,
+            },
+          ]
+        : []),
     ]);
     this.declaration = {
       deviceId: cfg.deviceId,
@@ -367,7 +398,7 @@ export class MavlinkVehicleAdapter implements Adapter {
       components: this.comps.list(),
       units: { position: 'site-m', altitude: 'm-site-datum', speed: 'm/s', battery: 'percent' },
       rateMs: 1000,
-      limitations: `Flight controller via ${cfg.link.mode === 'client' ? `${cfg.link.host}:${cfg.link.port}` : `UDP :${cfg.link.port}`}. ${cfg.allowRemoteArm ? 'Remote arming enabled.' : 'Arm on the remote; the platform will not arm.'}${this.teleop ? ` Console driving overrides steering and throttle only, while armed in a manual mode; it stops ${this.teleop.deadmanMs} ms after stick samples stop.` : ''}`,
+      limitations: `Flight controller via ${cfg.link.mode === 'client' ? `${cfg.link.host}:${cfg.link.port}` : `UDP :${cfg.link.port}`}. ${cfg.allowRemoteArm ? 'Remote arming enabled.' : 'Arm on the remote; the platform will not arm.'}${this.teleop ? ` Console driving overrides steering and throttle only, while armed in a manual mode; it stops ${this.teleop.deadmanMs} ms after stick samples stop.` : ''}${this.relayCfg ? ` UniGCS on the remote may run at the same time through the gateway (${this.relayCfg.host}:${this.relayCfg.port}); its commands do not pass the platform's approvals.` : ''}`,
       linkLossBehavior: uav
         ? 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE / NAV_DLL_ACT): RTL or loiter as configured on the vehicle.'
         : 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE, FS_ACTION=Hold): stop in place as configured on the vehicle.',
@@ -386,12 +417,33 @@ export class MavlinkVehicleAdapter implements Adapter {
     sock.on('message', (msg, rinfo) => {
       if (this.cfg.link.mode === 'listen') this.peer = { host: rinfo.address, port: rinfo.port };
       this.input.write(msg);
+      this.relay?.fromVehicle(msg);
     });
     sock.on('error', (e) => ctx.log.warn(`${this.cfg.deviceId}: UDP error ${e.message}`));
     if (this.cfg.link.mode === 'client') {
       this.peer = { host: this.cfg.link.host, port: this.cfg.link.port };
       sock.bind(0);
     } else sock.bind(this.cfg.link.port);
+    if (this.relayCfg) {
+      this.relay = new GcsRelay({
+        deviceId: this.cfg.deviceId,
+        ...this.relayCfg,
+        log: ctx.log,
+        now: () => ctx.now(),
+        toVehicle: (b) => this.peer && this.sock?.send(b, this.peer.port, this.peer.host),
+        driving: () => this.drive.active || this.overriding,
+        modeName: (m) => MODES[this.cfg.profile].name(m),
+        staleMs: this.cfg.gcsRelayStaleMs,
+        onChange: (s, note) =>
+          this.comps.set('gcs', {
+            status: s.connected ? 'ok' : 'offline',
+            detail: s.connected
+              ? `Connected through the gateway${s.sysid !== undefined ? ` (sys ${s.sysid})` : ''}${note ? ` · last: ${note.replace(/^UniGCS on the remote: /, '')}` : ''}`
+              : `Disconnected · UniGCS: UDPCL ${s.listen.replace(':', ' port ')}`,
+          }),
+      });
+      this.relay.start();
+    }
     this.timers.push(
       setInterval(() => this.sendGcsHeartbeat(), 1000),
       setInterval(() => this.tick(), 250),
@@ -404,8 +456,15 @@ export class MavlinkVehicleAdapter implements Adapter {
     if (this.drive.active || this.overriding) this.endDrive('gateway stopping');
     this.timers.forEach(clearInterval);
     this.timers = [];
+    this.relay?.stop();
+    this.relay = undefined;
     this.sock?.close();
     this.sock = undefined;
+  }
+
+  /** The local ground station relay (UniGCS on the remote), for the gateway's status. */
+  relayState() {
+    return this.relay?.state;
   }
 
   onDemo() {
@@ -634,6 +693,8 @@ export class MavlinkVehicleAdapter implements Adapter {
     }
     if (!this.sys || p.header.sysid !== this.sys) return;
     const data = p.protocol.data(p.payload, clazz) as unknown as Record<string, number | string>;
+    // With a relayed ground station on the same link, answers addressed to it (its component id) are not ours.
+    if (this.relayCfg && REPLIES.has(p.header.msgid) && Number(data.targetComponent) && Number(data.targetComponent) !== this.myComp) return;
     switch (p.header.msgid) {
       case MSG.LOCAL_POSITION_NED: {
         if (!this.cfg.indoor) break;
@@ -760,6 +821,7 @@ export class MavlinkVehicleAdapter implements Adapter {
 
   private tick() {
     const now = this.ctx.now();
+    this.relay?.tick();
     const fresh = this.lastHeartbeat && now - this.lastHeartbeat < LINK_STALE_MS;
     if (!fresh) {
       this.wasStale = true;

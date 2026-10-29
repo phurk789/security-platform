@@ -90,6 +90,8 @@ export interface Adapter {
    * the controls back to the vehicle's own remote.
    */
   onDrive?(sample: SrvDrive): void;
+  /** A ground station relayed through this adapter (UniGCS on the remote), for the gateway's status. */
+  relayState?(): { listen: string; connected: boolean; peer?: string; lastSeenAt?: number; sysid?: number } | undefined;
 }
 
 /**

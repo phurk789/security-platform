@@ -16,6 +16,7 @@ describe('Pair an edge remote (Admin card)', () => {
       link: { mode: 'client', host: '192.168.144.20', port: 19856 },
       allowRemoteArm: false,
       teleop: true,
+      gcsRelay: true,
       stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', push: true },
     });
   });
