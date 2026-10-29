@@ -392,8 +392,8 @@ export const TH: Record<string, string> = {
   // --- admin ----------------------------------------------------------------
   'Administration needs a connection to the platform server.': 'การดูแลระบบต้องเชื่อมต่อเซิร์ฟเวอร์แพลตฟอร์ม',
   Administration: 'การดูแลระบบ',
-  'Users, access, connections and backups. Being an administrator does not give device control or access to incident data.':
-    'ผู้ใช้ สิทธิ์ การเชื่อมต่อ และการสำรองข้อมูล ผู้ดูแลระบบไม่ได้รับสิทธิ์ควบคุมอุปกรณ์หรือดูข้อมูลเหตุโดยอัตโนมัติ',
+  'Users, access, connections and backups. Administrators see every page; commanding vehicles, approving missions and handling incidents stay with the operational roles.':
+    'ผู้ใช้ สิทธิ์ การเชื่อมต่อ และการสำรองข้อมูล ผู้ดูแลระบบเห็นข้อมูลทุกหน้า ส่วนการสั่งงานรถ อนุมัติภารกิจ และจัดการเหตุ ยังเป็นหน้าที่ของบทบาทปฏิบัติงาน',
   Refresh: 'รีเฟรช',
   'Users ({n})': 'ผู้ใช้ ({n})',
   Name: 'ชื่อ',
@@ -1295,4 +1295,14 @@ export const TH: Record<string, string> = {
   'Resume refused by the vehicle.': 'รถไม่ยอมทำต่อ',
   'Hold requested. Waiting for speed 0.': 'สั่ง HOLD แล้ว รอรถหยุดนิ่ง',
   'Waiting for the vehicle to stop.': 'รอรถหยุด',
+  // Role guide on the admin users card
+  'What each role can do': 'แต่ละบทบาททำอะไรได้บ้าง',
+  'Receives and verifies alerts, prepares missions, watches and turns cameras.': 'รับแจ้งและยืนยันเหตุ เตรียมภารกิจ ดูวิดีโอและหมุนกล้อง',
+  'Everything a dispatcher does, plus approving missions, putting vehicles live, patrols, keep-out zones, exporting evidence and the audit log.':
+    'ทำได้ทุกอย่างของเจ้าหน้าที่รับแจ้ง เพิ่มเติมคืออนุมัติภารกิจ เปิดรถเป็น LIVE ตั้งตารางลาดตระเวน กำหนดเขตหวงห้าม ส่งออกหลักฐาน และดูบันทึกตรวจสอบ',
+  'Accepts missions and commands the vehicle: start, pause, stop, drive, camera.': 'รับภารกิจและสั่งงานรถ: เริ่ม พัก หยุด ขับ และควบคุมกล้อง',
+  'Field team: sees only the incidents assigned to them, in the field app.': 'ทีมภาคสนาม: เห็นเฉพาะเหตุที่ได้รับมอบหมาย ผ่านแอปภาคสนาม',
+  'Reads reports, evidence and the audit log; changes nothing.': 'ดูรายงาน หลักฐาน และบันทึกตรวจสอบ ไม่แก้ไขอะไร',
+  'Sees everything; manages users, devices, keys, zones, settings and backups. Does not command vehicles or approve missions.':
+    'เห็นทุกอย่าง จัดการผู้ใช้ อุปกรณ์ คีย์ โซน การตั้งค่า และการสำรองข้อมูล แต่ไม่สั่งงานรถและไม่อนุมัติภารกิจ',
 };

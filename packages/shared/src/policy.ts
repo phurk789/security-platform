@@ -81,7 +81,8 @@ const DISPATCH: Action[] = [
 
 /**
  * Role → allowed actions (PRD §3). Viewing video, exporting evidence and controlling devices
- * are separate permissions (F13). Administrators do not get device control.
+ * are separate permissions (F13). Administrators see everything (incidents, missions, video,
+ * evidence, reports, audit) but do not command devices, approve missions or handle incidents.
  */
 export const MATRIX: Record<Role, Action[]> = {
   dispatcher: DISPATCH,
@@ -100,6 +101,9 @@ export const MATRIX: Record<Role, Action[]> = {
   responder: ['incident.create', 'field.update', 'evidence.view', 'evidence.add'],
   auditor: ['evidence.view', 'evidence.export', 'report.view', 'audit.view'],
   admin: [
+    'media.view',
+    'evidence.view',
+    'report.view',
     'admin.users',
     'admin.devices',
     'admin.keys',

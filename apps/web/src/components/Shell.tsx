@@ -193,7 +193,7 @@ const NAV: { id: View; label: string; short?: string; Icon: typeof House }[] = [
 ];
 
 function navFor(role: string): View[] {
-  if (role === 'admin') return ['admin', 'devices'];
+  if (role === 'admin') return ['overview', 'command', 'incidents', 'missions', 'devices', 'evidence', 'reports', 'admin'];
   if (role === 'responder') return ['overview', 'incidents', 'missions', 'devices', 'evidence', 'reports'];
   return ['overview', 'command', 'incidents', 'missions', 'devices', 'evidence', 'reports'];
 }

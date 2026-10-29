@@ -155,7 +155,7 @@ describe('GIS on the platform', () => {
     expect([...layers].sort()).toEqual(['building', 'device', 'entrance', 'geofence', 'hydrant', 'incident', 'site', 'zone']);
     expect((r.body as GeoJsonFeatureCollection).features.find((f) => f.properties.layer === 'incident')?.properties.dataLabel).toBe('SIMULATION');
     const admin = (await ploy.get('/sites/default/geojson?layers=incidents,devices')).body as GeoJsonFeatureCollection;
-    expect(admin.features.some((f) => f.properties.layer === 'incident')).toBe(false);
+    expect(admin.features.some((f) => f.properties.layer === 'incident')).toBe(true); // administrators see everything
     expect(admin.features.some((f) => f.properties.layer === 'device')).toBe(true);
     const audit = (await ploy.get('/audit?action=site.export')).body as any[];
     expect(audit.some((e) => e.actorName === 'Alex Chen' || e.actor === 'Alex Chen' || JSON.stringify(e).includes('geojson'))).toBe(true);

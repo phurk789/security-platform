@@ -113,9 +113,18 @@ describe('field responders', () => {
     expect((await kitti.post(`/assignments/${asg.id}/report`, rep)).status).toBe(200);
   });
 
-  it('administrators manage users but cannot see incidents or command devices', async () => {
+  it('administrators see everything and manage users, but do not handle incidents or command devices', async () => {
     const ploy = await Client.login(srv.url, 'ploy');
-    expect((await ploy.get('/incidents')).status).toBe(403);
+    // Read: incidents, missions, video permission and live data, like a supervisor.
+    const inc = (await ploy.get('/incidents')).body as { id: string; status: string }[];
+    expect(inc.length).toBeGreaterThan(0);
+    expect((await ploy.get(`/incidents/${inc[0].id}`)).status).toBe(200);
+    const snap = (await ploy.get('/snapshot')).body as { incidents: unknown[]; missions: unknown[]; devices: unknown[] };
+    expect(snap.incidents.length).toBeGreaterThan(0);
+    expect(snap.devices.length).toBeGreaterThan(0);
+    // Act: no incident handling and no mission approval.
+    expect((await ploy.post(`/incidents/${inc[0].id}/triage`)).status).toBe(403);
+    expect((await ploy.post('/missions/MSN-0001/approve')).status).toBe(403);
     const u = await ploy.post('/admin/users', { username: 'op2', name: 'Second Operator', role: 'operator', password: 'correct-horse-1' });
     expect(u.status).toBe(200);
     expect((await Client.login(srv.url, 'op2', 'correct-horse-1')).token).toMatch(/^ses_/);
