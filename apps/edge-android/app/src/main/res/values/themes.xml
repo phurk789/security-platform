@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Edge" parent="@android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.Edge" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:colorPrimary">@color/primary</item>
         <item name="android:colorAccent">@color/primary</item>
         <item name="android:windowBackground">@color/bg</item>
-        <item name="android:statusBarColor">@color/primary</item>
+        <item name="android:statusBarColor">@color/bar</item>
+        <item name="android:navigationBarColor">@color/bar</item>
         <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:textColorSecondary">@color/muted</item>
+        <item name="android:textColorHint">@color/idle</item>
     </style>
 
     <!-- Base of the Edge.* text and card styles (a dotted name implies this parent). -->
@@ -13,27 +16,34 @@
 
     <style name="Edge.Card">
         <item name="android:background">@drawable/card</item>
-        <item name="android:padding">16dp</item>
+        <item name="android:padding">18dp</item>
         <item name="android:layout_marginTop">14dp</item>
-        <item name="android:elevation">1dp</item>
     </style>
 
     <style name="Edge.Title">
-        <item name="android:textSize">26sp</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:textColor">@color/text</item>
-    </style>
-
-    <style name="Edge.Heading">
         <item name="android:textSize">22sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textColor">@color/text</item>
     </style>
 
+    <!-- The gateway's state, large: the first thing read on the screen. -->
+    <style name="Edge.Hero">
+        <item name="android:textSize">30sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/text</item>
+    </style>
+
+    <style name="Edge.Heading">
+        <item name="android:textSize">20sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/text</item>
+    </style>
+
     <style name="Edge.Label">
-        <item name="android:textSize">14sp</item>
+        <item name="android:textSize">13sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textAllCaps">true</item>
+        <item name="android:letterSpacing">0.06</item>
         <item name="android:textColor">@color/muted</item>
     </style>
 
@@ -43,7 +53,7 @@
     </style>
 
     <style name="Edge.Status">
-        <item name="android:textSize">19sp</item>
+        <item name="android:textSize">18sp</item>
         <item name="android:lineSpacingExtra">4dp</item>
         <item name="android:textColor">@color/text</item>
     </style>
@@ -53,13 +63,32 @@
         <item name="android:textColor">@color/muted</item>
     </style>
 
-    <style name="Edge.BigButton" parent="@android:style/Widget.Material.Button.Colored">
-        <item name="android:textSize">22sp</item>
-        <item name="android:minHeight">72dp</item>
-        <item name="android:textColor">#FFFFFFFF</item>
+    <!-- Start / Stop: tall, full width, coloured by the action (tint set in code). -->
+    <style name="Edge.BigButton">
+        <item name="android:background">@drawable/btn_solid</item>
+        <item name="android:textSize">24sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:minHeight">80dp</item>
+        <item name="android:textColor">@color/button_text</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:stateListAnimator">@null</item>
     </style>
 
-    <style name="Edge.SmallButton" parent="@android:style/Widget.Material.Button">
+    <style name="Edge.SmallButton">
+        <item name="android:background">@drawable/btn_secondary</item>
         <item name="android:textSize">15sp</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <style name="Edge.Input">
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textColorHint">@color/idle</item>
+        <item name="android:backgroundTint">@color/muted</item>
     </style>
 </resources>

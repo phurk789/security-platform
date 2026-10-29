@@ -97,6 +97,8 @@ EOF
   sleep 1
   bg camera bash -c 'while true; do ffmpeg -hide_banner -loglevel warning -re -f lavfi -i testsrc2=size=1280x720:rate=25 -c:v libx264 -preset ultrafast -tune zerolatency -g 25 -bf 0 -pix_fmt yuv420p -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/main.264; sleep 1; done'
   bg rover "$NODE" "$HERE/fake-rover.cjs" "$REPO/node_modules" 19856
+  # An emulator stopped mid-snapshot leaves locks that make the next one exit ("snapshot operation pending").
+  pgrep -f 'qemu-system.*edge33' >/dev/null || find "$HOME/.android/avd/edge33.avd" -maxdepth 1 -name '*.lock' -exec rm -rf {} + 2>/dev/null
   bg emulator "$SDK/emulator/emulator" -avd edge33 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -camera-back none -camera-front none -accel on
   "$ADB" wait-for-device
   for _ in $(seq 1 120); do [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break; sleep 2; done
@@ -123,7 +125,8 @@ test_() {
   "$ADB" shell pm clear com.store13.edge >/dev/null # unpaired, as on a new remote
   "$ADB" shell am start -W -a android.intent.action.VIEW -d "'psedge://pair?server=http%3A%2F%2F10.0.2.2%3A8099&code=$code'" com.store13.edge >/dev/null
   sleep 6
-  tap startButton
+  "$ADB" exec-out screencap -p >shots/paired.png
+  tap mainButton # Start
   sleep 20
   "$ADB" exec-out screencap -p >shots/running.png
   echo "gateways: $(curl -fsS "${auth[@]}" $API/admin/gateways)"
@@ -165,8 +168,12 @@ update_() {
   local before; before="$(vcode)"
   "$ADB" root >/dev/null 2>&1; sleep 2; "$ADB" wait-for-device # to read the app's log at the end
   "$ADB" shell am start -n com.store13.edge/.MainActivity >/dev/null; sleep 3
-  for _ in 1 2 3; do "$ADB" shell input swipe 1200 1500 1200 300 200; done # Settings, at the bottom
-  sleep 1
+  if "$ADB" shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && "$ADB" shell cat /sdcard/ui.xml | grep -q 'id/settingsButton'; then
+    tap settingsButton; sleep 2 # 0.3.0 and later: settings open from the gear in the top bar
+  else
+    for _ in 1 2 3; do "$ADB" shell input swipe 1200 1500 1200 300 200; done # 0.2.0: settings at the bottom
+    sleep 1
+  fi
   tap checkUpdateButton; sleep 4
   "$ADB" exec-out screencap -p >shots/update-available.png
   tap installUpdateButton; sleep 3

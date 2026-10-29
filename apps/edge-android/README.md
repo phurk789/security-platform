@@ -30,6 +30,17 @@ MainActivity ── Pair ──► POST /api/v1/edge/pair (6-digit code) ──�
   while its heartbeat is fresh), video push state. The screen and the notification show it.
 - Start on boot exists but is off by default: the gateway and UniGCS must not use the datalink together.
 
+## UniGCS alongside the gateway (from 0.3.0, E-5)
+
+The UniRC datalink serves one client well. The gateway is that client and relays a ground station on the same
+remote: `gcsRelay` (apps/gateway/src/real/gcsRelay.ts) listens on 127.0.0.1:19857; UniGCS is set to UDPCL
+127.0.0.1 port 19857 once. Frames pass both ways unchanged; while the console drives, UniGCS's RC_CHANNELS_OVERRIDE
+/ MANUAL_CONTROL are held back (a mode change or disarm always passes). The gateway then speaks as 255/191, so replies
+for UniGCS (255/190) are not taken for its own; SYSID_MYGCS stays 255. The app turns `gcsRelay` on for the first
+MAVLink vehicle when it writes site.json (`Pairing.gatewayDevices()`), so remotes paired earlier get it too; a
+pairing can say `"gcsRelay": false`. The status file carries `relay {listen, connected}` and the screen shows it under
+Vehicle.
+
 ## In-app updates (from 0.2.0)
 
 ```

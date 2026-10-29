@@ -29,8 +29,8 @@ android {
         targetSdk = 35
         // Raise versionCode for every build given to remotes: Android installs only a higher one, and in-app
         // updates offer only a higher one. -PedgeVersionCode / -PedgeVersionName override it (bench builds).
-        versionCode = ((project.findProperty("edgeVersionCode") as String?) ?: "2").toInt()
-        versionName = (project.findProperty("edgeVersionName") as String?) ?: "0.2.0"
+        versionCode = ((project.findProperty("edgeVersionCode") as String?) ?: "3").toInt()
+        versionName = (project.findProperty("edgeVersionName") as String?) ?: "0.3.0"
         ndk { abiFilters += edgeAbis }
     }
 

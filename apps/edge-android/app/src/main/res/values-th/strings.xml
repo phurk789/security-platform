@@ -11,7 +11,7 @@
     <string name="scan_prompt">หันกล้องไปที่ QR บนหน้าเว็บ</string>
     <string name="scan_bad">QR นี้ไม่ใช่รหัสจับคู่</string>
     <string name="pairing_wait">กำลังจับคู่…</string>
-    <string name="pair_ok">จับคู่เป็น %1$s แล้ว ปิด UniGCS แล้วกด "เริ่ม"</string>
+    <string name="pair_ok">จับคู่เป็น %1$s แล้ว กด "เริ่ม" ได้เลย ใช้ UniGCS พร้อมกันได้ถ้าตั้งให้ต่อผ่านแอปนี้ (UDPCL 127.0.0.1 พอร์ต 19857)</string>
     <string name="pair_wrong_code">รหัสไม่ถูกต้อง ถูกใช้ไปแล้ว หรือหมดอายุ ขอรหัสใหม่จากผู้ดูแล</string>
     <string name="pair_too_many">ใส่รหัสผิดหลายครั้งเกินไป รอสักครู่แล้วขอรหัสใหม่</string>
     <string name="pair_no_server">ติดต่อเซิร์ฟเวอร์ %1$s ไม่ได้ ตรวจ Wi-Fi และที่อยู่</string>
@@ -31,7 +31,12 @@
     <string name="no_key">รีโมตนี้ยังไม่ได้จับคู่ (ไม่มีคีย์ Gateway) กรุณาจับคู่ใหม่</string>
     <string name="start">เริ่ม</string>
     <string name="stop">หยุด</string>
-    <string name="datalink_warning">ก่อนกดเริ่ม: ปิด UniGCS ก่อน (ตั้งค่า → แอป → UniGCS → บังคับหยุด) ลิงก์ข้อมูลของรถใช้ได้ทีละโปรแกรมเท่านั้น</string>
+    <string name="button_start">▶  เริ่ม</string>
+    <string name="button_stop">■  หยุด</string>
+    <string name="button_wait">รอสักครู่…</string>
+    <string name="uptime">ออนไลน์ %1$s</string>
+    <string name="settings_button">⚙</string>
+    <string name="datalink_warning">⚠ ลิงก์ข้อมูลของรถใช้ได้ทีละโปรแกรม UniGCS ต้องต่อผ่านแอปนี้ (UDPCL 127.0.0.1 พอร์ต 19857) ไม่ใช่ต่อตรง 192.168.144.20:19856 ถ้ายังต่อตรงอยู่ ให้ปิด UniGCS ก่อนกดเริ่ม (ตั้งค่า → แอป → UniGCS → บังคับหยุด)</string>
 
     <string name="section_server">เซิร์ฟเวอร์</string>
     <string name="section_vehicles">รถ</string>
@@ -43,8 +48,8 @@
     <string name="server_connecting">● ยังเชื่อมต่อ %1$s ไม่ได้ กำลังลองใหม่ ตรวจ Wi-Fi</string>
     <string name="server_refused">● เซิร์ฟเวอร์ไม่รับคีย์ Gateway แจ้งผู้ดูแล แล้วจับคู่ใหม่</string>
     <string name="device_alive">● %1$s: สัญญาณจากรถปกติ (ข้อมูลล่าสุด %2$s วินาทีที่แล้ว)</string>
-    <string name="device_never">● %1$s: รอสัญญาณแรกจากรถ เปิดรถแล้วหรือยัง และปิด UniGCS แล้วหรือยัง</string>
-    <string name="device_silent">● %1$s: ไม่มีสัญญาณจากรถมา %2$s วินาที รถดับ อยู่นอกระยะ หรือ UniGCS เปิดอยู่</string>
+    <string name="device_never">● %1$s: รอสัญญาณแรกจากรถ เปิดรถแล้วหรือยัง และ UniGCS ต่อตรงเข้าลิงก์ข้อมูลอยู่หรือเปล่า (ต้องต่อผ่านแอปนี้)</string>
+    <string name="device_silent">● %1$s: ไม่มีสัญญาณจากรถมา %2$s วินาที รถดับ อยู่นอกระยะ หรือ UniGCS ต่อตรงเข้าลิงก์ข้อมูลแทนการต่อผ่านแอปนี้</string>
     <string name="device_refused">● %1$s: เซิร์ฟเวอร์ไม่รับ: %2$s</string>
     <string name="video_none">รีโมตนี้ไม่มีกล้องที่ต้องส่งภาพ</string>
     <string name="video_waiting">● %1$s: รอที่อยู่ส่งวิดีโอจากเซิร์ฟเวอร์</string>
@@ -59,7 +64,7 @@
 
     <string name="settings">ตั้งค่า</string>
     <string name="boot_switch">เริ่ม Gateway เองเมื่อเปิดรีโมต</string>
-    <string name="boot_help">ปิดไว้เป็นค่าเริ่มต้น เปิดเฉพาะเมื่อรีโมตนี้ไม่ใช้ UniGCS เพราะทั้งสองโปรแกรมใช้ลิงก์ข้อมูลพร้อมกันไม่ได้</string>
+    <string name="boot_help">ปิดไว้เป็นค่าเริ่มต้น เปิดเฉพาะเมื่อ UniGCS บนรีโมตนี้ต่อผ่านแอปนี้ (UDPCL 127.0.0.1 พอร์ต 19857) หรือไม่ได้ใช้ UniGCS เพราะถ้า UniGCS ต่อตรงเข้าลิงก์ข้อมูล จะใช้พร้อม Gateway ไม่ได้</string>
     <string name="battery_button">อนุญาตให้ทำงานตอนปิดจอ</string>
     <string name="battery_ok">ปิดการประหยัดแบตเตอรี่ให้แอปนี้แล้ว Gateway ทำงานต่อได้ตอนปิดจอ</string>
     <string name="battery_on">Android อาจพัก Gateway เมื่อปิดจอ กดปุ่มด้านล่างแล้วเลือก "อนุญาต"</string>
@@ -98,6 +103,9 @@
     <string name="update_done">อัปเดตเป็น %1$s แล้ว</string>
     <string name="update_done_resumed">Gateway เริ่มทำงานต่อแล้ว</string>
     <string name="update_done_start">เปิดแอปแล้วกด "เริ่ม" เมื่อพร้อม</string>
+
+    <string name="relay_connected">● UniGCS: ต่อผ่านแอปนี้อยู่ (ใช้พร้อม Gateway ได้)</string>
+    <string name="relay_waiting">● UniGCS: ยังไม่ต่อ ถ้าจะใช้พร้อมกัน ตั้งการเชื่อมต่อใน UniGCS เป็น UDPCL %1$s พอร์ต %2$s</string>
 
     <string name="notif_channel">Gateway</string>
     <string name="notif_running">Gateway %1$s</string>
