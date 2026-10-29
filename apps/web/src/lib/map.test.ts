@@ -175,6 +175,10 @@ describe('overlay data', () => {
     const area = { id: 'GF-1', name: 'Office yard', kind: 'operating_area' as const, active: true, appliesTo: ['ugv' as const], poly: [{ x: 0, y: -40 }, { x: 40, y: -40 }, { x: 40, y: 0 }] };
     expect(buildOverlayData(input({ geofences: [area] })).boundary.features).toHaveLength(0);
     expect(buildOverlayData(input({ geofences: [{ ...area, active: false }] })).boundary.features).toHaveLength(1);
+    // A zone hidden on this console (or open in the editor) is not drawn, but still bounds the site.
+    const hidden = buildOverlayData(input({ geofences: [area], hiddenGeofenceIds: new Set(['GF-1']) }));
+    expect(hidden.geofences.features).toHaveLength(0);
+    expect(hidden.boundary.features).toHaveLength(0);
   });
 
   it('points the heading arrow to true north bearings (site grid heading + grid rotation)', () => {

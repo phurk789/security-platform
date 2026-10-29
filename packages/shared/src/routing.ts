@@ -146,6 +146,32 @@ function segmentsCross(a: Point, b: Point, c: Point, d: Point) {
   return o1 * o2 < 0 && o3 * o4 < 0;
 }
 
+/** Area (m²) of a polygon in site metres (shoelace; any winding). */
+export function polygonArea(poly: Point[]) {
+  let a = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) a += (poly[j].x + poly[i].x) * (poly[j].y - poly[i].y);
+  return Math.abs(a / 2);
+}
+
+/** Length (m) around a closed outline. */
+export function polygonPerimeter(poly: Point[]) {
+  let len = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length && poly.length > 1; j = i++) len += Math.hypot(poly[i].x - poly[j].x, poly[i].y - poly[j].y);
+  return len;
+}
+
+/** True if two non-adjacent edges of the closed outline cross (a bow-tie): inside tests and the area go wrong then. */
+export function polygonSelfIntersects(poly: Point[]) {
+  const n = poly.length;
+  if (n < 4) return false;
+  for (let i = 0; i < n; i++)
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // the closing edge touches the first one at a corner
+      if (segmentsCross(poly[i], poly[(i + 1) % n], poly[j], poly[(j + 1) % n])) return true;
+    }
+  return false;
+}
+
 /** True if the segment a→b touches the polygon (enters it or crosses an edge). */
 export function segmentHitsPoly(a: Point, b: Point, poly: Point[]) {
   if (insidePoly(a, poly) || insidePoly(b, poly)) return true;

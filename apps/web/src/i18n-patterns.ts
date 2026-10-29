@@ -5,6 +5,7 @@
 type Rule = [RegExp, (m: string[], inner: (s: string) => string) => string];
 
 const VERB: Record<string, string> = { start: 'เริ่ม', resume: 'ทำต่อ', pause: 'พัก', stop: 'หยุด' };
+const ZONE_KIND: Record<string, string> = { 'keep-out': 'ห้ามเข้า', caution: 'ระวัง', 'no-fly': 'ห้ามบิน', 'operating area': 'พื้นที่ปฏิบัติงาน' };
 
 const RULES: Rule[] = [
   // Messages that wrap another message come first, so the inner one is not matched as a whole.
@@ -25,6 +26,8 @@ const RULES: Rule[] = [
   [/^(.+) is outside the operating area during (.+?)\.?$/, (m) => `${m[1]} ออกนอกพื้นที่ปฏิบัติงานระหว่างภารกิจ ${m[2]}`],
   [/^(.+) is outside the operating area\.?$/, (m) => `${m[1]} อยู่นอกพื้นที่ปฏิบัติงาน`],
   [/^(.+) is back inside the operating area\.$/, (m) => `${m[1]} กลับเข้าพื้นที่ปฏิบัติงานแล้ว`],
+  [/^(.+?) entered (keep-out|caution|no-fly|operating area) zone "(.+?)"\.?(.*)$/, (m) => `${m[1]} เข้าโซน${ZONE_KIND[m[2]] ?? m[2]} "${m[3]}"${m[4] ? ` ${m[4].trim()}` : ''}`],
+  [/^(.+?) left zone "(.+)"\.$/, (m) => `${m[1]} ออกจากโซน "${m[2]}" แล้ว`],
 ];
 
 /** Thai for a message with names or numbers in it, or undefined when no rule matches. */

@@ -259,3 +259,193 @@
 .route-pt:active {
   cursor: grabbing;
 }
+
+/* Zones panel (map tools) */
+.map-real .zones {
+  position: relative;
+}
+.map-real .zones > .btn-ghost {
+  padding: 6px 8px;
+}
+.zones-pop {
+  right: 0;
+  top: 40px;
+  width: min(340px, calc(100vw - 32px));
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+.zones-pop button {
+  width: auto;
+  padding: 4px 8px;
+}
+.zones-pop .icon-btn {
+  padding: 4px;
+  flex: none;
+}
+.zones-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.zones-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--text-3);
+}
+.zones-search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  color: var(--text);
+  outline: none;
+}
+.zones-pop section h5 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+  font-size: 0.78rem;
+  color: var(--text-2);
+}
+.zones-pop .swatch,
+.zone-editor .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+.zone-editor .swatch {
+  background: var(--zone-color, #fbbf24);
+}
+.zones-pop ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.zones-pop li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+.zones-pop li:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.zones-pop li .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zones-pop li.hidden .name,
+.zones-pop li.inactive .name {
+  color: var(--text-3);
+}
+.zones-pop li.inactive .name {
+  text-decoration: line-through;
+}
+.zones-pop .tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--text-2);
+  font-size: 0.7rem;
+}
+
+/* Zone editor (top of the map) */
+.zone-editor {
+  border-color: color-mix(in srgb, var(--zone-color, #fbbf24) 60%, transparent);
+}
+.zone-editor .route-draft-head {
+  color: var(--zone-color, #fbbf24);
+}
+.zone-shapes {
+  display: flex;
+  gap: 4px;
+}
+.zone-shapes button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: none;
+  color: var(--text-2);
+  font-size: 0.8rem;
+}
+.zone-shapes button.on {
+  border-color: var(--zone-color, #fbbf24);
+  color: #f8fafc;
+  background: color-mix(in srgb, var(--zone-color, #fbbf24) 22%, transparent);
+}
+.zone-fields {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 6px;
+}
+.zone-fields input,
+.zone-fields select {
+  min-width: 0;
+}
+.zone-fields > input:last-child,
+.zone-applies {
+  grid-column: 1 / -1;
+}
+.zone-applies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.8rem;
+}
+.route-draft .btn-ghost.danger {
+  color: #fca5a5;
+}
+
+/* Zone corners: smaller than route checkpoints, no number, ringed in the zone's colour. */
+.route-pt.zone-pt {
+  width: 16px;
+  height: 16px;
+  background: #0b1220;
+  border: 3px solid var(--pt-color, #fbbf24);
+  font-size: 0;
+}
+.route-pt.zone-pt.closes {
+  width: 22px;
+  height: 22px;
+  background: var(--pt-color, #fbbf24);
+  cursor: pointer;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--pt-color, #fbbf24) 35%, transparent);
+}
+/* Midpoint handle: click or drag to add a corner. */
+.route-mid {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px dashed var(--pt-color, #fbbf24);
+  background: rgba(11, 18, 32, 0.7);
+  cursor: copy;
+}
+.route-mid:hover {
+  background: var(--pt-color, #fbbf24);
+}
+@media (max-width: 640px) {
+  .zone-fields {
+    grid-template-columns: 1fr;
+  }
+}
