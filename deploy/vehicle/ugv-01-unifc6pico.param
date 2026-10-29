@@ -87,8 +87,9 @@ COMPASS_USE3,0
 WP_SPEED,1
 FS_CRASH_CHECK,1
 # ArduPilot's own fence, a 30 m circle around the arming point, HOLD on breach.
-# Arming needs a GPS position while the fence is on.
-FENCE_ENABLE,1
+# Stored OFF so the vehicle can be armed indoors without GPS (a fence that is on at arming needs a position).
+# The edge gateway turns it on before each route and off after disarm ("missionFence": true in site.json).
+FENCE_ENABLE,0
 FENCE_TYPE,2
 FENCE_RADIUS,30
 FENCE_ACTION,2

@@ -66,6 +66,11 @@ describe('operating area', () => {
     expect(far.status).toBe(400);
     expect(far.body.error).toMatch(/touch the site/);
     expect((await nida.post('/geofences', { name: 'x', kind: 'parking', poly: square(10, -20) })).status).toBe(400);
+    // A bow-tie outline (two edges cross) is refused: inside tests and its area would be wrong.
+    const [a, b, c, d] = square(10, -20);
+    const bow = await nida.post('/geofences', { name: 'Bow tie', kind: 'keep_out', poly: [a, c, b, d] });
+    expect(bow.status).toBe(400);
+    expect(bow.body.error).toMatch(/crosses itself/);
   });
 
   it('keeps patrols inside the area: refused when saved outside it, skipped when the area moved away', async () => {

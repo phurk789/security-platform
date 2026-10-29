@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Geofence } from '@13store/shared';
-import { MAX_CHECKPOINTS, MAX_ZONE_POINTS, addPoint, checkDraft, finishedDraft, maxPoints, movePoint, removePoint, routeDraft } from './routeDraft';
+import { MAX_CHECKPOINTS, MAX_ZONE_POINTS, addPoint, checkDraft, finishedDraft, insertPoint, maxPoints, movePoint, northUpRect, removePoint, routeDraft } from './routeDraft';
 
 const keepOut: Geofence = {
   id: 'GF-X',
@@ -55,6 +55,39 @@ describe('drawing a route on the map', () => {
     expect(checkDraft(tri.slice(0, 2), undefined, [], 'ugv', 'zone').ok).toBe(false);
     // Outside the demo box is fine: an operating area is what defines the site.
     expect(checkDraft(tri, undefined, [], 'ugv', 'zone')).toMatchObject({ ok: true, lengthM: 120, outside: [] });
+  });
+
+  it('undoes every change, inserts corners, and draws north-up rectangles', () => {
+    routeDraft.start({ purpose: 'geofence', deviceId: '', points: [] });
+    routeDraft.setPoints(addPoint([], { x: 0, y: 0 }));
+    routeDraft.setPoints(addPoint(routeDraft.get()!.points, { x: 10, y: 0 }));
+    routeDraft.setPoints(movePoint(routeDraft.get()!.points, 1, { x: 12, y: 0 }));
+    routeDraft.undo();
+    expect(routeDraft.get()!.points).toEqual([
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    ]);
+    routeDraft.undo();
+    routeDraft.undo();
+    expect(routeDraft.get()!.points).toEqual([]);
+    routeDraft.undo(); // nothing left: no change
+    expect(routeDraft.get()!.past).toEqual([]);
+    expect(insertPoint([{ x: 0, y: 0 }, { x: 10, y: 0 }], 1, { x: 5, y: 3 })).toEqual([
+      { x: 0, y: 0 },
+      { x: 5, y: 3 },
+      { x: 10, y: 0 },
+    ]);
+    // On a rotated site grid the rectangle is north-up on the map, so not axis-aligned in site metres.
+    const anchor = { originLat: 13.95, originLon: 100.46, rotationDeg: -28.5 };
+    const r = northUpRect({ x: 0, y: 0 }, { x: 40, y: 30 }, anchor);
+    expect(r).toHaveLength(4);
+    expect(r[0]).toEqual({ x: 0, y: 0 });
+    expect(r[2]).toEqual({ x: 40, y: 30 });
+    expect(r[1].x === 0 || r[1].y === 0).toBe(false);
+    const c = checkDraft(r, undefined, [], 'ugv', 'geofence');
+    expect(c).toMatchObject({ ok: true, crosses: false });
+    expect(c.areaM2).toBeGreaterThan(0);
+    expect(checkDraft([r[0], r[2], r[1], r[3]], undefined, [], 'ugv', 'geofence')).toMatchObject({ ok: false, crosses: true });
   });
 
   it('keeps one draft: start, finish, cancel back to where it started', () => {

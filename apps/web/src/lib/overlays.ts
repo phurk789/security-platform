@@ -41,6 +41,8 @@ export interface OverlayInput {
   freshness: (d: Device) => Freshness;
   /** How far back a trail reaches (ms). */
   trailMs?: number;
+  /** Zones not drawn: hidden on this console, or being reshaped in the editor. */
+  hiddenGeofenceIds?: ReadonlySet<string>;
 }
 
 export const KIND_COLOR: Record<string, string> = { ugv: '#38bdf8', uav: '#c084fc', cctv: '#cbd5e1' };
@@ -116,7 +118,7 @@ export function buildOverlayData(i: OverlayInput): OverlayData {
   if (on('geofences'))
     out.geofences = fc(
       i.geofences
-        .filter((g) => g.active && g.poly.length >= 3)
+        .filter((g) => g.active && g.poly.length >= 3 && !i.hiddenGeofenceIds?.has(g.id))
         .map((g) => feature({ type: 'Polygon', coordinates: [ring(a, g.poly)] }, { id: g.id, name: g.name, kind: g.kind, color: GEOFENCE_COLOR[g.kind] ?? '#f59e0b' })),
     );
 

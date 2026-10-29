@@ -1,15 +1,41 @@
 // Floating panel on the real map while a route or zone is being drawn: what is being drawn, how
 // long it is, what is wrong with it, and the buttons to finish or give up.
+import { useEffect, useRef } from 'react';
 import { Check, Eraser, MapPinned, Undo2, X } from 'lucide-react';
 import { MIN_ZONE_POINTS, checkDraft, maxPoints, routeDraft, useRouteDraft } from '../domain/routeDraft';
 import { useStore } from '../store';
 import { useT } from '../i18n';
+import { ZoneEditor } from './ZoneEditor';
+
+const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
 
 export function RouteDraftPanel() {
   const { s, dispatch } = useStore();
   const t = useT();
   const d = useRouteDraft();
-  if (!d || d.state !== 'drawing') return null;
+  const keys = useRef<{ done: () => void; cancel: () => void } | null>(null);
+  // Esc cancels, Backspace undoes, Enter uses the route (the zone editor has its own keys).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const k = keys.current;
+      if (!k || typing(e.target)) return;
+      if (e.key === 'Escape') k.cancel();
+      else if (e.key === 'Enter') k.done();
+      else if (e.key === 'Backspace' || e.key === 'Delete') routeDraft.undo();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  if (!d || d.state !== 'drawing') {
+    keys.current = null;
+    return null;
+  }
+  if (d.purpose === 'geofence') {
+    keys.current = null;
+    return <ZoneEditor d={d} />;
+  }
   const zone = d.purpose === 'zone';
   const dev = zone ? undefined : s.devices[d.deviceId];
   const from = dev && !dev.noFix ? dev.pos : undefined;
@@ -36,6 +62,7 @@ export function RouteDraftPanel() {
     else routeDraft.cancel();
     back();
   };
+  keys.current = { done, cancel };
 
   return (
     <div className="route-draft" role="dialog" aria-label={title}>
@@ -61,7 +88,7 @@ export function RouteDraftPanel() {
       {c.full && <p className="route-draft-warn">{t('{n} points is the most this can have.', { n: maxPoints(d.purpose) })}</p>}
       {!zone && !from && <p className="route-draft-warn">{t('{id} has no position yet, so the distance starts at the first checkpoint.', { id: d.deviceId })}</p>}
       <div className="route-draft-actions">
-        <button className="btn-ghost small" disabled={!d.points.length} onClick={() => routeDraft.setPoints(d.points.slice(0, -1))}>
+        <button className="btn-ghost small" disabled={!d.past.length} onClick={() => routeDraft.undo()} title={t('Undo (Backspace)')}>
           <Undo2 size={14} /> {t('Undo')}
         </button>
         <button className="btn-ghost small" disabled={!d.points.length} onClick={() => routeDraft.setPoints([])}>

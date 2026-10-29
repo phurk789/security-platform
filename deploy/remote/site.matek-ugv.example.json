@@ -15,6 +15,7 @@
       "firmwareTested": "ArduPilot Rover (version from the probe report)",
       "link": { "mode": "client", "host": "192.168.144.20", "port": 19856 },
       "allowRemoteArm": false,
+      "missionFence": true,
       "teleop": true,
       "stream": {
         "rtsp": "rtsp://192.168.144.25:8554/main.264",

@@ -7,13 +7,15 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MlMap, type MapLayerMouseEvent, type MapMouseEvent } from 'maplibre-gl';
 import { Layers as LayersIcon, LocateFixed, SatelliteDish } from 'lucide-react';
 import { GEOFENCE_KIND_LABEL, SITE, fmtLatLon, geoToSite, type AppState, type Layers as LayerState } from '@13store/shared';
-import { addPoint, maxPoints, movePoint, removePoint, routeDraft, useRouteDraft } from '../domain/routeDraft';
+import { MAX_ZONE_POINTS, addPoint, insertPoint, isZonePurpose, maxPoints, movePoint, northUpRect, removePoint, routeDraft, useRouteDraft, type ZoneMeta } from '../domain/routeDraft';
+import { useHiddenZones } from '../domain/zoneVisibility';
+import { ZonesPanel } from './ZonesPanel';
 import { RouteDraftPanel } from './RouteDraftPanel';
 import { freshness } from '../domain/policy';
 import { useStore } from '../store';
 import { useT } from '../i18n';
 import { createStandardMap, SITE_ZOOM, type StandardMap } from '../lib/standardMap';
-import { CLICKABLE, buildOverlayData, devicePositions, ensureOperationalLayers, lngLat, updateOverlayData, type OverlayInput } from '../lib/overlays';
+import { CLICKABLE, GEOFENCE_COLOR, buildOverlayData, devicePositions, ensureOperationalLayers, lngLat, updateOverlayData, type OverlayInput } from '../lib/overlays';
 import { addMapImages } from '../lib/mapImages';
 import { registerBasemaps, type Basemap } from '../lib/basemaps';
 
@@ -23,6 +25,8 @@ const PLAN_KEY = 'ps-map-plan';
 const REDRAW_MS = 250;
 /** The route being drawn (dashed line; its checkpoints are draggable DOM markers). */
 const DRAFT_SRC = 'route-draft';
+/** The line from the last point to the mouse while drawing (a rectangle preview for the rectangle tool). */
+const CURSOR_SRC = 'route-draft-cursor';
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 const drawing = () => routeDraft.get()?.state === 'drawing';
 
@@ -46,7 +50,7 @@ function useLocalFlag(key: string, def: boolean): [boolean, (v: boolean) => void
   return [v, set];
 }
 
-function overlayInput(s: AppState, showTrails: boolean, showPlan: boolean): OverlayInput {
+function overlayInput(s: AppState, showTrails: boolean, showPlan: boolean, hiddenGeofenceIds?: ReadonlySet<string>): OverlayInput {
   return {
     anchor: s.geo,
     devices: Object.values(s.devices),
@@ -62,8 +66,15 @@ function overlayInput(s: AppState, showTrails: boolean, showPlan: boolean): Over
     showTrails,
     showPlan,
     freshness: (d) => freshness(s, d),
+    hiddenGeofenceIds,
   };
 }
+
+/** A zone being drawn or reshaped in the editor on the map. */
+const zoneMeta = () => {
+  const d = routeDraft.get();
+  return d?.state === 'drawing' && d.purpose === 'geofence' ? (d.meta as ZoneMeta) : undefined;
+};
 
 /** Pixels hidden behind the floating HUD panels (CSS variables on the overview), used as camera padding. */
 function hudPadding(el: HTMLElement) {
@@ -85,8 +96,13 @@ export default function RealMap() {
   const [layersOpen, setLayersOpen] = useState(false);
   const [showTrails, setShowTrails] = useLocalFlag(TRAILS_KEY, true);
   const [showPlan, setShowPlan] = useLocalFlag(PLAN_KEY, false);
-  const latest = useRef({ s, showTrails, showPlan, dispatch, t, session });
-  latest.current = { s, showTrails, showPlan, dispatch, t, session };
+  const draft = useRouteDraft();
+  const hiddenZones = useHiddenZones();
+  // The zone open in the editor is drawn by the editor, not as a normal zone.
+  const editingId = draft?.state === 'drawing' && draft.purpose === 'geofence' ? (draft.meta as ZoneMeta).id : undefined;
+  const hiddenIds = editingId ? new Set([...hiddenZones, editingId]) : hiddenZones;
+  const latest = useRef({ s, showTrails, showPlan, dispatch, t, session, hiddenIds });
+  latest.current = { s, showTrails, showPlan, dispatch, t, session, hiddenIds };
 
   // One map per mounted component; everything it added goes with it.
   useEffect(() => {
@@ -109,13 +125,30 @@ export default function RealMap() {
           onReady: (map) => {
             ensureOperationalLayers(map);
             if (!map.getSource(DRAFT_SRC)) map.addSource(DRAFT_SRC, { type: 'geojson', data: EMPTY_FC });
+            if (!map.getSource(CURSOR_SRC)) map.addSource(CURSOR_SRC, { type: 'geojson', data: EMPTY_FC });
+            if (!map.getLayer('route-draft-fill'))
+              map.addLayer({
+                id: 'route-draft-fill',
+                type: 'fill',
+                source: DRAFT_SRC,
+                filter: ['==', ['geometry-type'], 'Polygon'],
+                paint: { 'fill-color': ['coalesce', ['get', 'color'], '#fbbf24'], 'fill-opacity': 0.2 },
+              });
             if (!map.getLayer('route-draft-line'))
               map.addLayer({
                 id: 'route-draft-line',
                 type: 'line',
                 source: DRAFT_SRC,
+                filter: ['==', ['geometry-type'], 'LineString'],
                 layout: { 'line-cap': 'round', 'line-join': 'round' },
-                paint: { 'line-color': '#fbbf24', 'line-width': 3, 'line-dasharray': [2, 1.5] },
+                paint: { 'line-color': ['coalesce', ['get', 'color'], '#fbbf24'], 'line-width': 3, 'line-dasharray': [2, 1.5] },
+              });
+            if (!map.getLayer('route-draft-cursor'))
+              map.addLayer({
+                id: 'route-draft-cursor',
+                type: 'line',
+                source: CURSOR_SRC,
+                paint: { 'line-color': ['coalesce', ['get', 'color'], '#fbbf24'], 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [1, 1.5] },
               });
             off.push(addMapImages(map));
             bindInteractions(map, off);
@@ -157,6 +190,36 @@ export default function RealMap() {
     };
   }, []);
 
+  /** The dashed line from the last point to the mouse; a rectangle preview for the rectangle tool. */
+  function drawCursor(map: MlMap, at: { lng: number; lat: number } | null) {
+    const src = map.getSource(CURSOR_SRC) as GeoJSONSource | undefined;
+    if (!src) return;
+    const d = routeDraft.get();
+    const meta = zoneMeta();
+    if (!at || !d || d.state !== 'drawing' || meta?.mode === 'edit' || d.points.length >= maxPoints(d.purpose)) return src.setData(EMPTY_FC);
+    const g = latest.current.s.geo;
+    const cur: [number, number] = [at.lng, at.lat];
+    const ll = (p: { x: number; y: number }) => lngLat(g, p) as [number, number];
+    let coords: [number, number][];
+    if (meta?.shape === 'rect') {
+      if (d.points.length !== 1) return src.setData(EMPTY_FC);
+      const rect = northUpRect(d.points[0], geoToSite(g, { lat: at.lat, lon: at.lng }), g);
+      coords = [...rect, rect[0]].map(ll);
+    } else if (isZonePurpose(d.purpose)) {
+      if (!d.points.length) return src.setData(EMPTY_FC);
+      const last = ll(d.points[d.points.length - 1]);
+      coords = d.points.length >= 2 ? [last, cur, ll(d.points[0])] : [last, cur];
+    } else {
+      // A route continues from its last checkpoint, or from the vehicle before the first one.
+      const dev = latest.current.s.devices[d.deviceId];
+      const start = d.points.length ? d.points[d.points.length - 1] : dev && !dev.noFix ? dev.pos : undefined;
+      if (!start) return src.setData(EMPTY_FC);
+      coords = [ll(start), cur];
+    }
+    const color = meta ? GEOFENCE_COLOR[meta.kind] : undefined;
+    src.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: color ? { color } : {}, geometry: { type: 'LineString', coordinates: coords } }] });
+  }
+
   function bindInteractions(map: MlMap, off: (() => void)[]) {
     const on = (type: 'click' | 'mouseenter' | 'mouseleave', layer: string, fn: (e: MapLayerMouseEvent) => void) => {
       map.on(type, layer, fn);
@@ -171,11 +234,40 @@ export default function RealMap() {
     const onMapClick = (e: MapMouseEvent) => {
       const d = routeDraft.get();
       if (!d || d.state !== 'drawing') return;
-      if ((e.originalEvent.target as HTMLElement | null)?.closest?.('.route-pt')) return;
-      routeDraft.setPoints(addPoint(d.points, geoToSite(latest.current.s.geo, { lat: e.lngLat.lat, lon: e.lngLat.lng }), maxPoints(d.purpose)));
+      if ((e.originalEvent.target as HTMLElement | null)?.closest?.('.route-pt, .route-mid')) return;
+      const geo = latest.current.s.geo;
+      const p = geoToSite(geo, { lat: e.lngLat.lat, lon: e.lngLat.lng });
+      const meta = zoneMeta();
+      if (meta) {
+        // Reshaping: corners are added from the midpoint handles, not by clicking the map.
+        if (meta.mode === 'edit') return;
+        if (meta.shape === 'rect') {
+          if (!d.points.length) return routeDraft.setPoints(addPoint([], p));
+          routeDraft.setPoints(northUpRect(d.points[0], p, geo));
+          routeDraft.setMeta({ ...meta, mode: 'edit', shape: 'polygon' });
+          return;
+        }
+      }
+      routeDraft.setPoints(addPoint(d.points, p, maxPoints(d.purpose)));
     };
     map.on('click', onMapClick);
     off.push(() => map.off('click', onMapClick));
+    // Rubber band from the last point to the mouse (one redraw per frame).
+    let raf = 0;
+    let at: { lng: number; lat: number } | null = null;
+    const onMove = (e: MapMouseEvent) => {
+      at = e.lngLat;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        drawCursor(map, at);
+      });
+    };
+    map.on('mousemove', onMove);
+    off.push(() => {
+      map.off('mousemove', onMove);
+      cancelAnimationFrame(raf);
+    });
     for (const id of CLICKABLE.device) on('click', id, (e) => !drawing() && e.features?.[0] && latest.current.dispatch({ type: 'selectDevice', id: String(e.features[0].properties.id) }));
     for (const id of CLICKABLE.incident) on('click', id, (e) => !drawing() && e.features?.[0] && latest.current.dispatch({ type: 'selectIncident', id: String(e.features[0].properties.id) }));
     for (const id of CLICKABLE.geofence)
@@ -202,10 +294,10 @@ export default function RealMap() {
     timer.current = window.setTimeout(() => {
       timer.current = null;
       const map = sm.current?.map;
-      const { s: cur, showTrails: tr, showPlan: pl } = latest.current;
-      if (map) updateOverlayData(map, buildOverlayData(overlayInput(cur, tr, pl)));
+      const { s: cur, showTrails: tr, showPlan: pl, hiddenIds: hid } = latest.current;
+      if (map) updateOverlayData(map, buildOverlayData(overlayInput(cur, tr, pl, hid)));
     }, REDRAW_MS);
-  }, [ready, s, showTrails, showPlan]);
+  }, [ready, s, showTrails, showPlan, hiddenZones, editingId]);
   useEffect(
     () => () => {
       if (timer.current !== null) clearTimeout(timer.current);
@@ -213,9 +305,9 @@ export default function RealMap() {
     [],
   );
 
-  // The route being drawn: dashed line from the vehicle through the checkpoints, and one draggable
-  // numbered marker per checkpoint (right-click removes it). Rebuilt whenever the draft changes.
-  const draft = useRouteDraft();
+  // The route or zone being drawn: a dashed line (a route starts at the vehicle; a zone closes on its
+  // first corner, filled in its kind's colour), and one draggable marker per point (right-click
+  // removes it). Reshaping a zone adds a handle on each edge: click or drag it to add a corner.
   const markers = useRef<maplibregl.Marker[]>([]);
   useEffect(() => {
     const map = sm.current?.map;
@@ -223,26 +315,41 @@ export default function RealMap() {
     for (const mk of markers.current) mk.remove();
     markers.current = [];
     const src = map.getSource(DRAFT_SRC) as GeoJSONSource | undefined;
+    const cursor = map.getSource(CURSOR_SRC) as GeoJSONSource | undefined;
     const on = draft?.state === 'drawing';
     map.getCanvas().style.cursor = on ? 'crosshair' : '';
+    // A double-click while drawing would zoom away from the shape.
+    if (on) map.doubleClickZoom.disable();
+    else map.doubleClickZoom.enable();
     if (!on || !draft) {
       src?.setData(EMPTY_FC);
+      cursor?.setData(EMPTY_FC);
       return;
     }
     const cur = latest.current.s;
     const g = cur.geo;
-    // A route starts at the vehicle; a zone outline closes on its first corner.
-    const zone = draft.purpose === 'zone';
+    const zone = isZonePurpose(draft.purpose);
+    const meta = draft.purpose === 'geofence' ? (draft.meta as ZoneMeta) : undefined;
+    if (meta?.mode === 'edit') cursor?.setData(EMPTY_FC);
+    const color = meta ? GEOFENCE_COLOR[meta.kind] : undefined;
+    const props = color ? { color } : {};
     const dev = zone ? undefined : cur.devices[draft.deviceId];
     const from = dev && !dev.noFix ? dev.pos : undefined;
-    const line = zone ? (draft.points.length > 2 ? [...draft.points, draft.points[0]] : draft.points) : [...(from ? [from] : []), ...draft.points];
-    const coords = line.map((p) => lngLat(g, p));
-    src?.setData(coords.length > 1 ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }] } : EMPTY_FC);
+    const ring = draft.points.length > 2 ? [...draft.points, draft.points[0]] : draft.points;
+    const line = (zone ? ring : [...(from ? [from] : []), ...draft.points]).map((p) => lngLat(g, p));
+    const features: GeoJSON.Feature[] = [];
+    if (zone && draft.points.length > 2) features.push({ type: 'Feature', properties: props, geometry: { type: 'Polygon', coordinates: [ring.map((p) => lngLat(g, p))] } });
+    if (line.length > 1) features.push({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: line } });
+    src?.setData({ type: 'FeatureCollection', features });
+    const tt = latest.current.t;
     draft.points.forEach((p, i) => {
       const el = document.createElement('div');
-      el.className = 'route-pt';
-      el.textContent = String(i + 1);
-      el.title = latest.current.t('Drag to move · right-click to remove');
+      el.className = zone ? 'route-pt zone-pt' : 'route-pt';
+      if (color) el.style.setProperty('--pt-color', color);
+      if (!zone) el.textContent = String(i + 1);
+      const closes = meta?.mode === 'draw' && i === 0 && draft.points.length >= 3;
+      el.title = closes ? tt('Click to close the outline') : tt('Drag to move · right-click to remove');
+      if (closes) el.classList.add('closes');
       el.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -250,13 +357,50 @@ export default function RealMap() {
         if (d) routeDraft.setPoints(removePoint(d.points, i));
       });
       const mk = new maplibregl.Marker({ element: el, draggable: true }).setLngLat(lngLat(g, p) as [number, number]).addTo(map);
+      let dragged = false;
+      mk.on('dragstart', () => (dragged = true));
       mk.on('dragend', () => {
         const ll = mk.getLngLat();
         const d = routeDraft.get();
         if (d) routeDraft.setPoints(movePoint(d.points, i, geoToSite(g, { lat: ll.lat, lon: ll.lng })));
       });
+      // Clicking the first corner closes a new outline: the shape is then reshaped, not extended.
+      if (closes)
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (dragged) return;
+          const m = zoneMeta();
+          if (m) routeDraft.setMeta({ ...m, mode: 'edit' });
+        });
       markers.current.push(mk);
     });
+    if (meta?.mode === 'edit' && draft.points.length >= 2 && draft.points.length < MAX_ZONE_POINTS) {
+      const n = draft.points.length;
+      for (let i = 0; i < (n === 2 ? 1 : n); i++) {
+        const a = draft.points[i];
+        const b = draft.points[(i + 1) % n];
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const el = document.createElement('div');
+        el.className = 'route-mid';
+        if (color) el.style.setProperty('--pt-color', color);
+        el.title = tt('Click or drag to add a corner');
+        const mk = new maplibregl.Marker({ element: el, draggable: true }).setLngLat(lngLat(g, mid) as [number, number]).addTo(map);
+        let dragged = false;
+        mk.on('dragstart', () => (dragged = true));
+        mk.on('dragend', () => {
+          const ll = mk.getLngLat();
+          const d = routeDraft.get();
+          if (d) routeDraft.setPoints(insertPoint(d.points, i + 1, geoToSite(g, { lat: ll.lat, lon: ll.lng })));
+        });
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (dragged) return;
+          const d = routeDraft.get();
+          if (d) routeDraft.setPoints(insertPoint(d.points, i + 1, mid));
+        });
+        markers.current.push(mk);
+      }
+    }
   }, [ready, draft]);
   useEffect(
     () => () => {
@@ -291,6 +435,22 @@ export default function RealMap() {
         [Math.max(...lons), Math.max(...lats)],
       ],
       { padding: 40, duration: 800, pitch: 0, bearing: 0 },
+    );
+  };
+
+  /** Fit a zone (site metres) into view, clear of the HUD panels. */
+  const zoomTo = (poly: { x: number; y: number }[]) => {
+    const map = sm.current?.map;
+    if (!map || !poly.length) return;
+    const pts = poly.map((p) => lngLat(s.geo, p));
+    const lons = pts.map((p) => p[0]);
+    const lats = pts.map((p) => p[1]);
+    map.fitBounds(
+      [
+        [Math.min(...lons), Math.min(...lats)],
+        [Math.max(...lons), Math.max(...lats)],
+      ],
+      { padding: 80, maxZoom: 19, duration: 700 },
     );
   };
 
@@ -344,6 +504,7 @@ export default function RealMap() {
                 </div>
               )}
             </div>
+            <ZonesPanel onZoom={zoomTo} />
             <button className="btn-ghost" onClick={fitSite} title={t('Show the whole site')} aria-label={t('Show the whole site')}>
               <LocateFixed size={16} />
             </button>

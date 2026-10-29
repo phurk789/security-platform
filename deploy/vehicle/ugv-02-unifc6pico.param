@@ -1,0 +1,99 @@
+# UGV-02 (tracked UGV, one RC-style ESC per track, lift on output 6)
+# Flight controller: SIYI UniFC 6 Pico (MCU 00340047 36315811 34333133), ArduRover V4.7.0 (1511f271).
+# Applied on top of the board's factory Rover defaults (parameters erased first); anything not listed stays
+# at its default. Loadable in Mission Planner. Earlier setup: vehicle-backups/unifc6pico-ugv-02-20261029-as-read.param
+#
+# Outputs (each lead plugged upright into one output column, signal on the same row as the RC_IN signal)
+#   output 1 -> left ESC
+#   output 3 -> right ESC
+#   output 6 -> lift, straight from the ch6 switch
+# ArduPilot mixes the sticks for the tracks: left = throttle + steering, right = throttle - steering.
+# If a track runs backwards when driving forward, set SERVO1_REVERSED or SERVO3_REVERSED to 1.
+SERVO1_FUNCTION,73
+SERVO1_MIN,1100
+SERVO1_MAX,1900
+SERVO1_TRIM,1500
+# The left motor is mounted mirrored (29 Oct: with the right side reversed instead, stick-up drove both tracks
+# backwards), so the left output is reversed.
+SERVO1_REVERSED,1
+SERVO2_FUNCTION,0
+SERVO3_FUNCTION,74
+SERVO3_MIN,1100
+SERVO3_MAX,1900
+SERVO3_TRIM,1500
+SERVO3_REVERSED,0
+SERVO4_FUNCTION,0
+# Output 6 = RC channel 6 passed straight through (works armed or disarmed)
+SERVO6_FUNCTION,56
+#
+# 5 V output signals. On 27 Oct the ESCs ignored the 3.3 V signal (LED blinking fast, no response)
+# while a hobby servo on the same pin worked.
+BRD_PWM_VOLT_SEL,1
+#
+# Forward/back at full power (user, 29 Oct: "100% ถาวร"). Steering (pivot) is not capped by this.
+MOT_THR_MAX,100
+#
+# Gears: deploy/vehicle/ugv-02-gears.lua on the microSD card as APM/scripts/gears.lua.
+# 4 gears (25 / 50 / 75 / 100 % of MOT_THR_MAX, set in memory only), every boot starts in gear 1.
+# Remote buttons: ch12 = gear up (Scripting1), ch11 = gear down (Scripting2).
+SCR_ENABLE,1
+RC12_OPTION,300
+RC11_OPTION,301
+#
+# Stick ranges of the SIYI remote (1050-1950)
+RC1_MIN,1050
+RC1_MAX,1950
+RC1_TRIM,1500
+RC3_MIN,1050
+RC3_MAX,1950
+RC3_TRIM,1500
+# This remote sends 1050 with the left stick pushed up (seen 29 Oct), so ch3 is reversed here to make
+# stick-up = forward. Web driving for this vehicle needs teleop.reverseThrottle = true in the remote's site.json.
+RC3_REVERSED,1
+#
+# Arm / disarm with the ch7 switch only. Stick arming (steering held right for 2 s) is off,
+# so a pivot test while disarmed cannot arm the vehicle.
+RC7_OPTION,153
+ARMING_RUDDER,0
+#
+# Mode switch on ch10: low = HOLD, middle and high = MANUAL (same as UGV-01).
+# Until a switch is assigned to ch10 the remote sends 1500, which reads as MANUAL.
+MODE_CH,10
+MODE1,4
+MODE2,4
+MODE3,0
+MODE4,0
+MODE5,0
+MODE6,0
+#
+# Failsafes: remote lost -> HOLD after 1.5 s, gateway lost -> HOLD
+FS_THR_ENABLE,1
+FS_ACTION,2
+FS_GCS_ENABLE,1
+#
+# Console driving: RC overrides expire 1 s after the gateway stops sending
+RC_OVERRIDE_TIME,1
+#
+# SIYI air unit UART on TELEM2 (SERIAL2): MAVLink 2 at 115200. This vehicle's remote datalink runs at 115200
+# (the earlier setup used 115; with the factory 57600 the remote saw nothing). Confirmed 29 Oct: UniGCS sees live data.
+SERIAL2_PROTOCOL,2
+SERIAL2_BAUD,115
+# Only TX/RX/GND are wired, so no flow control
+BRD_SER2_RTSCTS,0
+# Keep UniGCS from overwriting TELEM2 stream rates (the gateway uses SET_MESSAGE_INTERVAL)
+MAV3_OPTIONS,4
+SERIAL1_PROTOCOL,2
+SERIAL1_BAUD,115
+BRD_SER1_RTSCTS,0
+MAV2_OPTIONS,4
+#
+# No hardware safety button on this vehicle (the factory value 1 keeps every output off)
+BRD_SAFETY_DEFLT,0
+#
+# No GPS or compass fitted yet
+COMPASS_USE,0
+COMPASS_USE2,0
+COMPASS_USE3,0
+#
+# Accelerometer: this board's own 6-side calibration is restored from the backup after the reset
+# (board-specific, not in this file).
