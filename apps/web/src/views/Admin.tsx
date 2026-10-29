@@ -73,6 +73,16 @@ interface Backup {
 
 const ROLES: Role[] = ['dispatcher', 'supervisor', 'operator', 'responder', 'auditor', 'admin'];
 
+/** One line per role for the users card, so it is clear who may do what. */
+const ROLE_HINT: Record<Role, string> = {
+  dispatcher: 'Receives and verifies alerts, prepares missions, watches and turns cameras.',
+  supervisor: 'Everything a dispatcher does, plus approving missions, putting vehicles live, patrols, keep-out zones, exporting evidence and the audit log.',
+  operator: 'Accepts missions and commands the vehicle: start, pause, stop, drive, camera.',
+  responder: 'Field team: sees only the incidents assigned to them, in the field app.',
+  auditor: 'Reads reports, evidence and the audit log; changes nothing.',
+  admin: 'Sees everything; manages users, devices, keys, zones, settings and backups. Does not command vehicles or approve missions.',
+};
+
 interface PrivacyMatch {
   table: 'incidents' | 'timeline' | 'evidence' | 'assignments';
   id: string;
@@ -229,7 +239,7 @@ function Admin() {
       <div className="page-head">
         <div>
           <h1>{t('Administration')}</h1>
-          <p className="muted">{t('Users, access, connections and backups. Being an administrator does not give device control or access to incident data.')}</p>
+          <p className="muted">{t('Users, access, connections and backups. Administrators see every page; commanding vehicles, approving missions and handling incidents stay with the operational roles.')}</p>
         </div>
         <button className="btn-secondary" onClick={() => act(load)}>
           <RefreshCw size={16} /> {t('Refresh')}
@@ -323,6 +333,17 @@ function Admin() {
               <Plus size={16} /> {t('Add user')}
             </button>
           </form>
+          <details className="role-guide">
+            <summary>{t('What each role can do')}</summary>
+            <dl className="meta">
+              {ROLES.map((r) => (
+                <div key={r}>
+                  <dt>{roleLabel(r)}</dt>
+                  <dd>{t(ROLE_HINT[r])}</dd>
+                </div>
+              ))}
+            </dl>
+          </details>
         </section>
 
         <section className="card">

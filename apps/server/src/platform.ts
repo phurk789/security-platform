@@ -514,7 +514,6 @@ export class Platform {
     const r = this.incRow(id);
     if (!r || !this.inScope(a, r.org_id, r.site_id)) return fail(404, 'not_found', `Incident ${id} not found.`);
     const inc = JSON.parse(r.data) as Incident;
-    if (a.role === 'admin') return fail(403, 'forbidden', 'Administrators manage the system but do not see incident data.');
     if (a.role === 'responder' && !this.hasAssignment(a, id)) return fail(404, 'not_found', `Incident ${id} not found.`);
     return { ...inc, siteId: r.site_id };
   }
@@ -557,7 +556,6 @@ export class Platform {
   }
 
   listIncidents(a: Actor, f: { siteId?: string; status?: string; zone?: string; from?: number; to?: number; q?: string; deviceId?: string; limit?: number } = {}): Incident[] {
-    if (a.role === 'admin') fail(403, 'forbidden', 'Administrators manage the system but do not see incident data.');
     const rows = this.db
       .prepare('SELECT site_id, data FROM incidents WHERE org_id = ? AND created_at BETWEEN ? AND ? ORDER BY created_at DESC LIMIT ?')
       .all(a.orgId, f.from ?? 0, f.to ?? Number.MAX_SAFE_INTEGER, Math.min(f.limit ?? 500, 20000)) as { site_id: string; data: string }[];
@@ -3102,7 +3100,7 @@ export class Platform {
   // ---- scheduled patrols ---------------------------------------------------------------
 
   listPatrols(a: Actor): (Patrol & { siteId: string })[] {
-    if (a.role === 'responder' || a.role === 'admin') return [];
+    if (a.role === 'responder') return [];
     const rows = this.db.prepare('SELECT site_id, data FROM patrols WHERE org_id = ? ORDER BY rowid').all(a.orgId) as { site_id: string; data: string }[];
     return rows.filter((r) => this.inScope(a, a.orgId, r.site_id)).map((r) => ({ ...(JSON.parse(r.data) as Patrol), siteId: r.site_id }));
   }
@@ -3560,7 +3558,7 @@ export class Platform {
     const site = this.site(a, siteId);
     const want = (layers ?? []).map((l) => l.trim()).filter((l): l is GeoLayer => (GEO_LAYERS as string[]).includes(l));
     // Administrators manage the system but do not see incident data (same rule as the API).
-    const incidents = a.role === 'admin' ? [] : this.listIncidents(a, { siteId: site.id }).filter((i) => !['closed', 'duplicate', 'dismissed'].includes(i.status));
+    const incidents = this.listIncidents(a, { siteId: site.id }).filter((i) => !['closed', 'duplicate', 'dismissed'].includes(i.status));
     const fc = siteGeoJson({
       site,
       anchor: this.siteAnchor(a.orgId, site.id),
@@ -3634,12 +3632,12 @@ export class Platform {
 
   snapshot(a: Actor, siteId?: string): Snapshot {
     const site = this.site(a, siteId);
-    const incidents = a.role === 'admin' ? [] : this.listIncidents(a, { siteId: site.id });
+    const incidents = this.listIncidents(a, { siteId: site.id });
     const ids = new Set(incidents.map((i) => i.id));
     const timeline = (this.db.prepare('SELECT data FROM timeline WHERE org_id = ? ORDER BY at').all(a.orgId) as { data: string }[])
       .map((r) => JSON.parse(r.data) as TimelineEvent)
       .filter((e) => ids.has(e.incidentId));
-    const missions = a.role === 'responder' || a.role === 'admin' ? [] : this.allMissions(a.orgId).filter((m) => ids.has(m.incidentId));
+    const missions = a.role === 'responder' ? [] : this.allMissions(a.orgId).filter((m) => ids.has(m.incidentId));
     return {
       serverTime: this.now(),
       meta: this.meta(a.orgId),
@@ -3648,14 +3646,14 @@ export class Platform {
       incidents,
       devices: this.listDevices(a, site.id),
       missions,
-      commands: a.role === 'admin' ? [] : this.listCommands(a).filter((c) => missions.some((m) => m.id === c.missionId)),
+      commands: this.listCommands(a).filter((c) => missions.some((m) => m.id === c.missionId)),
       timeline,
       evidence: can(a.role as Role, 'evidence.view') ? this.evidenceFor(a, ids) : [],
       assignments: this.listAssignments(a).filter((x) => ids.has(x.incidentId)),
       geofences: this.geofencesOf(a.orgId, site.id),
       playbooks: getOrgSettings(this.db, a.orgId).playbooks,
       patrols:
-        a.role === 'admin' || a.role === 'responder'
+        a.role === 'responder'
           ? []
           : this.listPatrols(a)
               .filter((p) => p.siteId === site.id)
@@ -3671,9 +3669,8 @@ export class Platform {
     if (e.type === 'resync') return true;
     if (e.type === 'notice') return a.role !== 'responder' || (!!m.incidentId && this.hasAssignment(a, m.incidentId));
     if (e.type === 'geofence' || e.type === 'site') return true;
-    if (e.type === 'detection') return a.role !== 'responder' && a.role !== 'admin' && can(a.role as Role, 'media.view');
-    if (e.type === 'patrol') return a.role !== 'responder' && a.role !== 'admin';
-    if (a.role === 'admin') return e.type === 'audit' || e.type === 'device';
+    if (e.type === 'detection') return a.role !== 'responder' && can(a.role as Role, 'media.view');
+    if (e.type === 'patrol') return a.role !== 'responder';
     if (e.type === 'audit') return can(a.role as Role, 'audit.view');
     if (a.role === 'responder') {
       if (['device', 'telemetry', 'mission', 'command'].includes(e.type)) return false;
