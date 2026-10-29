@@ -1959,8 +1959,12 @@ table.compact th {
   .site-select svg:last-child {
     display: none;
   }
+  /* The site name alone hides; with more than one site the switcher stays, compact. */
+  .site-pick .site-select {
+    max-width: 38vw;
+  }
   .user-txt,
-  .top-mid .site-select {
+  .top-mid > .site-select {
     display: none;
   }
   .mode {
@@ -3133,8 +3137,11 @@ html:lang(th) .meta dt {
   }
 }
 @media (max-width: 1500px) {
-  .theme-hud .top-mid .site-select {
+  .theme-hud .top-mid > .site-select {
     display: none;
+  }
+  .theme-hud .site-pick .site-select {
+    max-width: 220px;
   }
   .map-search {
     min-width: 170px;
@@ -3957,4 +3964,104 @@ a.latlon:hover {
 .role-guide dl.meta {
   grid-template-columns: 1fr;
   margin-top: 8px;
+}
+
+/* Top bar site switcher: a long site name is cut short, not the buttons beside it. */
+.site-pick .site-select {
+  min-width: 0;
+}
+.site-pick .site-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Admin sites card: each site and the devices on it. */
+.sites-list li {
+  display: block;
+}
+.site-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.site-row .grow {
+  min-width: 0;
+}
+.site-row .badge {
+  margin-left: 6px;
+}
+.site-devices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.site-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+.site-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-2);
+}
+.site-move select {
+  font-size: 0.75rem;
+  padding: 1px 2px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  max-width: 7.5rem;
+}
+
+/* Users table: which sites a user may see. */
+.site-access {
+  position: relative;
+}
+.site-access summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.site-access-menu {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  min-width: 14rem;
+  margin-top: 4px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.3);
+}
+.site-access-menu label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+/* Devices page: the device's site and moving it. */
+.site-cell select {
+  margin-top: 4px;
+  font-size: 0.8rem;
+}
+.other-sites {
+  margin-top: 16px;
 }

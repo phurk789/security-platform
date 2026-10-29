@@ -572,6 +572,48 @@ function missionStatusText(status: string | undefined, t: T) {
 }
 
 /** Site picker. In the offline demo it switches between the two demo sites (reloads the page). */
+/** Server consoles: the site on screen, and the other sites this user may switch to. */
+function ServerSitePicker() {
+  const { s, session } = useStore();
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const sites = s.sites ?? [];
+  const name = s.site?.name ?? t(SITE.name);
+  if (sites.length < 2 || !session)
+    return (
+      <span className="site-select" title={t('Only sites you are authorised for are listed')}>
+        <MapPin size={16} /> {name}
+      </span>
+    );
+  return (
+    <div className="site-pick">
+      <button className="site-select" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)} title={t('Switch site')}>
+        <MapPin size={16} /> <span className="site-name">{name}</span> <ChevronDown size={16} />
+      </button>
+      {open && (
+        <ul className="site-pop" role="listbox" aria-label={t('Sites')}>
+          {sites.map((x) => (
+            <li key={x.id}>
+              <button
+                role="option"
+                aria-selected={x.id === s.site?.id}
+                className={x.id === s.site?.id ? 'on' : ''}
+                onClick={() => {
+                  setOpen(false);
+                  if (x.id !== s.site?.id) session.switchSite(x.id);
+                }}
+              >
+                <b>{x.name}</b>
+                <small>{x.devices ? t('{n} devices', { n: x.devices.length }) : x.id}</small>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function SitePicker() {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -579,12 +621,7 @@ function SitePicker() {
     { id: 'civic', name: 'Civic Center', note: 'Original demo · drawn 3D twin' },
     { id: 'amata', name: 'Demo Plant · Amata City Chonburi', note: 'Industrial estate · real 3D imagery' },
   ];
-  if (!__STANDALONE__)
-    return (
-      <button className="site-select" title={t('Only sites you are authorised for are listed')}>
-        <MapPin size={16} /> {SITE.name} <ChevronDown size={16} />
-      </button>
-    );
+  if (!__STANDALONE__) return <ServerSitePicker />;
   return (
     <div className="site-pick">
       <button className="site-select" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>

@@ -30,7 +30,7 @@ and the API description at `/api/v1/openapi.json`.
 | `GATEWAY_KEY`                                                                                      | demo key                                     | Key the embedded gateway uses                                                                                                                  |
 | `LOG`                                                                                              | `0`                                          | `1` enables request logging                                                                                                                    |
 | `LICENSE_FILE`                                                                                     | none                                         | Signed license JSON (see **License**). Without it a pilot runs as an evaluation (1 site, 10 devices, 5 users)                                  |
-| `LICENSE_PUBLIC_KEY`                                                                               | built-in                                     | Override the Ed25519 public key that license files are verified against (PEM, `\n` escaped)                                                    |
+| `LICENSE_PUBLIC_KEY`                                                                               | none                                         | Ed25519 public key that license files are verified against (PEM, `\n` escaped); required with `LICENSE_FILE`                                   |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`                         | none                                         | Enable single sign-on (see **Single sign-on**)                                                                                                 |
 | `OIDC_NAME`, `OIDC_ROLE_CLAIM`, `OIDC_ROLE_MAP`, `OIDC_DEFAULT_ROLE`, `OIDC_ORG`, `OIDC_SYNC_ROLE` | `SSO`, `groups`, `{}`, none, `org-demo`, `1` | Button label, claim holding groups, group→role map (JSON), fallback role, organisation for provisioned users, keep roles in sync at each login |
 | `METRICS_TOKEN`                                                                                    | none                                         | Bearer token Prometheus uses to scrape `/api/v1/metrics` (admins can also read it with their session)                                          |
@@ -99,8 +99,13 @@ and the API description at `/api/v1/openapi.json`.
 ## License
 
 Pilot and production servers run under a signed license file. A license is a JSON document
-signed with Ed25519; the server verifies the signature against the built-in 13 STORE public key
-(or `LICENSE_PUBLIC_KEY`) and refuses files issued for a different organisation.
+signed with Ed25519; the server verifies the signature against the 13 STORE public key set as
+`LICENSE_PUBLIC_KEY` (PEM, `\n` escaped) and refuses files issued for a different organisation.
+Without that key the server ignores the file and stays in evaluation (`GET /api/v1/license` says why).
+
+**More than one site:** sign a license with `--sites N` (below), copy it to the server, set
+`LICENSE_FILE` to its path and `LICENSE_PUBLIC_KEY` to the issuer public key, and restart. The
+Administration page then shows _Sites (n of N)_ and **Add site** works up to N.
 
 ```bash
 npm run license -w @13store/server -- keygen                       # once, at 13 STORE: prints private + public key PEM

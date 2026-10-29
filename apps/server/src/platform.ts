@@ -112,6 +112,7 @@ import {
   type GeoAnchor,
   type GeoLayer,
   SITE,
+  SITE_GEOMETRY,
   type SiteInfo,
   planFor,
   indoorRouteChecks,
@@ -644,7 +645,7 @@ export class Platform {
 
   private defaultSite(a: Actor) {
     if (a.siteIds.length) return a.siteIds[0];
-    const r = this.db.prepare('SELECT id FROM sites WHERE org_id = ? ORDER BY id LIMIT 1').get(a.orgId) as { id: string } | undefined;
+    const r = this.db.prepare('SELECT id FROM sites WHERE org_id = ? ORDER BY rowid LIMIT 1').get(a.orgId) as { id: string } | undefined;
     return r?.id ?? fail(404, 'not_found', 'No site configured.');
   }
 
@@ -904,8 +905,8 @@ export class Platform {
       this.audit(a, 'admin.device_register', input.id, 'denied', over);
       fail(402, 'license', over);
     }
-    const siteId = input.siteId ?? this.defaultSite(a);
-    if (!this.inScope(a, a.orgId, siteId)) fail(404, 'not_found', 'Site not found.');
+    // A site of this organisation that the actor may see: an unknown id is refused, not stored.
+    const siteId = this.site(a, input.siteId || undefined).id;
     // A registered device is real hardware under test. Only an administrator later marks it verified
     // (PATCH /devices/{id}/integration); a gateway never sets it (capability matrix §8). Simulated
     // devices come from the demo/sandbox seed only, so a pilot site cannot bypass the mode gate.
@@ -3561,6 +3562,109 @@ export class Platform {
     return info;
   }
 
+  /**
+   * Administrator: a new site, placed on Earth by its anchor (the north-west corner of its grid).
+   * Real sites start without the demo's buildings and plan; their zones say where vehicles work.
+   */
+  createSite(a: Actor, input: { name?: unknown } & Partial<GeoAnchor>) {
+    this.require(a, 'site.manage', 'site');
+    if (a.siteIds.length) fail(403, 'forbidden', 'Adding a site needs an administrator for every site.');
+    const name = String(input.name ?? '').trim();
+    if (!name || name.length > 80) fail(400, 'invalid', 'A site name of up to 80 characters is required.');
+    const over = this.license.check('sites', this.licenseUsage(a.orgId).sites, this.now());
+    if (over) {
+      this.audit(a, 'site.create', name, 'denied', over);
+      fail(402, 'license', over);
+    }
+    const lat = Number(input.originLat);
+    const lon = Number(input.originLon);
+    const rot = input.rotationDeg === undefined || input.rotationDeg === null ? 0 : Number(input.rotationDeg);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180 || !Number.isFinite(rot))
+      fail(400, 'invalid', 'Give the site anchor as originLat and originLon in degrees (rotationDeg optional).');
+    const geo: GeoAnchor = { originLat: Math.round(lat * 1e7) / 1e7, originLon: Math.round(lon * 1e7) / 1e7, rotationDeg: Math.round(rot * 100) / 100 };
+    // Same shape as the demo geometry (width and height bound GIS imports), without its drawn plan.
+    const geometry = Object.fromEntries(Object.entries({ ...SITE_GEOMETRY, name, geo }).map(([k, v]) => [k, Array.isArray(v) ? [] : v])) as unknown as SiteGeometry;
+    const id = `${this.prefix(a.orgId)}site-${String(nextNumber(this.db, a.orgId, 'site', 2)).padStart(3, '0')}`;
+    this.db.prepare('INSERT INTO sites (id, org_id, name, crs, geometry) VALUES (?,?,?,?,?)').run(id, a.orgId, name, SITE.crs, JSON.stringify(geometry));
+    this.audit(a, 'site.create', id, 'ok', `${name} at ${geo.originLat}, ${geo.originLon}`);
+    return { id, name, geometry };
+  }
+
+  /** Administrator: rename a site. */
+  renameSite(a: Actor, siteId: string | undefined, input: { name?: unknown }) {
+    this.require(a, 'site.manage', siteId ?? 'site');
+    const site = this.site(a, siteId);
+    const name = String(input.name ?? '').trim();
+    if (!name || name.length > 80) fail(400, 'invalid', 'A site name of up to 80 characters is required.');
+    const geometry = { ...site.geometry, name };
+    this.db.prepare('UPDATE sites SET name = ?, geometry = ? WHERE id = ?').run(name, JSON.stringify(geometry), site.id);
+    this.audit(a, 'site.rename', site.id, 'ok', `${site.name} → ${name}`);
+    const info: SiteInfo = { id: site.id, name, geometry };
+    this.publish({ orgId: a.orgId, siteId: site.id, event: { type: 'site', site: info } });
+    return info;
+  }
+
+  /** Administrator: remove an empty site (no devices, incidents, missions, patrols or detections). Its zones, edge origins and pairing codes go with it. */
+  deleteSite(a: Actor, siteId: string) {
+    this.require(a, 'site.manage', siteId);
+    const site = this.site(a, siteId);
+    if (a.siteIds.length) fail(403, 'forbidden', 'Removing a site needs an administrator for every site.');
+    if (this.listSites(a).length <= 1) fail(409, 'conflict', 'This is the only site. Create another one first.');
+    const count = (table: string) => (this.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE site_id = ?`).get(site.id) as { n: number }).n;
+    const busy = ['devices', 'incidents', 'missions', 'patrols', 'detections'].map((t) => [t, count(t)] as const).filter(([, n]) => n > 0);
+    if (busy.length) fail(409, 'conflict', `${site.name} still has ${busy.map(([t, n]) => `${n} ${t}`).join(', ')}. Move or remove them first.`);
+    // Users and keys limited to this site: without it their list would be empty, which means every site.
+    const scoped = (sql: string) =>
+      (this.db.prepare(sql).all(a.orgId) as { id: string; name: string; site_ids: string }[])
+        .map((r) => ({ ...r, ids: JSON.parse(r.site_ids) as string[] }))
+        .filter((r) => r.ids.includes(site.id));
+    const users = scoped('SELECT id, username AS name, site_ids FROM users WHERE org_id = ?');
+    const keys = scoped('SELECT id, label AS name, site_ids FROM api_keys WHERE org_id = ? AND revoked = 0');
+    const only = [...users, ...keys].filter((r) => r.ids.length === 1).map((r) => r.name);
+    if (only.length) fail(409, 'conflict', `${only.join(', ')} can only see ${site.name}. Give them another site (or revoke the key) first.`);
+    tx(this.db, () => {
+      for (const u of users) this.db.prepare('UPDATE users SET site_ids = ? WHERE id = ?').run(JSON.stringify(u.ids.filter((x) => x !== site.id)), u.id);
+      for (const k of keys) this.db.prepare('UPDATE api_keys SET site_ids = ? WHERE id = ?').run(JSON.stringify(k.ids.filter((x) => x !== site.id)), k.id);
+      for (const t of ['geofences', 'edge_origins', 'pairing_codes']) this.db.prepare(`DELETE FROM ${t} WHERE site_id = ?`).run(site.id);
+      this.db.prepare('DELETE FROM sites WHERE id = ?').run(site.id);
+      this.fenceCache.delete(site.id);
+      this.audit(a, 'site.delete', site.id, 'ok', site.name);
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Administrator: move a device to another site. Only while it is offline: its gateway converts
+   * positions with its own site's anchor and its key is scoped to that site, so the gateway is paired
+   * again at the new site. The device arrives in SHADOW mode with no one holding control.
+   */
+  moveDevice(a: Actor, deviceId: string, input: { siteId?: unknown }) {
+    this.require(a, 'admin.devices', deviceId);
+    const d = this.getDevice(a, deviceId);
+    const to = this.site(a, String(input.siteId ?? ''));
+    if (to.id === d.siteId) return this.publicDevice(d);
+    if (d.lastSeen && freshnessAt(this.now(), d) !== 'offline')
+      fail(409, 'conflict', `${d.id} is online. Switch its gateway off (close the edge app), move it, then pair the gateway again at ${to.name}.`);
+    if (this.activeMission(d.id)) fail(409, 'conflict', `${d.id} is on a mission. Finish or cancel it first.`);
+    if (this.driving.has(d.id)) fail(409, 'conflict', `${d.id} is being driven from the console.`);
+    const patrols = this.listPatrols(a).filter((p) => p.deviceId === d.id).map((p) => p.id);
+    if (patrols.length) fail(409, 'conflict', `${d.id} runs patrol ${patrols.join(', ')} at its current site. Delete or change the patrol first.`);
+    const from = d.siteId;
+    tx(this.db, () => {
+      this.db.prepare('UPDATE devices SET site_id = ?, gateway_id = NULL WHERE id = ?').run(to.id, d.id);
+      d.siteId = to.id;
+      d.controlOwner = undefined;
+      this.insideFences.delete(d.id);
+      this.outsideArea.delete(d.id);
+      this.saveDevice(d, false);
+      this.audit(a, 'admin.device_move', d.id, 'ok', `${from} → ${to.id} (${to.name})`);
+    });
+    if (modeOf(d) === 'LIVE_MANUAL' || modeOf(d) === 'LIVE_ASSISTED') this.demoteBySystem(d.id, `moved to site ${to.name}`);
+    // Consoles on either site reload: the device leaves one map and joins the other.
+    for (const siteId of [from, to.id]) this.publish({ orgId: a.orgId, siteId, event: { type: 'resync' } });
+    return this.publicDevice(d);
+  }
+
   /** The site as a WGS 84 FeatureCollection. A download is audited like an export. */
   siteGeoJson(a: Actor, siteId: string | undefined, layers?: string[], download = false) {
     const site = this.site(a, siteId);
@@ -3628,9 +3732,18 @@ export class Platform {
     return { id: r.id, name: r.name, geometry };
   }
 
+  /** Sites the actor may see, with the devices on each, and whether it is a demo site (drawn plan). */
   listSites(a: Actor) {
-    const rows = this.db.prepare('SELECT id, org_id, name FROM sites WHERE org_id = ?').all(a.orgId) as { id: string; org_id: string; name: string }[];
-    return rows.filter((r) => this.inScope(a, r.org_id, r.id)).map((r) => ({ id: r.id, name: r.name }));
+    const rows = this.db.prepare('SELECT id, org_id, name, geometry FROM sites WHERE org_id = ? ORDER BY rowid').all(a.orgId) as { id: string; org_id: string; name: string; geometry: string }[];
+    const devs = [...this.devices.values()].filter((d) => d.orgId === a.orgId);
+    return rows
+      .filter((r) => this.inScope(a, r.org_id, r.id))
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        demo: ((JSON.parse(r.geometry) as Partial<SiteGeometry>).buildings?.length ?? 0) > 0,
+        devices: devs.filter((d) => d.siteId === r.id).map((d) => d.id),
+      }));
   }
 
   orgUsers(a: Actor): User[] {

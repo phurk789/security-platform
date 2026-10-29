@@ -44,6 +44,7 @@ import { roleLabel, useT } from '../i18n';
 import { StepUpDialog } from '../components/StepUp';
 import { NotificationChannels } from '../components/NotificationChannels';
 import { EdgePairingCard } from '../components/EdgePairingCard';
+import { SiteAccess, SitesCard } from '../components/SitesCard';
 import { finishedDraft, routeDraft, useRouteDraft } from '../domain/routeDraft';
 
 interface ZoneForm {
@@ -152,6 +153,10 @@ function Admin() {
   const geofences = useStore().s.geofences;
   const geo = useStore().s.geo;
   const devices = useStore().s.devices;
+  const sites = useStore().s.sites ?? [];
+  const site = useStore().s.site;
+  // Site-scoped calls go to the site on screen ('default' before the site list has loaded).
+  const siteKey = encodeURIComponent(site?.id ?? 'default');
   const [reloads, setReloads] = useState(0);
   const [ga, setGa] = useState<{ lat: string; lon: string; rot: string } | null>(null);
   const gaForm = ga ?? { lat: String(geo.originLat), lon: String(geo.originLon), rot: String(geo.rotationDeg ?? 0) };
@@ -175,9 +180,10 @@ function Admin() {
   const [msg, setMsg] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [stepUp, setStepUp] = useState<null | (() => void)>(null);
-  const [nu, setNu] = useState({ username: '', name: '', role: 'dispatcher' as Role, password: '' });
+  const [nu, setNu] = useState({ username: '', name: '', role: 'dispatcher' as Role, password: '', siteIds: [] as string[] });
   const [nk, setNk] = useState({ label: '', kind: 'integration' as 'integration' | 'gateway' });
-  const [nd, setNd] = useState({ id: '', kind: 'ugv' as 'ugv' | 'uav' | 'cctv', model: '' });
+  const [nd, setNd] = useState({ id: '', kind: 'ugv' as 'ugv' | 'uav' | 'cctv', model: '', siteId: '' });
+  const ndSite = sites.some((x) => x.id === nd.siteId) ? nd.siteId : site?.id;
   const [origins, setOrigins] = useState<EdgeOrigin[]>([]);
   const [no, setNo] = useState('');
   const orgOrigins = origins.filter((o) => !o.siteId).map((o) => o.origin);
@@ -247,7 +253,8 @@ function Admin() {
       </div>
       {msg && (
         <p className={`banner ${msg.tone === 'ok' ? 'info' : 'warn'}`} style={{ margin: '0 0 12px' }}>
-          {msg.text}
+          {/* Server messages arrive in English; messages made here are already translated (t leaves them as they are). */}
+          {t(msg.text)}
         </p>
       )}
 
@@ -263,6 +270,7 @@ function Admin() {
                   <th>{t('Name')}</th>
                   <th>{t('Username')}</th>
                   <th>{t('Role')}</th>
+                  {sites.length > 1 && <th>{t('Sites')}</th>}
                   <th>{t('Status')}</th>
                   <th />
                 </tr>
@@ -291,6 +299,16 @@ function Admin() {
                         ))}
                       </select>
                     </td>
+                    {sites.length > 1 && (
+                      <td>
+                        <SiteAccess
+                          id={`sites-${u.id}`}
+                          value={u.siteIds ?? []}
+                          sites={sites}
+                          onChange={(ids) => act(() => api.patch(`/admin/users/${u.id}`, { siteIds: ids }), t('Site access changed for {name}. Their sessions were ended.', { name: u.name }))}
+                        />
+                      </td>
+                    )}
                     <td>{u.active ? <span className="badge badge-green">{t('Active')}</span> : <span className="badge badge-grey">{t('Disabled')}</span>}</td>
                     <td>
                       <button
@@ -315,7 +333,7 @@ function Admin() {
             onSubmit={(e) => {
               e.preventDefault();
               act(() => api.post('/admin/users', nu), t('User {name} created.', { name: nu.username })).then(() =>
-                setNu({ username: '', name: '', role: 'dispatcher', password: '' }),
+                setNu({ username: '', name: '', role: 'dispatcher', password: '', siteIds: [] }),
               );
             }}
           >
@@ -328,6 +346,16 @@ function Admin() {
                 </option>
               ))}
             </select>
+            {sites.length > 1 && (
+              <select id="nu-site" value={nu.siteIds[0] ?? ''} onChange={(e) => setNu({ ...nu, siteIds: e.target.value ? [e.target.value] : [] })} aria-label={t('Sites')}>
+                <option value="">{t('All sites')}</option>
+                {sites.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {t('Only {site}', { site: x.name })}
+                  </option>
+                ))}
+              </select>
+            )}
             <input id="nu-pw" type="password" placeholder={t('Temporary password (10+ chars)')} value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
             <button className="btn-primary" disabled={!nu.name || !nu.username || nu.password.length < 10}>
               <Plus size={16} /> {t('Add user')}
@@ -407,7 +435,9 @@ function Admin() {
           </form>
         </section>
 
-        <EdgePairingCard api={api} act={act} registered={Object.keys(devices)} reloadKey={reloads} />
+        <SitesCard act={act} limit={lic?.limits.sites} />
+
+        <EdgePairingCard api={api} act={act} registered={Object.keys(devices)} reloadKey={reloads} sites={sites} currentSiteId={site?.id} />
 
         <section className="card">
           <h3>
@@ -429,7 +459,13 @@ function Admin() {
             className="inline-form"
             onSubmit={(e) => {
               e.preventDefault();
-              act(() => api.post('/devices', nd), t('{id} registered.', { id: nd.id })).then(() => setNd({ id: '', kind: 'ugv', model: '' }));
+              const at = sites.find((x) => x.id === ndSite);
+              act(
+                () => api.post('/devices', { id: nd.id, kind: nd.kind, model: nd.model, siteId: ndSite }),
+                at && sites.length > 1 ? t('{id} registered at {site}.', { id: nd.id, site: at.name }) : t('{id} registered.', { id: nd.id }),
+              )
+                .then(() => session!.refreshSites())
+                .then(() => setNd({ id: '', kind: 'ugv', model: '', siteId: nd.siteId }));
             }}
           >
             <input id="nd-id" placeholder={t('Device ID, e.g. UGV-02')} value={nd.id} onChange={(e) => setNd({ ...nd, id: e.target.value.toUpperCase() })} />
@@ -439,6 +475,15 @@ function Admin() {
               <option value="cctv">CCTV</option>
             </select>
             <input id="nd-model" placeholder={t('Model')} value={nd.model} onChange={(e) => setNd({ ...nd, model: e.target.value })} />
+            {sites.length > 1 && (
+              <select id="nd-site" value={ndSite} onChange={(e) => setNd({ ...nd, siteId: e.target.value })} aria-label={t('Site')}>
+                {sites.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <button className="btn-primary" disabled={!nd.id}>
               <Plus size={16} /> {t('Register')}
             </button>
@@ -749,6 +794,7 @@ function Admin() {
         <section className="card">
           <h3>
             <Globe2 size={16} /> {t('Site & GIS')}
+            {site && sites.length > 1 && <span className="muted"> · {site.name}</span>}
           </h3>
           <p className="fine" style={{ marginTop: 0 }}>
             {t(
@@ -765,7 +811,7 @@ function Admin() {
               e.preventDefault();
               const body: GeoAnchor = { originLat: Number(gaForm.lat), originLon: Number(gaForm.lon), rotationDeg: Number(gaForm.rot || 0) };
               void act(async () => {
-                await api.patch('/sites/default/geo', body);
+                await api.patch(`/sites/${siteKey}/geo`, body);
                 setGa(null);
               }, t('Site anchor saved. Positions now map to the new coordinates.'));
             }}
@@ -808,8 +854,8 @@ function Admin() {
               className="btn-secondary small"
               onClick={() =>
                 act(async () => {
-                  const blob = await api.blob('/sites/default/geojson?download=1');
-                  saveBlob(blob, `site-${new Date().toISOString().slice(0, 10)}.geojson`);
+                  const blob = await api.blob(`/sites/${siteKey}/geojson?download=1`);
+                  saveBlob(blob, `${site?.id ?? 'site'}-${new Date().toISOString().slice(0, 10)}.geojson`);
                 }, t('GeoJSON exported (buildings, zones, entrances, hydrants, geofences, devices).'))
               }
             >
@@ -832,7 +878,7 @@ function Admin() {
                     } catch {
                       throw new Error(t('{name} is not valid JSON.', { name: f.name }));
                     }
-                    const r = await api.post<{ imported: number; errors: string[] }>('/geofences/import', fc);
+                    const r = await api.post<{ imported: number; errors: string[] }>(site ? `/geofences/import?siteId=${siteKey}` : '/geofences/import', fc);
                     setImp(r);
                     setMsg({
                       tone: r.imported ? 'ok' : 'warn',

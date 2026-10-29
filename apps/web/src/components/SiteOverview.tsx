@@ -3,7 +3,7 @@
 // device state distribution. Everything comes from the live app state — nothing is mocked.
 import { useMemo } from 'react';
 import { Activity, Building2, Cctv, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { BUILDINGS, SITE, siteVariant, type AppState, type Device } from '@13store/shared';
+import { BUILDINGS, SITE, polygonArea, siteVariant, type AppState, type Device } from '@13store/shared';
 import { freshness, isReady } from '../domain/policy';
 import { useT } from '../i18n';
 import { useStore } from '../store';
@@ -46,6 +46,11 @@ export function SiteOverview() {
   const link = avg(liveDevs.map((d) => d.signal).filter((n): n is number => n !== undefined));
   const accurate = liveDevs.length ? liveDevs.filter((d) => d.accuracyM <= 1).length / liveDevs.length : null;
   const battery = avg(vehicles.filter((d) => freshness(s, d) !== 'offline' && d.battery !== undefined).map((d) => d.battery!));
+  // The demo site has a drawn plan (buildings, occupancy); a real site is described by its zones.
+  const demo = !s.site || s.site.demo;
+  const areas = s.geofences.filter((g) => g.active && g.kind === 'operating_area');
+  const areaM2 = Math.round(areas.reduce((a, g) => a + polygonArea(g.poly), 0));
+  const zones = s.geofences.filter((g) => g.active && g.kind !== 'operating_area').length;
   const gfa = BUILDINGS.reduce((a, b) => a + b.bim.gfaM2, 0);
   const occ = BUILDINGS.reduce((a, b) => a + b.bim.occupancy, 0);
   const indoor = devs.filter((d) => d.indoor).length;
@@ -63,22 +68,37 @@ export function SiteOverview() {
         <dl className="so-rows">
           <div>
             <dt>{t('Site')}</dt>
-            <dd>
-              {t(SITE.name)} · {t(siteVariant === 'civic' ? 'Civic campus' : 'Industrial estate')}
-            </dd>
+            <dd>{demo ? `${s.site?.name ?? t(SITE.name)} · ${t(siteVariant === 'civic' ? 'Civic campus' : 'Industrial estate')}` : s.site!.name}</dd>
           </div>
-          <div>
-            <dt>{t('Buildings')}</dt>
-            <dd>
-              {BUILDINGS.length} · {gfa.toLocaleString()} m²
-            </dd>
-          </div>
-          <div>
-            <dt>{t('Occupancy')}</dt>
-            <dd>
-              {occ.toLocaleString()} {t('people')}
-            </dd>
-          </div>
+          {demo ? (
+            <>
+              <div>
+                <dt>{t('Buildings')}</dt>
+                <dd>
+                  {BUILDINGS.length} · {gfa.toLocaleString()} m²
+                </dd>
+              </div>
+              <div>
+                <dt>{t('Occupancy')}</dt>
+                <dd>
+                  {occ.toLocaleString()} {t('people')}
+                </dd>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <dt>{t('Operating area')}</dt>
+                <dd className={areas.length ? '' : 'warn'}>
+                  {areas.length ? `${areaM2.toLocaleString()} m² · ${(areaM2 / 1600).toFixed(1)} ${t('rai')}` : t('not drawn yet')}
+                </dd>
+              </div>
+              <div>
+                <dt>{t('Zones')}</dt>
+                <dd>{zones}</dd>
+              </div>
+            </>
+          )}
           <div>
             <dt>{t('Devices online')}</dt>
             <dd>

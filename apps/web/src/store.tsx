@@ -9,6 +9,10 @@ export interface Session {
   user: SessionUser;
   meta: Meta;
   logout(): void;
+  /** Show another site (one this user may see); the console reloads for it. */
+  switchSite(id: string): void;
+  /** Fetch the site list again (after a site was added, renamed or removed). */
+  refreshSites(): Promise<void>;
   /** Demo environment only: sign in as another seeded user (role switch at the booth). */
   switchUser?(username: string): Promise<void>;
   demoUsers: { username: string; name: string; role: string }[];
@@ -38,6 +42,8 @@ export interface Session {
   deletePatrol(id: string): Promise<unknown>;
   runPatrol(id: string): Promise<unknown>;
   recordService(deviceId: string, note: string): Promise<unknown>;
+  /** Administrator: move an offline device to another site (its gateway is paired again there). True when moved. */
+  moveDevice(deviceId: string, siteId: string): Promise<boolean>;
   /** Live driving: open a drive session (also takes control). False when refused (the reason is shown as a toast). */
   startDriving(deviceId: string): Promise<boolean>;
   /** End this console's drive session; the vehicle stops and the remote gets its sticks back. */

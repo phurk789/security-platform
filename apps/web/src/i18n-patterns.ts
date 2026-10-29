@@ -5,6 +5,7 @@
 type Rule = [RegExp, (m: string[], inner: (s: string) => string) => string];
 
 const VERB: Record<string, string> = { start: 'เริ่ม', resume: 'ทำต่อ', pause: 'พัก', stop: 'หยุด' };
+const NOUN: Record<string, string> = { sites: 'ไซต์', devices: 'อุปกรณ์', users: 'ผู้ใช้', incidents: 'เหตุ', missions: 'ภารกิจ', patrols: 'รอบลาดตระเวน', detections: 'การตรวจจับ' };
 const ZONE_KIND: Record<string, string> = { 'keep-out': 'ห้ามเข้า', caution: 'ระวัง', 'no-fly': 'ห้ามบิน', 'operating area': 'พื้นที่ปฏิบัติงาน' };
 
 const RULES: Rule[] = [
@@ -28,6 +29,21 @@ const RULES: Rule[] = [
   [/^(.+) is back inside the operating area\.$/, (m) => `${m[1]} กลับเข้าพื้นที่ปฏิบัติงานแล้ว`],
   [/^(.+?) entered (keep-out|caution|no-fly|operating area) zone "(.+?)"\.?(.*)$/, (m) => `${m[1]} เข้าโซน${ZONE_KIND[m[2]] ?? m[2]} "${m[3]}"${m[4] ? ` ${m[4].trim()}` : ''}`],
   [/^(.+?) left zone "(.+)"\.$/, (m) => `${m[1]} ออกจากโซน "${m[2]}" แล้ว`],
+  // Sites: moving devices, removing a site, licence limits.
+  [
+    /^(.+) is online\. Switch its gateway off \(close the edge app\), move it, then pair the gateway again at (.+)\.$/,
+    (m) => `${m[1]} ยังออนไลน์อยู่ ปิด gateway (ปิดแอป edge) ก่อนแล้วจึงย้าย จากนั้นจับคู่ gateway ใหม่ที่ ${m[2]}`,
+  ],
+  [/^(.+) is on a mission\. Finish or cancel it first\.$/, (m) => `${m[1]} กำลังทำภารกิจ ให้จบหรือยกเลิกก่อน`],
+  [/^(.+) is being driven from the console\.$/, (m) => `${m[1]} กำลังถูกขับจากคอนโซล`],
+  [/^(.+) runs patrol (.+) at its current site\. Delete or change the patrol first\.$/, (m) => `${m[1]} อยู่ในรอบลาดตระเวน ${m[2]} ของไซต์เดิม ลบหรือแก้รอบลาดตระเวนก่อน`],
+  [/^(.+) still has (.+)\. Move or remove them first\.$/, (m) => `${m[1]} ยังมี ${m[2].replace(/\b(devices|incidents|missions|patrols|detections)\b/g, (w) => NOUN[w] ?? w)} ย้ายหรือลบออกก่อน`],
+  [/^(.+) can only see (.+)\. Give them another site \(or revoke the key\) first\.$/, (m) => `${m[1]} เห็นได้เฉพาะ ${m[2]} ให้สิทธิ์ไซต์อื่นก่อน (หรือยกเลิกคีย์)`],
+  [/^Unknown site: (.+)\.$/, (m) => `ไม่พบไซต์ ${m[1]}`],
+  [
+    /^License limit reached: (\d+) (sites|devices|users)( \(evaluation\))?\. Contact 13STORE to extend it\.$/,
+    (m) => `ถึงขีดจำกัดของ License แล้ว: ${m[1]} ${NOUN[m[2]] ?? m[2]}${m[3] ? ' (รุ่นทดลอง)' : ''} ติดต่อ 13STORE เพื่อขยาย`,
+  ],
 ];
 
 /** Thai for a message with names or numbers in it, or undefined when no rule matches. */

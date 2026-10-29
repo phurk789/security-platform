@@ -150,6 +150,22 @@ export class Accounts {
 
   // ---- admin --------------------------------------------------------------
 
+  /**
+   * A site list for a user or key: sites of this organisation, and [] (every site) only from an
+   * administrator who has every site. A site-limited administrator grants only their own sites.
+   */
+  private siteList(a: Actor, ids: unknown): string[] | undefined {
+    if (ids === undefined || ids === null) return undefined;
+    if (!Array.isArray(ids) || ids.some((x) => typeof x !== 'string')) throw new ApiError(400, 'invalid', 'siteIds must be a list of site ids.');
+    const list = [...new Set(ids as string[])];
+    const known = new Set((this.db.prepare('SELECT id FROM sites WHERE org_id = ?').all(a.orgId) as { id: string }[]).map((r) => r.id));
+    const unknown = list.filter((x) => !known.has(x));
+    if (unknown.length) throw new ApiError(400, 'invalid', `Unknown site: ${unknown.join(', ')}.`);
+    if (a.siteIds.length && (list.length === 0 || list.some((x) => !a.siteIds.includes(x))))
+      throw new ApiError(403, 'forbidden', 'You can give access only to sites you manage yourself.');
+    return list;
+  }
+
   listUsers(a: Actor): UserAdminView[] {
     this.p.require(a, 'admin.users', 'users', { mutating: false });
     const rows = this.db.prepare('SELECT * FROM users WHERE org_id = ? ORDER BY name').all(a.orgId) as unknown as UserRow[];
@@ -161,6 +177,8 @@ export class Accounts {
     if (!/^[a-z0-9._-]{3,32}$/.test(input.username ?? '')) throw new ApiError(400, 'invalid', 'Username: 3–32 lowercase letters, digits, dot, dash or underscore.');
     if (!ROLES.includes(input.role)) throw new ApiError(400, 'invalid', 'Unknown role.');
     if ((input.password ?? '').length < 10) throw new ApiError(400, 'invalid', 'Password must be at least 10 characters.');
+    // A site-limited administrator's new users get that administrator's sites unless a list is given.
+    const siteIds = this.siteList(a, input.siteIds) ?? a.siteIds;
     if (this.db.prepare('SELECT 1 FROM users WHERE username = ?').get(input.username)) throw new ApiError(409, 'conflict', 'Username already taken.');
     const over = this.p.license.check('users', (this.db.prepare('SELECT COUNT(*) AS n FROM users WHERE org_id = ? AND active = 1').get(a.orgId) as { n: number }).n, this.p.now());
     if (over) {
@@ -180,7 +198,7 @@ export class Accounts {
         (input.title ?? '').slice(0, 80),
         input.role,
         hashPassword(input.password),
-        JSON.stringify(input.siteIds ?? []),
+        JSON.stringify(siteIds),
         this.p.now(),
       );
     this.p.audit(a, 'admin.user_create', input.username, 'ok', input.role);
@@ -194,18 +212,25 @@ export class Accounts {
     if (id === a.userId && (patch.active === false || (patch.role && patch.role !== 'admin'))) throw new ApiError(409, 'conflict', 'You cannot lock yourself out.');
     if (patch.role && !ROLES.includes(patch.role)) throw new ApiError(400, 'invalid', 'Unknown role.');
     if (patch.password !== undefined && patch.password.length < 10) throw new ApiError(400, 'invalid', 'Password must be at least 10 characters.');
+    const before = JSON.parse(u.site_ids) as string[];
+    const siteIds = this.siteList(a, patch.siteIds) ?? before;
+    const sitesChanged = siteIds.length !== before.length || siteIds.some((x) => !before.includes(x));
+    if (sitesChanged && id === a.userId) throw new ApiError(409, 'conflict', 'Another administrator changes your own site access.');
+    // A site-limited administrator manages only users within their own sites.
+    if (a.siteIds.length && (before.length === 0 || before.some((x) => !a.siteIds.includes(x)))) throw new ApiError(403, 'forbidden', 'This user has sites you do not manage.');
     this.db
       .prepare('UPDATE users SET role = ?, active = ?, site_ids = ?, title = ?, pw_hash = ? WHERE id = ?')
       .run(
         patch.role ?? u.role,
         patch.active === undefined ? u.active : patch.active ? 1 : 0,
-        JSON.stringify(patch.siteIds ?? JSON.parse(u.site_ids)),
+        JSON.stringify(siteIds),
         patch.title ?? u.title,
         patch.password ? hashPassword(patch.password) : u.pw_hash,
         id,
       );
-    if (patch.active === false || patch.password || patch.role) this.db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
-    this.p.audit(a, 'admin.user_update', u.username, 'ok', Object.keys(patch).join(','));
+    // Signed-in consoles hold the old access (their live feed was opened with it): sign them out.
+    if (patch.active === false || patch.password || patch.role || sitesChanged) this.db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+    this.p.audit(a, 'admin.user_update', u.username, 'ok', sitesChanged ? `${Object.keys(patch).join(',')}: ${siteIds.length ? siteIds.join(' ') : 'all sites'}` : Object.keys(patch).join(','));
     return this.listUsers(a).find((x) => x.id === id)!;
   }
 
@@ -227,11 +252,12 @@ export class Accounts {
   createKey(a: Actor, input: { label: string; kind: 'integration' | 'gateway'; siteIds?: string[] }, env: ApiKeyView['env']) {
     this.p.require(a, 'admin.keys', input.label);
     if (!['integration', 'gateway'].includes(input.kind)) throw new ApiError(400, 'invalid', 'Kind must be integration or gateway.');
+    const siteIds = this.siteList(a, input.siteIds) ?? a.siteIds;
     const secret = randomToken(input.kind === 'gateway' ? `gw_${env}_` : `sk_${env}_`);
     const id = `key-${randomToken('', 6)}`;
     this.db
       .prepare('INSERT INTO api_keys (id, org_id, label, kind, env, prefix, key_hash, site_ids, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(id, a.orgId, (input.label || 'key').slice(0, 60), input.kind, env, secret.slice(0, 12), sha256(secret), JSON.stringify(input.siteIds ?? []), this.p.now());
+      .run(id, a.orgId, (input.label || 'key').slice(0, 60), input.kind, env, secret.slice(0, 12), sha256(secret), JSON.stringify(siteIds), this.p.now());
     this.p.audit(a, 'admin.key_create', id, 'ok', `${input.kind} ${env}`);
     return { id, secret };
   }

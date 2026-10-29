@@ -239,8 +239,11 @@ export function MissionsPage() {
 }
 
 export function DevicesPage() {
-  const { s, dispatch } = useStore();
+  const { s, dispatch, session } = useStore();
   const t = useT();
+  const sites = s.sites ?? [];
+  const multi = sites.length > 1;
+  const others = sites.filter((x) => x.id !== s.site?.id);
   return (
     <Page
       title={t('Devices & integrations')}
@@ -252,6 +255,7 @@ export function DevicesPage() {
             <tr>
               <th>{t('Device')}</th>
               <th>{t('Type')}</th>
+              {multi && <th>{t('Site')}</th>}
               <th>{t('Integration')}</th>
               <th>{t('Equipment')}</th>
               <th>{t('Link')}</th>
@@ -267,6 +271,13 @@ export function DevicesPage() {
             </tr>
           </thead>
           <tbody>
+            {Object.keys(s.devices).length === 0 && (
+              <tr>
+                <td colSpan={multi ? 15 : 14} className="muted">
+                  {t('No devices at this site yet. Register one under Administration, or move one here from another site.')}
+                </td>
+              </tr>
+            )}
             {Object.values(s.devices).map((d) => {
               const f = freshness(s, d);
               return (
@@ -284,6 +295,11 @@ export function DevicesPage() {
                     <small className="muted">{d.model}</small>
                   </td>
                   <td>{d.kind.toUpperCase()}</td>
+                  {multi && (
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <SiteCell d={d} />
+                    </td>
+                  )}
                   <td>
                     <IntegrationBadge i={d.integration} />
                   </td>
@@ -329,7 +345,59 @@ export function DevicesPage() {
           </tbody>
         </table>
       </div>
+      {multi && (
+        <section className="card other-sites">
+          <h3>{t('At other sites')}</h3>
+          <ul className="list">
+            {others.map((x) => (
+              <li key={x.id}>
+                <span>
+                  <b>{x.name}</b> <small className="muted mono">{x.devices?.length ? x.devices.join(', ') : t('No devices yet.')}</small>
+                </span>
+                <button className="btn-ghost small" onClick={() => session?.switchSite(x.id)}>
+                  {t('Open')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </Page>
+  );
+}
+
+/** The device's site; administrators move an offline device to another one from here. */
+function SiteCell({ d }: { d: Device }) {
+  const { s, session } = useStore();
+  const t = useT();
+  const me = currentUser(s);
+  const others = (s.sites ?? []).filter((x) => x.id !== s.site?.id);
+  const name = s.site?.name ?? '—';
+  if (!session || !others.length || !can(me.role, 'admin.devices')) return <>{name}</>;
+  const offline = freshness(s, d) === 'offline';
+  return (
+    <span className="site-cell">
+      {name}
+      <br />
+      <select
+        className="small"
+        value=""
+        disabled={!offline}
+        title={offline ? t('Move to another site') : t('Only an offline device moves: switch its gateway off first.')}
+        aria-label={t('Move {id} to', { id: d.id })}
+        onChange={(e) => {
+          const to = others.find((x) => x.id === e.target.value);
+          if (to && window.confirm(t('Move {id} to {site}? Pair its gateway again at {site} afterwards.', { id: d.id, site: to.name }))) void session.moveDevice(d.id, to.id);
+        }}
+      >
+        <option value="">{t('Move to…')}</option>
+        {others.map((x) => (
+          <option key={x.id} value={x.id}>
+            {x.name}
+          </option>
+        ))}
+      </select>
+    </span>
   );
 }
 

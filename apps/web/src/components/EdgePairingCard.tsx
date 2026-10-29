@@ -3,7 +3,7 @@
 // appears here: the server hands it straight to the app.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QrCode, Smartphone, X } from 'lucide-react';
-import { PAIRING_CODE_TTL_MIN, fmtTime, type PairingCodeView } from '@13store/shared';
+import { PAIRING_CODE_TTL_MIN, fmtTime, type PairingCodeView, type SiteRef } from '@13store/shared';
 import type { Api } from '../api';
 import { useT } from '../i18n';
 import { REMOTE_DEFAULTS, formatCode, loopbackOrigin, pairingQr, readDeviceList, remoteDevices, timeLeft, unregistered, type RemoteForm } from '../domain/pairing';
@@ -16,6 +16,8 @@ export function EdgePairingCard({
   act,
   registered,
   reloadKey,
+  sites = [],
+  currentSiteId,
 }: {
   api: Api;
   /** The Admin page's action runner: shows errors and asks for the password again when needed. */
@@ -24,6 +26,10 @@ export function EdgePairingCard({
   registered: string[];
   /** Changes when the Admin page reloads. */
   reloadKey: number;
+  /** The organisation's sites with their devices; the remote is paired for one of them. */
+  sites?: SiteRef[];
+  /** The site on screen: the default choice. */
+  currentSiteId?: string;
 }) {
   const t = useT();
   const [codes, setCodes] = useState<PairingCodeView[]>([]);
@@ -31,6 +37,8 @@ export function EdgePairingCard({
   const [advanced, setAdvanced] = useState(false);
   const [json, setJson] = useState('');
   const [shown, setShown] = useState<PairingCodeView | null>(null);
+  const [pick, setPick] = useState('');
+  const site = sites.find((x) => x.id === pick) ?? sites.find((x) => x.id === currentSiteId);
   const [now, setNow] = useState(Date.now());
   const server = window.location.origin;
 
@@ -53,13 +61,17 @@ export function EdgePairingCard({
   const status = live?.status ?? shown?.status;
 
   const parsed = advanced ? readDeviceList(json) : { devices: remoteDevices(form), ids: [form.vehicleId.trim().toUpperCase()] };
-  const missing = 'ids' in parsed ? unregistered(parsed.ids, registered) : [];
+  // The gateway's key is scoped to the site it pairs for: its devices must be registered there.
+  const here = site?.devices ?? registered;
+  const missing = 'ids' in parsed ? unregistered(parsed.ids, here) : [];
+  const elsewhere = missing.filter((id) => sites.some((x) => x.id !== site?.id && x.devices?.includes(id)));
+  const unknown = missing.filter((id) => !elsewhere.includes(id));
   const qr = useMemo(() => (shown?.code ? pairingQr(server, shown.code) : null), [shown, server]);
 
   const create = () =>
     act(async () => {
       if ('error' in parsed) throw new Error(t('Device list: {error}', { error: parsed.error }));
-      const c = await api.post<PairingCodeView>('/admin/pairing-codes', { label: form.label, gatewayId: form.gatewayId.trim(), devices: parsed.devices });
+      const c = await api.post<PairingCodeView>('/admin/pairing-codes', { label: form.label, gatewayId: form.gatewayId.trim(), devices: parsed.devices, siteId: site?.id });
       setShown(c);
       setNow(Date.now());
       await load();
@@ -121,6 +133,15 @@ export function EdgePairingCard({
         }}
       >
         <input id="pair-label" placeholder={t('Name, e.g. SIYI UniRC 7 Pro')} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} aria-label={t('Name')} />
+        {sites.length > 1 && (
+          <select id="pair-site" value={site?.id ?? ''} onChange={(e) => setPick(e.target.value)} aria-label={t('Site')} title={t('Site')}>
+            {sites.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+        )}
         <input id="pair-gw" placeholder="edge-unirc-01" value={form.gatewayId} onChange={(e) => setForm({ ...form, gatewayId: e.target.value })} aria-label={t('Gateway id')} />
         {!advanced && (
           <>
@@ -153,7 +174,10 @@ export function EdgePairingCard({
         </button>
       </form>
       {'error' in parsed && advanced && <p className="fine warn-text">{t('Device list: {error}', { error: parsed.error })}</p>}
-      {missing.length > 0 && <p className="fine warn-text">{t('Register {ids} under "Edge gateways and devices" first, or the server refuses them.', { ids: missing.join(', ') })}</p>}
+      {unknown.length > 0 && <p className="fine warn-text">{t('Register {ids} under "Edge gateways and devices" first, or the server refuses them.', { ids: unknown.join(', ') })}</p>}
+      {elsewhere.length > 0 && (
+        <p className="fine warn-text">{t('{ids} is registered at another site. Move it to {site} under Sites first, or the server refuses it.', { ids: elsewhere.join(', '), site: site?.name ?? '' })}</p>
+      )}
 
       {codes.length > 0 && (
         <ul className="list">

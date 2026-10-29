@@ -20,6 +20,7 @@ import {
   type Mission,
   type OperationalMode,
   type SessionUser,
+  type SiteRef,
   type Snapshot,
   type TelemetrySample,
 } from '@13store/shared';
@@ -59,7 +60,17 @@ function upsert<T extends { id: string }>(list: T[], item: T) {
   return copy;
 }
 
-function fromSnapshot(prev: AppState, snap: Snapshot, user: SessionUser, offset: number): AppState {
+/** The site this user last looked at (per browser), so a reload comes back to it. */
+const siteKey = (userId: string) => `ps.site.${userId}`;
+function storedSite(userId: string) {
+  try {
+    return localStorage.getItem(siteKey(userId)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function fromSnapshot(prev: AppState, snap: Snapshot, user: SessionUser, offset: number, sites?: SiteRef[]): AppState {
   // Keep the operator's selection while it still exists; never pick one for them.
   const selected = prev.selectedIncidentId && snap.incidents.some((i) => i.id === prev.selectedIncidentId) ? prev.selectedIncidentId : null;
   return {
@@ -76,6 +87,8 @@ function fromSnapshot(prev: AppState, snap: Snapshot, user: SessionUser, offset:
     assignments: snap.assignments,
     geofences: snap.geofences ?? [],
     geo: snap.site?.geometry?.geo ?? prev.geo,
+    site: snap.site ? { id: snap.site.id, name: snap.site.name, demo: (snap.site.geometry?.buildings?.length ?? 0) > 0 } : prev.site,
+    sites: sites ?? prev.sites,
     detections: prev.detections,
     patrols: snap.patrols ?? [],
     playbooks: snap.playbooks ?? prev.playbooks,
@@ -126,6 +139,10 @@ export function RemoteProvider({
     };
   });
   const offset = useRef(meta.serverTime - Date.now());
+  // The site on screen. Unset: the server's default site for this user.
+  const [siteId, setSiteId] = useState<string | undefined>(() => storedSite(initialUser.id));
+  const siteRef = useRef(siteId);
+  siteRef.current = siteId;
   const sRef = useRef(s);
   sRef.current = s;
   const [stepUp, setStepUp] = useState<null | { retry: () => void }>(null);
@@ -137,11 +154,14 @@ export function RemoteProvider({
 
   const reloadRef = useRef<() => Promise<void>>(async () => {});
   const reload = useCallback(async () => {
-    const snap = await api.get<Snapshot>('/snapshot');
+    const sites = await api.get<SiteRef[]>('/sites').catch(() => undefined);
+    // A remembered site that was removed, or that this user may no longer see, falls back to the default.
+    const want = siteRef.current && (!sites || sites.some((x) => x.id === siteRef.current)) ? siteRef.current : undefined;
+    const snap = await api.get<Snapshot>(want ? `/snapshot?siteId=${encodeURIComponent(want)}` : '/snapshot');
     offset.current = snap.serverTime - Date.now();
     let audit: AuditEvent[] = [];
     if (can(user.role, 'audit.view')) audit = (await api.get<AuditEvent[]>('/audit?limit=300')).reverse();
-    setS((p) => ({ ...fromSnapshot(p, snap, user, offset.current), audit }));
+    setS((p) => ({ ...fromSnapshot(p, snap, user, offset.current, sites), audit }));
   }, [api, user]);
   reloadRef.current = reload;
 
@@ -180,7 +200,12 @@ export function RemoteProvider({
           case 'patrol':
             return { ...p, patrols: m.deleted ? p.patrols.filter((x) => x.id !== m.patrol.id) : upsert<Patrol>(p.patrols, m.patrol) };
           case 'site':
-            return m.site.geometry?.geo ? { ...p, geo: m.site.geometry.geo } : p;
+            return {
+              ...p,
+              geo: m.site.geometry?.geo ?? p.geo,
+              site: p.site?.id === m.site.id ? { ...p.site, name: m.site.name } : p.site,
+              sites: p.sites?.map((x) => (x.id === m.site.id ? { ...x, name: m.site.name } : x)),
+            };
           case 'detection':
             return { ...p, detections: [m.detection, ...p.detections.filter((d) => d.id !== m.detection.id)].slice(0, 200) };
           case 'telemetry': {
@@ -235,7 +260,8 @@ export function RemoteProvider({
     const connect = () => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/api/v1/ws`);
-      ws.onopen = () => ws!.send(JSON.stringify({ type: 'auth', token: api.token }));
+      // The site on screen goes with the sign-in, so events of other sites stay off this map.
+      ws.onopen = () => ws!.send(JSON.stringify({ type: 'auth', token: api.token, siteId: siteRef.current }));
       ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data) as ConsoleMessage;
         if (m.type === 'hello') {
@@ -265,7 +291,7 @@ export function RemoteProvider({
       window.clearTimeout(timer);
       ws?.close();
     };
-  }, [api, onLogout, toast]);
+  }, [api, onLogout, toast, siteId]);
 
   const call = useCallback(
     async (fn: () => Promise<unknown>, retry: () => void, okText?: string) => {
@@ -445,8 +471,28 @@ export function RemoteProvider({
     [toast],
   );
 
+  const switchSite = useCallback(
+    (id: string) => {
+      try {
+        localStorage.setItem(siteKey(user.id), id);
+      } catch {
+        /* this page only */
+      }
+      // The live connection reconnects for the new site and reloads its snapshot.
+      setS((p) => ({ ...p, selectedDeviceId: null, selectedIncidentId: null, selectedBuildingId: null }));
+      setSiteId(id);
+    },
+    [user.id],
+  );
+  const refreshSites = useCallback(async () => {
+    const sites = await api.get<SiteRef[]>('/sites').catch(() => undefined);
+    if (sites) setS((p) => ({ ...p, sites, site: p.site && (sites.find((x) => x.id === p.site!.id) ?? p.site) }));
+  }, [api]);
+
   const session: Session = useMemo(
     () => ({
+      switchSite,
+      refreshSites,
       api,
       user,
       meta,
@@ -493,7 +539,11 @@ export function RemoteProvider({
       },
       saveGeofence: (g: Partial<Geofence>, id?: string) =>
         guarded(
-          () => (id ? api.patch<Geofence>(`/geofences/${encodeURIComponent(id)}`, g) : api.post<Geofence>('/geofences', g)),
+          // Zones belong to the site on screen (the server looks a zone up within its site).
+          () => {
+            const body = { siteId: sRef.current.site?.id, ...g };
+            return id ? api.patch<Geofence>(`/geofences/${encodeURIComponent(id)}`, body) : api.post<Geofence>('/geofences', body);
+          },
           () => void session.saveGeofence(g, id),
         ),
       deleteGeofence: (id: string) =>
@@ -532,6 +582,18 @@ export function RemoteProvider({
           },
           () => void session.recordService(deviceId, note),
         ),
+      moveDevice: (deviceId: string, siteId: string) =>
+        guarded(
+          async () => {
+            await api.patch(`/devices/${encodeURIComponent(deviceId)}/site`, { siteId });
+            const to = sRef.current.sites?.find((x) => x.id === siteId)?.name ?? siteId;
+            toast('ok', tr('{id} moved to {site}. Pair its gateway again there.', { id: deviceId, site: to }));
+            // The server also tells both sites to reload; this covers a console whose feed is reconnecting.
+            await reload();
+            return true;
+          },
+          () => void session.moveDevice(deviceId, siteId),
+        ).then((ok) => ok === true),
       startDriving: (deviceId: string) =>
         guarded(
           () => api.post<Device>(`/devices/${encodeURIComponent(deviceId)}/drive`, { action: 'start' }),
@@ -572,7 +634,7 @@ export function RemoteProvider({
         }
       },
     }),
-    [api, user, meta, onLogout, onSwitch, reload, toast, guarded],
+    [api, user, meta, onLogout, onSwitch, reload, toast, guarded, switchSite, refreshSites],
   );
 
   return (

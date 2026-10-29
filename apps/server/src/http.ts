@@ -229,6 +229,9 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.get('/api/v1/sites', async (req) => p.listSites(A(req)));
   const siteParam = (req: Req) => (req.params.id === 'default' ? undefined : req.params.id);
   app.get('/api/v1/sites/:id', async (req: Req) => p.site(A(req), siteParam(req)));
+  app.post('/api/v1/sites', async (req: Req) => p.createSite(A(req), body(req) as any));
+  app.patch('/api/v1/sites/:id', async (req: Req) => p.renameSite(A(req), siteParam(req), body(req) as any));
+  app.delete('/api/v1/sites/:id', async (req: Req) => p.deleteSite(A(req), req.params.id));
   app.get('/api/v1/snapshot', async (req: Req) => p.snapshot(A(req), req.query.siteId));
   app.get('/api/v1/users', async (req) => p.orgUsers(A(req)));
 
@@ -362,6 +365,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   });
   app.post('/api/v1/devices', async (req: Req) => p.registerDevice(A(req), body(req) as any));
   app.post('/api/v1/devices/:id/handover', async (req: Req) => p.handover(A(req), req.params.id, String(body(req).toUserId ?? '')));
+  app.patch('/api/v1/devices/:id/site', async (req: Req) => p.moveDevice(A(req), req.params.id, body(req) as any));
   // Operational mode (ADR-006): promote needs a supervisor and step-up; demote a supervisor or admin.
   app.post('/api/v1/devices/:id/mode-transitions', async (req: Req) => p.transitionMode(A(req), req.params.id, body(req)));
   app.patch('/api/v1/devices/:id/integration', async (req: Req) => p.setDeviceIntegration(A(req), req.params.id, body(req)));
@@ -612,9 +616,13 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     }
     let actor: Actor | null = null;
     let token = '';
+    /** The site this console shows (sent with the sign-in message); other sites stay off its map. */
+    let viewSite: string | undefined;
     const timer = setTimeout(() => !actor && socket.close(4401, 'auth timeout'), 5000);
     const onEvent = (m: BusMessage) => {
-      if (actor && p.visible(actor, m) && socket.readyState === socket.OPEN) socket.send(JSON.stringify(m.event satisfies ConsoleMessage));
+      if (!actor || !p.visible(actor, m) || socket.readyState !== socket.OPEN) return;
+      if (viewSite && m.siteId && m.siteId !== viewSite) return;
+      socket.send(JSON.stringify(m.event satisfies ConsoleMessage));
     };
     const recheck = setInterval(() => {
       if (actor && !accounts.authenticate(token)) socket.close(4401, 'session ended');
@@ -631,11 +639,12 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
         return;
       }
       try {
-        const msg = JSON.parse(String(raw)) as { type: string; token?: string };
+        const msg = JSON.parse(String(raw)) as { type: string; token?: string; siteId?: string };
         const auth = msg.type === 'auth' ? accounts.authenticate(msg.token) : null;
         if (!auth?.user) return socket.close(4401, 'invalid session');
         token = msg.token!;
         actor = auth.actor;
+        viewSite = typeof msg.siteId === 'string' && msg.siteId ? msg.siteId : undefined;
         wsClients++;
         clearTimeout(timer);
         p.bus.on('event', onEvent);
