@@ -108,7 +108,10 @@ export function buildOverlayData(i: OverlayInput): OverlayData {
   const on = (k: keyof Layers) => L[k] !== false;
   const out: OverlayData = { boundary: empty(), geofences: empty(), plan: empty(), trails: empty(), routes: empty(), checkpoints: empty(), accuracy: empty(), incidents: empty(), devices: empty() };
 
-  out.boundary = fc([feature({ type: 'Polygon', coordinates: [ring(a, rect(0, 0, SITE.width, SITE.height))] }, { name: SITE.name })]);
+  // The demo site grid (dashed). A real site that has its own operating area is bounded by that
+  // area (drawn with the zones), so the demo rectangle would only mislead there.
+  const ownArea = i.geofences.some((g) => g.active && g.kind === 'operating_area');
+  if (!ownArea) out.boundary = fc([feature({ type: 'Polygon', coordinates: [ring(a, rect(0, 0, SITE.width, SITE.height))] }, { name: SITE.name })]);
 
   if (on('geofences'))
     out.geofences = fc(
