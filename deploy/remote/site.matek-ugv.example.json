@@ -17,6 +17,7 @@
       "allowRemoteArm": false,
       "missionFence": true,
       "teleop": true,
+      "gcsRelay": true,
       "stream": {
         "rtsp": "rtsp://192.168.144.25:8554/main.264",
         "push": true

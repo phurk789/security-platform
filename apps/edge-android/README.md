@@ -30,6 +30,36 @@ MainActivity ── Pair ──► POST /api/v1/edge/pair (6-digit code) ──�
   while its heartbeat is fresh), video push state. The screen and the notification show it.
 - Start on boot exists but is off by default: the gateway and UniGCS must not use the datalink together.
 
+## UniGCS alongside the gateway (from 0.3.0, E-5)
+
+The UniRC datalink serves one client well. The gateway is that client and relays a ground station on the same
+remote: `gcsRelay` (apps/gateway/src/real/gcsRelay.ts) listens on 127.0.0.1:19857; UniGCS is set to UDPCL
+127.0.0.1 port 19857 once. Frames pass both ways unchanged; while the console drives, UniGCS's RC_CHANNELS_OVERRIDE
+/ MANUAL_CONTROL are held back (a mode change or disarm always passes). The gateway then speaks as 255/191, so replies
+for UniGCS (255/190) are not taken for its own; SYSID_MYGCS stays 255. The app turns `gcsRelay` on for the first
+MAVLink vehicle when it writes site.json (`Pairing.gatewayDevices()`), so remotes paired earlier get it too; a
+pairing can say `"gcsRelay": false`. The status file carries `relay {listen, connected}` and the screen shows it under
+Vehicle.
+
+## In-app updates (from 0.2.0)
+
+```
+build-apk.sh ─► dist/13store-edge-<v>.apk + .json {packageName, versionCode, versionName, sha256, size}
+Admin → "Edge app updates" ─ PUT /api/v1/admin/edge-app?versionCode&versionName&sha256&packageName (raw APK body)
+     server checks SHA-256 against the manifest, newer versionCode, zip magic; stores DATA_DIR/edge-app/ (the volume)
+App (gateway key) ─ GET /api/v1/edge/app/latest ─► newer? ─► "Update to <v>"
+     ─ stop gateway (remembered) ─ GET /api/v1/edge/app/download (audited) ─ size + SHA-256 ─ package, versionCode,
+       signing certificate equal to the installed app ─ PackageInstaller session ─ person confirms on Android's screen
+UpdatedReceiver (MY_PACKAGE_REPLACED, new version) ─ notification, gateway started again if it was running
+```
+
+- The server never parses the binary AndroidManifest: the build manifest says the version, the hash ties it to the APK.
+- First time only, Android asks to allow "Install unknown apps" for 13STORE Edge (`REQUEST_INSTALL_PACKAGES`).
+- Raise `versionCode` in `app/build.gradle.kts` for every build given to remotes, and sign with the same key
+  (`~/.13store`). A build signed with another key is refused by the app before install, with an explanation.
+- 0.1.0 has no updater: 0.2.0 must be installed by hand once.
+- `tools/bench/bench.sh update <newer.apk>` publishes a build and drives the app through the whole update.
+
 ## ffmpeg licence
 
 `tools/build-natives.sh` builds ffmpeg 8.1.3 from the official tarball (signature checked against the FFmpeg

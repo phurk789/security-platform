@@ -1,339 +1,498 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Dark dashboard. On a wide screen (the UniRC 7 Pro in landscape) `columns` is turned horizontal
+     in MainActivity: state and Start/Stop on the left, server / vehicle / video and the log on the
+     right. On a narrow screen the two columns stack. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg"
-    android:fillViewport="true">
+    android:orientation="vertical">
 
+    <!-- Top bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
+        android:background="@color/bar"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="20dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="10dp">
 
-        <!-- Header -->
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/title"
-                    style="@style/Edge.Title"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/app_name" />
-
-                <TextView
-                    android:id="@+id/subtitle"
-                    style="@style/Edge.Muted"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-
-            <Button
-                android:id="@+id/langButton"
-                style="@style/Edge.SmallButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/switch_language" />
-        </LinearLayout>
-
-        <!-- Not paired: pair with a code from Admin → Pair an edge remote -->
-        <LinearLayout
-            android:id="@+id/pairSection"
-            style="@style/Edge.Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:orientation="vertical">
 
             <TextView
-                style="@style/Edge.Heading"
+                android:id="@+id/title"
+                style="@style/Edge.Title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/pair_title" />
+                android:text="@string/app_name" />
 
             <TextView
-                style="@style/Edge.Body"
-                android:layout_width="match_parent"
+                android:id="@+id/subtitle"
+                style="@style/Edge.Muted"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/pair_help" />
+                android:ellipsize="end"
+                android:maxLines="1" />
+        </LinearLayout>
 
-            <EditText
-                android:id="@+id/serverInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:hint="@string/server_hint"
-                android:importantForAutofill="no"
-                android:inputType="textUri"
-                android:textSize="20sp" />
+        <Button
+            android:id="@+id/langButton"
+            style="@style/Edge.SmallButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/switch_language" />
 
-            <EditText
-                android:id="@+id/codeInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="@string/code_hint"
-                android:importantForAutofill="no"
-                android:inputType="number"
-                android:letterSpacing="0.2"
-                android:maxLength="7"
-                android:textSize="32sp" />
+        <Button
+            android:id="@+id/settingsButton"
+            style="@style/Edge.SmallButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:contentDescription="@string/settings"
+            android:text="@string/settings_button" />
+    </LinearLayout>
 
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingBottom="20dp">
+
+            <!-- A newer version on the paired server, or an update in progress -->
             <LinearLayout
+                android:id="@+id/updateBanner"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:orientation="horizontal">
+                android:layout_marginTop="14dp"
+                android:background="@drawable/banner"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="16dp"
+                android:visibility="gone">
 
-                <Button
-                    android:id="@+id/pairButton"
-                    style="@style/Edge.BigButton"
+                <TextView
+                    android:id="@+id/updateBannerText"
+                    style="@style/Edge.Body"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:backgroundTint="@color/primary"
-                    android:text="@string/pair_button" />
+                    android:textStyle="bold" />
 
                 <Button
-                    android:id="@+id/scanButton"
-                    style="@style/Edge.BigButton"
-                    android:layout_width="0dp"
+                    android:id="@+id/updateBannerButton"
+                    style="@style/Edge.SmallButton"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
-                    android:layout_weight="1"
-                    android:backgroundTint="@color/idle"
-                    android:text="@string/scan_button" />
+                    android:backgroundTint="@color/primary" />
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/pairMessage"
-                style="@style/Edge.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp" />
-        </LinearLayout>
-
-        <!-- Paired: start / stop and what the gateway is doing -->
-        <LinearLayout
-            android:id="@+id/runSection"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
+            <!-- Not paired: pair with a code from Admin → Pair an edge remote -->
             <LinearLayout
+                android:id="@+id/pairSection"
                 style="@style/Edge.Card"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
                 <TextView
-                    android:id="@+id/phaseText"
                     style="@style/Edge.Heading"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    android:text="@string/pair_title" />
 
                 <TextView
-                    android:id="@+id/problemText"
-                    style="@style/Edge.Body"
+                    style="@style/Edge.Muted"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textColor="@color/bad" />
+                    android:layout_marginTop="6dp"
+                    android:text="@string/pair_help"
+                    android:textSize="16sp" />
+
+                <EditText
+                    android:id="@+id/serverInput"
+                    style="@style/Edge.Input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="@string/server_hint"
+                    android:importantForAutofill="no"
+                    android:inputType="textUri"
+                    android:textSize="20sp" />
+
+                <EditText
+                    android:id="@+id/codeInput"
+                    style="@style/Edge.Input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/code_hint"
+                    android:importantForAutofill="no"
+                    android:inputType="number"
+                    android:letterSpacing="0.2"
+                    android:maxLength="7"
+                    android:textSize="32sp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="10dp"
                     android:orientation="horizontal">
 
                     <Button
-                        android:id="@+id/startButton"
+                        android:id="@+id/pairButton"
                         style="@style/Edge.BigButton"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:backgroundTint="@color/ok"
-                        android:text="@string/start" />
+                        android:backgroundTint="@color/primary"
+                        android:text="@string/pair_button" />
 
                     <Button
-                        android:id="@+id/stopButton"
+                        android:id="@+id/scanButton"
                         style="@style/Edge.BigButton"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="12dp"
                         android:layout_weight="1"
-                        android:backgroundTint="@color/bad"
-                        android:text="@string/stop" />
+                        android:backgroundTint="@color/secondary_button"
+                        android:text="@string/scan_button" />
                 </LinearLayout>
 
                 <TextView
+                    android:id="@+id/pairMessage"
                     style="@style/Edge.Body"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" />
+            </LinearLayout>
+
+            <!-- Paired: two columns on a wide screen -->
+            <LinearLayout
+                android:id="@+id/runSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:baselineAligned="false"
+                android:orientation="vertical">
+
+                <!-- Left: the gateway's state and the one big button -->
+                <LinearLayout
+                    android:id="@+id/leftCol"
+                    style="@style/Edge.Card"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="22dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <View
+                            android:id="@+id/phaseDot"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:layout_marginEnd="14dp"
+                            android:background="@drawable/dot" />
+
+                        <TextView
+                            android:id="@+id/phaseText"
+                            style="@style/Edge.Hero"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/uptimeText"
+                        style="@style/Edge.Muted"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="32dp"
+                        android:layout_marginTop="2dp"
+                        android:fontFeatureSettings="tnum"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/problemText"
+                        style="@style/Edge.Body"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:textColor="@color/bad" />
+
+                    <Button
+                        android:id="@+id/mainButton"
+                        style="@style/Edge.BigButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="22dp" />
+
+                    <TextView
+                        android:id="@+id/datalinkWarning"
+                        style="@style/Edge.Body"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:text="@string/datalink_warning"
+                        android:textColor="@color/warn"
+                        android:textSize="15sp" />
+                </LinearLayout>
+
+                <!-- Right: what the gateway reaches, and its log -->
+                <LinearLayout
+                    android:id="@+id/rightCol"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        style="@style/Edge.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <TextView
+                            style="@style/Edge.Label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/section_server" />
+
+                        <TextView
+                            android:id="@+id/serverStatus"
+                            style="@style/Edge.Status"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp" />
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginTop="14dp"
+                            android:layout_marginBottom="14dp"
+                            android:background="@color/divider" />
+
+                        <TextView
+                            style="@style/Edge.Label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/section_vehicles" />
+
+                        <TextView
+                            android:id="@+id/devicesStatus"
+                            style="@style/Edge.Status"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp" />
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginTop="14dp"
+                            android:layout_marginBottom="14dp"
+                            android:background="@color/divider" />
+
+                        <TextView
+                            style="@style/Edge.Label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/section_video" />
+
+                        <TextView
+                            android:id="@+id/videoStatus"
+                            style="@style/Edge.Status"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        style="@style/Edge.Card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                style="@style/Edge.Label"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/section_log" />
+
+                            <Button
+                                android:id="@+id/logMore"
+                                style="@style/Edge.SmallButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/log_more" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/logView"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:background="@drawable/log_bg"
+                            android:fontFamily="monospace"
+                            android:padding="10dp"
+                            android:textColor="@color/muted"
+                            android:textIsSelectable="true"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Settings: behind the gear button in the top bar -->
+            <LinearLayout
+                android:id="@+id/settingsSection"
+                style="@style/Edge.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    style="@style/Edge.Heading"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings" />
+
+                <Switch
+                    android:id="@+id/bootSwitch"
+                    style="@style/Edge.Body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/boot_switch" />
+
+                <TextView
+                    style="@style/Edge.Muted"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/boot_help" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@color/divider" />
+
+                <TextView
+                    android:id="@+id/batteryText"
+                    style="@style/Edge.Body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <Button
+                    android:id="@+id/batteryButton"
+                    style="@style/Edge.SmallButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:text="@string/datalink_warning"
-                    android:textColor="@color/warn" />
-            </LinearLayout>
+                    android:text="@string/battery_button" />
 
-            <LinearLayout
-                style="@style/Edge.Card"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@color/divider" />
 
                 <TextView
                     style="@style/Edge.Label"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/section_server" />
+                    android:text="@string/update_title" />
 
                 <TextView
-                    android:id="@+id/serverStatus"
-                    style="@style/Edge.Status"
+                    android:id="@+id/updateText"
+                    style="@style/Edge.Body"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-
-                <TextView
-                    style="@style/Edge.Label"
-                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/section_vehicles" />
-
-                <TextView
-                    android:id="@+id/devicesStatus"
-                    style="@style/Edge.Status"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-
-                <TextView
-                    style="@style/Edge.Label"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/section_video" />
-
-                <TextView
-                    android:id="@+id/videoStatus"
-                    style="@style/Edge.Status"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-
-            <LinearLayout
-                style="@style/Edge.Card"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
+                    android:layout_marginTop="4dp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
+                    android:layout_marginTop="8dp"
                     android:orientation="horizontal">
 
-                    <TextView
-                        style="@style/Edge.Label"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/section_log" />
-
                     <Button
-                        android:id="@+id/logMore"
+                        android:id="@+id/checkUpdateButton"
                         style="@style/Edge.SmallButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/log_more" />
+                        android:text="@string/update_check" />
+
+                    <Button
+                        android:id="@+id/installUpdateButton"
+                        style="@style/Edge.SmallButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:backgroundTint="@color/primary"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@color/divider" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/unpairButton"
+                        style="@style/Edge.SmallButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/unpair"
+                        android:textColor="@color/bad" />
+
+                    <Button
+                        android:id="@+id/licensesButton"
+                        style="@style/Edge.SmallButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:text="@string/licenses" />
                 </LinearLayout>
 
                 <TextView
-                    android:id="@+id/logView"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:fontFamily="monospace"
-                    android:textColor="@color/text"
-                    android:textIsSelectable="true"
-                    android:textSize="12sp" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- Settings -->
-        <LinearLayout
-            style="@style/Edge.Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <TextView
-                style="@style/Edge.Label"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/settings" />
-
-            <Switch
-                android:id="@+id/bootSwitch"
-                style="@style/Edge.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="@string/boot_switch" />
-
-            <TextView
-                style="@style/Edge.Muted"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/boot_help" />
-
-            <TextView
-                android:id="@+id/batteryText"
-                style="@style/Edge.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp" />
-
-            <Button
-                android:id="@+id/batteryButton"
-                style="@style/Edge.SmallButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/battery_button" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:orientation="horizontal">
-
-                <Button
-                    android:id="@+id/unpairButton"
-                    style="@style/Edge.SmallButton"
+                    android:id="@+id/versionText"
+                    style="@style/Edge.Muted"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/unpair" />
-
-                <Button
-                    android:id="@+id/licensesButton"
-                    style="@style/Edge.SmallButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp"
-                    android:text="@string/licenses" />
+                    android:layout_marginTop="12dp" />
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/versionText"
-                style="@style/Edge.Muted"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp" />
         </LinearLayout>
-    </LinearLayout>
-</ScrollView>
+    </ScrollView>
+</LinearLayout>

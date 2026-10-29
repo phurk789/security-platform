@@ -608,6 +608,23 @@ export interface EdgePairResponse {
   devices: unknown[];
 }
 
+/** Package name of the edge Android app (apps/edge-android). */
+export const EDGE_APP_PACKAGE = 'com.store13.edge';
+
+/**
+ * An edge app build offered for in-app updates. apps/edge-android/tools/build-apk.sh writes these fields next to the
+ * APK (<apk>.json); the administrator publishes both, and the server checks the file's SHA-256 against it.
+ */
+export interface EdgeAppRelease {
+  packageName: string;
+  versionCode: number;
+  versionName: string;
+  sha256: string;
+  size: number;
+  publishedAt?: number;
+  publishedBy?: string;
+}
+
 /** QR text for a pairing code: the edge app reads the server address and the code from it. */
 export function pairingLink(serverOrigin: string, code: string) {
   return `psedge://pair?server=${encodeURIComponent(serverOrigin)}&code=${code}`;

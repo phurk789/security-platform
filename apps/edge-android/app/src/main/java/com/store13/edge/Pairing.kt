@@ -35,7 +35,19 @@ data class Pairing(
         get() = (0 until devices.length()).mapNotNull { devices.optJSONObject(it)?.optString("deviceId")?.takeIf(String::isNotEmpty) }
 
     /** site.json for the gateway. The key is not in it: it goes to the gateway in GATEWAY_KEY. */
-    fun siteJson(): String = JSONObject().put("gatewayId", gatewayId).put("serverUrl", serverWs).put("geo", geo).put("devices", devices).toString(2)
+    fun siteJson(): String = JSONObject().put("gatewayId", gatewayId).put("serverUrl", serverWs).put("geo", geo).put("devices", gatewayDevices()).toString(2)
+
+    /**
+     * The devices for the gateway, with UniGCS on this remote relayed through the app ("gcsRelay") on the first MAVLink
+     * vehicle, unless the pairing already decides (true, false or host/port on any vehicle). Remotes paired before the
+     * relay existed get it without a new code; it only listens on 127.0.0.1.
+     */
+    fun gatewayDevices(): JSONArray {
+        val out = JSONArray(devices.toString())
+        val list = (0 until out.length()).mapNotNull { out.optJSONObject(it) }
+        if (list.none { it.has("gcsRelay") }) list.firstOrNull { it.optString("type") == "mavlink" }?.put("gcsRelay", true)
+        return out
+    }
 
     fun toJson(): JSONObject =
         JSONObject().put("server", server).put("gatewayId", gatewayId).put("siteName", siteName).put("geo", geo).put("devices", devices).put("pairedAt", pairedAt)

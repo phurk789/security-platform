@@ -45,6 +45,7 @@ import { StepUpDialog } from '../components/StepUp';
 import { NotificationChannels } from '../components/NotificationChannels';
 import { EdgePairingCard } from '../components/EdgePairingCard';
 import { SiteAccess, SitesCard } from '../components/SitesCard';
+import { EdgeAppCard } from '../components/EdgeAppCard';
 import { finishedDraft, routeDraft, useRouteDraft } from '../domain/routeDraft';
 
 interface ZoneForm {
@@ -438,6 +439,8 @@ function Admin() {
         <SitesCard act={act} limit={lic?.limits.sites} />
 
         <EdgePairingCard api={api} act={act} registered={Object.keys(devices)} reloadKey={reloads} sites={sites} currentSiteId={site?.id} />
+
+        <EdgeAppCard api={api} act={act} reloadKey={reloads} />
 
         <section className="card">
           <h3>

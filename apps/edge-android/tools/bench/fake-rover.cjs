@@ -12,11 +12,19 @@ const proto = new MavLinkProtocolV2(1, 1);
 let seq = 0;
 let gcs = null;
 let heard = 0;
+/** "sysid/compid" of every MAVLink 2 sender seen, e.g. the gateway (255/191) and UniGCS through its relay (255/190). */
+const senders = new Set();
 const send = (m) => gcs && sock.send(proto.serialize(m, seq++ & 0xff), gcs.port, gcs.address);
-sock.on('message', (_m, r) => {
+sock.on('message', (m, r) => {
   if (!gcs || gcs.port !== r.port) console.log(`[rover] ground station at ${r.address}:${r.port}`);
   gcs = { port: r.port, address: r.address };
   heard++;
+  for (let i = 0; i + 10 <= m.length; ) {
+    if (m[i] !== 0xfd) { i++; continue; }
+    const who = `${m[i + 5]}/${m[i + 6]}`;
+    if (!senders.has(who)) { senders.add(who); console.log(`[rover] new sender ${who}`); }
+    i += 12 + m[i + 1] + (m[i + 2] & 1 ? 13 : 0);
+  }
 });
 setInterval(() => {
   const hb = new minimal.Heartbeat();

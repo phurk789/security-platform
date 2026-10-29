@@ -14,11 +14,14 @@ import { Metrics } from './metrics';
 import { OidcClient, OidcError } from './oidc';
 import { openapi } from './openapi';
 import { EdgePairing } from './pairing';
+import { EDGE_APP_MAX_BYTES, EdgeAppStore } from './edgeApp';
 import { ApiError, Platform, type Actor, type BusMessage } from './platform';
 import { PushService, initVapid, registerPushRoutes } from './push';
 import { DEMO_ORG, resetDemo } from './seed';
 import { initSecrets } from './secrets';
 import { RateLimiter, safeEqual } from './security';
+
+const APK_MIME = 'application/vnd.android.package-archive';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -55,6 +58,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   const p = new Platform(db, cfg);
   const accounts = new Accounts(db, p, cfg.sessionTtlMs);
   const pairing = new EdgePairing(db, p, accounts, (orgId) => (cfg.env === 'pilot' ? 'pilot' : orgEnv(db, orgId)));
+  const edgeApp = new EdgeAppStore(cfg.dataDir, p);
   const hub = new GatewayHub(p, accounts);
   p.gateways = hub;
   const metrics = new Metrics();
@@ -83,6 +87,8 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
 
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 12 * 1024 * 1024, trustProxy: cfg.trustProxy });
   await app.register(fastifyWebsocket, { options: { maxPayload: 1024 * 1024 } });
+  // Edge app updates are uploaded as the raw APK (Admin → Edge app updates).
+  app.addContentTypeParser(APK_MIME, { parseAs: 'buffer', bodyLimit: EDGE_APP_MAX_BYTES }, (_req, buf, done) => done(null, buf));
 
   app.setErrorHandler((err: Error & { statusCode?: number; validation?: unknown }, req, reply) => {
     if (err instanceof ApiError) return reply.status(err.status).send({ error: err.message, code: err.code });
@@ -135,7 +141,8 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     if (!path.startsWith('/api/v1/') || PUBLIC.has(path) || (path.startsWith('/api/v1/media/') && (path.endsWith('/frame.svg') || path.endsWith('/storyboard.svg')))) return;
     const auth = accounts.authenticate(bearer(req));
     if (!auth) throw new ApiError(401, 'unauthenticated', 'Sign in to continue.');
-    if (auth.actor.role === 'gateway') throw new ApiError(403, 'forbidden', 'Gateway keys can only open the gateway channel.');
+    // Gateway keys open the gateway channel, and let a paired edge app fetch its own updates.
+    if (auth.actor.role === 'gateway' && !path.startsWith('/api/v1/edge/app/')) throw new ApiError(403, 'forbidden', 'Gateway keys can only open the gateway channel.');
     const mode = req.headers['x-console-mode'];
     req.actor = { ...auth.actor, requestId: req.id, consoleMode: mode === 'replay' ? 'replay' : 'live' };
     req.sessionHash = auth.sessionHash;
@@ -485,6 +492,23 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.post('/api/v1/edge/pair', async (req: Req, reply) => {
     reply.header('Cache-Control', 'no-store');
     return pairing.pair(body(req) as any, { ip: req.ip, serverUrl: `${req.protocol === 'https' ? 'wss' : 'ws'}://${req.host}` });
+  });
+  // In-app updates of the edge app: the administrator publishes, paired apps (gateway key) fetch.
+  app.get('/api/v1/admin/edge-app', async (req) => edgeApp.view(A(req)));
+  app.put('/api/v1/admin/edge-app', { bodyLimit: EDGE_APP_MAX_BYTES }, async (req: Req) => edgeApp.publish(A(req), req.query, req.body));
+  app.delete('/api/v1/admin/edge-app', async (req) => {
+    edgeApp.unpublish(A(req));
+    return { ok: true };
+  });
+  app.get('/api/v1/edge/app/latest', async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return edgeApp.forEdge(A(req));
+  });
+  app.get('/api/v1/edge/app/download', async (req, reply) => {
+    const { release, stream } = edgeApp.download(A(req), String(req.headers['x-edge-app'] ?? ''));
+    reply.header('Content-Type', APK_MIME).header('Content-Length', String(release.size)).header('X-Sha256', release.sha256).header('Cache-Control', 'no-store');
+    reply.header('Content-Disposition', `attachment; filename="13store-edge-${release.versionName}.apk"`);
+    return reply.send(stream);
   });
   // Edge media origins that gateway-declared stream URLs must match (per site, or the whole org).
   app.get('/api/v1/admin/edge-origins', async (req) => p.listEdgeOrigins(A(req)));

@@ -39,11 +39,25 @@ class PairingTest {
     }
 
     @Test
+    fun relaysUniGcsOnTheFirstVehicleUnlessThePairingDecides() {
+        fun pairing(devices: String) = Pairing("http://x:1", "edge-1", "Site", org.json.JSONObject("{}"), org.json.JSONArray(devices), 0)
+        val two = pairing("""[{"type":"siyi-camera","deviceId":"CAM-1"},{"type":"mavlink","deviceId":"UGV-01"},{"type":"mavlink","deviceId":"UGV-02"}]""").gatewayDevices()
+        assertFalse(two.getJSONObject(0).has("gcsRelay"))
+        assertEquals(true, two.getJSONObject(1).get("gcsRelay"))
+        assertFalse("one relay per remote (one port)", two.getJSONObject(2).has("gcsRelay"))
+        val off = pairing("""[{"type":"mavlink","deviceId":"UGV-01","gcsRelay":false}]""").gatewayDevices()
+        assertEquals(false, off.getJSONObject(0).get("gcsRelay"))
+        val elsewhere = pairing("""[{"type":"mavlink","deviceId":"UGV-01"},{"type":"mavlink","deviceId":"UGV-02","gcsRelay":{"port":19860}}]""").gatewayDevices()
+        assertFalse(elsewhere.getJSONObject(0).has("gcsRelay"))
+    }
+
+    @Test
     fun parsesTheGatewayStatusFile() {
         // Shape of GatewayStatus in apps/gateway/src/gateway.ts
         val s = GatewayStatus.parse(
             """{"at":10000,"gatewayId":"edge-unirc-01","server":{"url":"ws://192.168.20.13:8090","connected":true,"refused":false,"since":1000},
-               "devices":[{"deviceId":"UGV-01","kind":"ugv","accepted":true,"lastTelemetryAt":9400,"video":{"status":"pushing","detail":"Pushing h264","codec":"h264"}},
+               "devices":[{"deviceId":"UGV-01","kind":"ugv","accepted":true,"lastTelemetryAt":9400,"video":{"status":"pushing","detail":"Pushing h264","codec":"h264"},
+                           "relay":{"listen":"127.0.0.1:19857","connected":true,"sysid":255,"lastSeenAt":9900}},
                           {"deviceId":"CAM-02","kind":"cctv","accepted":false,"rejected":"Device is not registered"}],
                "dropped":{"telemetry":0,"cmd":0,"event":0,"camera_result":0}}""",
         )!!
@@ -53,6 +67,8 @@ class PairingTest {
         assertEquals("h264", s.devices[0].video!!.codec)
         assertEquals("Device is not registered", s.devices[1].rejected)
         assertNull(s.devices[1].lastTelemetryAt)
+        assertEquals(GatewayStatus.Relay("127.0.0.1:19857", true), s.devices[0].relay)
+        assertNull(s.devices[1].relay)
         assertNull(GatewayStatus.parse("{"))
     }
 }
