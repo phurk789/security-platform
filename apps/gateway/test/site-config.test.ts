@@ -25,6 +25,12 @@ describe('mavlink vehicle from site.json', () => {
     expect(a.declaration.components?.some((c) => c.id === 'cam')).toBe(false);
   });
 
+  it('accepts missionFence for ArduPilot and refuses it for PX4 or a non-boolean value', () => {
+    expect(() => site({ missionFence: true })).not.toThrow();
+    expect(() => site({ profile: 'px4-rover', missionFence: true })).toThrow(/ArduPilot profiles only/);
+    expect(() => site({ missionFence: 'yes' })).toThrow(/true or false/);
+  });
+
   it('shows the flight controller and radio names from site.json on the Equipment tab', () => {
     const [a] = adaptersFromConfig(site({ flightController: 'SIYI UniFC 6 Pico', radio: 'SIYI UniRC 7 Pro datalink' }));
     const names = Object.fromEntries((a.declaration.components ?? []).map((c) => [c.id, c.name]));

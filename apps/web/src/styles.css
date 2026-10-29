@@ -3944,3 +3944,17 @@ a.latlon:hover {
 .brand-logo {
   display: block;
 }
+
+/* Admin users card: what each role can do. */
+.role-guide {
+  margin-top: 12px;
+}
+.role-guide summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 0.85rem;
+}
+.role-guide dl.meta {
+  grid-template-columns: 1fr;
+  margin-top: 8px;
+}

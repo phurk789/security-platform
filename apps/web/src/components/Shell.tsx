@@ -41,7 +41,7 @@ import { IncidentBadge } from './Badges';
 import { CameraFeed } from './CameraFeed';
 import { SceneSnapshot } from './SceneSnapshot';
 import { webglAvailable } from '../twin/world';
-import { AppearanceToggle, ThemeToggle } from './Hud';
+import { AppearanceToggle } from './Hud';
 import { SoundToggle } from './SoundEffects';
 import { setWall } from './Wall';
 import { SlaBadge } from './Sla';
@@ -99,7 +99,6 @@ export function TopBar() {
         <span className="clock">
           <Calendar size={16} /> {fmtDate(s.now)} &nbsp; {fmtTime(s.now)}
         </span>
-        <ThemeToggle />
         <AppearanceToggle />
         <SoundToggle />
         <LangToggle />
@@ -193,7 +192,7 @@ const NAV: { id: View; label: string; short?: string; Icon: typeof House }[] = [
 ];
 
 function navFor(role: string): View[] {
-  if (role === 'admin') return ['admin', 'devices'];
+  if (role === 'admin') return ['overview', 'command', 'incidents', 'missions', 'devices', 'evidence', 'reports', 'admin'];
   if (role === 'responder') return ['overview', 'incidents', 'missions', 'devices', 'evidence', 'reports'];
   return ['overview', 'command', 'incidents', 'missions', 'devices', 'evidence', 'reports'];
 }

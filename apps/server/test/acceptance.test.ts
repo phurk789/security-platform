@@ -79,7 +79,9 @@ describe('permissions are enforced by the server', () => {
     const id = await approvedAndAccepted(inc.id);
     expect((await priya.post('/commands', { missionId: id, type: 'start', idempotencyKey: 'x1' })).status).toBe(403);
     const r = await nida.post('/commands', { missionId: id, type: 'start', idempotencyKey: 'x2' });
-    expect(r.status).toBe(403); // supervisors have no device.command permission at all
+    // Supervisors may command vehicles, but not one whose control the operator holds.
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('control_held');
     await alex.post(`/missions/${id}/cancel`);
   });
 

@@ -16,9 +16,10 @@ beforeAll(async () => {
 afterAll(() => srv?.close());
 
 describe('access rules', () => {
-  it('administrators cannot read an incident by id', async () => {
+  it('administrators read and handle an incident like a supervisor', async () => {
     const inc = await alex.post('/incidents', { title: 'Private', place: 'Gate' });
-    expect((await ploy.get(`/incidents/${inc.body.id}`)).status).toBe(403);
+    expect((await ploy.get(`/incidents/${inc.body.id}`)).status).toBe(200);
+    expect((await ploy.post(`/incidents/${inc.body.id}/triage`)).status).toBe(200);
     expect((await alex.get(`/incidents/${inc.body.id}`)).status).toBe(200);
   });
 
@@ -26,7 +27,9 @@ describe('access rules', () => {
     expect((await kitti.get('/patrols')).body).toEqual([]);
     expect((await kitti.get('/devices/UGV-01')).status).toBe(404);
     expect((await kitti.get('/devices/UGV-01/telemetry')).status).toBe(404);
-    expect((await ploy.get('/patrols')).body).toEqual([]);
+    // Administrators see the same patrols as a supervisor.
+    expect((await ploy.get('/patrols')).status).toBe(200);
+    expect(Array.isArray((await ploy.get('/patrols')).body)).toBe(true);
   });
 });
 

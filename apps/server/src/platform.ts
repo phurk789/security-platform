@@ -81,11 +81,15 @@ import {
   type DeviceStats,
   DEFAULT_GEOFENCES,
   GEOFENCE_KIND_LABEL,
+  GEOFENCE_KINDS,
   fencesAt,
+  insideSite,
+  operatingAreas,
+  routeOutsideSite,
+  type FencedKind,
   planRoute,
   rankUnits,
   routeViolations,
-  insideDemoArea,
   type Playbook,
   type SlaStage,
   type NotificationChannel,
@@ -228,6 +232,8 @@ export class Platform {
   private fenceCache = new Map<string, Geofence[]>();
   /** Fence ids each vehicle is currently inside of. */
   private insideFences = new Map<string, Set<string>>();
+  /** Devices last seen outside every operating area of their site. */
+  private outsideArea = new Set<string>();
   /** Last telemetry position per vehicle, for odometer and runtime. */
   private lastFix = new Map<string, { pos: Point; at: number }>();
   private lastStatsSave = new Map<string, number>();
@@ -508,7 +514,6 @@ export class Platform {
     const r = this.incRow(id);
     if (!r || !this.inScope(a, r.org_id, r.site_id)) return fail(404, 'not_found', `Incident ${id} not found.`);
     const inc = JSON.parse(r.data) as Incident;
-    if (a.role === 'admin') return fail(403, 'forbidden', 'Administrators manage the system but do not see incident data.');
     if (a.role === 'responder' && !this.hasAssignment(a, id)) return fail(404, 'not_found', `Incident ${id} not found.`);
     return { ...inc, siteId: r.site_id };
   }
@@ -551,7 +556,6 @@ export class Platform {
   }
 
   listIncidents(a: Actor, f: { siteId?: string; status?: string; zone?: string; from?: number; to?: number; q?: string; deviceId?: string; limit?: number } = {}): Incident[] {
-    if (a.role === 'admin') fail(403, 'forbidden', 'Administrators manage the system but do not see incident data.');
     const rows = this.db
       .prepare('SELECT site_id, data FROM incidents WHERE org_id = ? AND created_at BETWEEN ? AND ? ORDER BY created_at DESC LIMIT ?')
       .all(a.orgId, f.from ?? 0, f.to ?? Number.MAX_SAFE_INTEGER, Math.min(f.limit ?? 500, 20000)) as { site_id: string; data: string }[];
@@ -941,7 +945,7 @@ export class Platform {
     const to = this.db.prepare('SELECT id, name, role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(toUserId, a.orgId) as
       | { id: string; name: string; role: Role }
       | undefined;
-    if (!to || (!can(to.role, 'device.command') && to.role !== 'supervisor')) fail(400, 'invalid', 'Control can only go to an operator or supervisor.');
+    if (!to || !can(to.role, 'device.command')) fail(400, 'invalid', 'Control can only go to someone who may command vehicles.');
     const from = d.controlOwner;
     tx(this.db, () => {
       d.controlOwner = toUserId;
@@ -1245,7 +1249,7 @@ export class Platform {
     const d = this.getDevice(a, input.deviceId);
     if (!isReadyAt(this.now(), d, this.allMissions(a.orgId))) fail(409, 'conflict', `${d.id} is not ready.`);
     const op = this.db.prepare('SELECT role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(input.operatorId, a.orgId) as { role: Role } | undefined;
-    if (!op || op.role !== 'operator') fail(400, 'invalid', 'Choose an active operator.');
+    if (!op || !can(op.role, 'mission.accept')) fail(400, 'invalid', 'Choose an active operator.');
     const m: Mission = {
       id: `${this.prefix(a.orgId)}MSN-${String(nextNumber(this.db, a.orgId, 'mission')).padStart(4, '0')}`,
       incidentId: inc.id,
@@ -1314,6 +1318,7 @@ export class Platform {
     this.require(a, 'mission.approve', id);
     const { m, siteId } = this.getMission(a, id);
     if (m.status !== 'pending_approval') fail(409, 'conflict', 'Mission is not awaiting approval.');
+    if (m.operatorId === a.userId) fail(409, 'two_person', 'You are the operator of this mission. Another supervisor must approve it (two-person rule).');
     const failed = this.checks(a, id).filter((c) => c.hard && !c.ok);
     if (failed.length) fail(409, 'conflict', `Cannot approve: ${failed.map((f) => f.label).join(', ')}.`);
     tx(this.db, () => {
@@ -1365,6 +1370,7 @@ export class Platform {
     this.require(a, 'mission.accept', id);
     const { m, siteId } = this.getMission(a, id);
     if (m.operatorId !== a.userId) fail(403, 'forbidden', 'This mission is assigned to another operator.');
+    if (m.approvedBy === a.userId) fail(409, 'two_person', 'You approved this mission. Another person must operate it (two-person rule).');
     if (m.status !== 'approved' || m.approvedVersion !== m.planVersion) fail(409, 'conflict', 'Mission needs an approved plan first.');
     const d = this.getDevice(a, m.deviceId);
     if (d.controlOwner && d.controlOwner !== a.userId)
@@ -1463,6 +1469,7 @@ export class Platform {
           ? `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`
           : `You do not hold control of ${d.id}. Accept the mission first.`,
       );
+    if ((type === 'start' || type === 'resume') && m.approvedBy === a.userId) deny('two_person', 'You approved this mission. Another person must start it (two-person rule).');
     const valid: Record<CommandType, MissionStatus[]> = { start: ['assigned'], pause: ['executing'], resume: ['paused'], stop: ['executing', 'paused'] };
     if (!valid[type].includes(m.status)) deny('conflict', `Cannot ${type} while mission is ${m.status.replace('_', ' ')}.`);
     if (type === 'start' && m.approvedVersion !== m.planVersion) deny('conflict', 'Plan changed since approval. Re-approval required.');
@@ -1691,7 +1698,7 @@ export class Platform {
     const d = this.getDevice(a, deviceId);
     const cur = this.driving.get(d.id);
     if (!cur) return this.publicDevice(d);
-    if (cur.userId !== a.userId && a.role !== 'supervisor' && a.role !== 'admin') fail(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
+    if (cur.userId !== a.userId && !can(a.role as Role, 'control.handover')) fail(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
     this.endDrive(d.id, a, cur.userId === a.userId ? 'driver stopped' : `stopped by ${a.name}`);
     return this.publicDevice(d);
   }
@@ -2834,7 +2841,7 @@ export class Platform {
     const name = String(input.name ?? existing?.name ?? '').trim();
     if (!name || name.length > 80) fail(400, 'invalid', 'A name of up to 80 characters is required.');
     const kind = (input.kind ?? existing?.kind ?? 'keep_out') as Geofence['kind'];
-    if (!['keep_out', 'caution', 'no_fly'].includes(kind)) fail(400, 'invalid', 'kind must be keep_out, caution or no_fly.');
+    if (!GEOFENCE_KINDS.includes(kind)) fail(400, 'invalid', 'kind must be keep_out, caution, no_fly or operating_area.');
     const poly = (input.poly ?? existing?.poly ?? []) as Point[];
     if (
       !Array.isArray(poly) ||
@@ -2843,7 +2850,9 @@ export class Platform {
       poly.some((p) => typeof p?.x !== 'number' || typeof p?.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y))
     )
       fail(400, 'invalid', 'poly needs 3–30 {x, y} points.');
-    if (!poly.some(insideDemoArea)) fail(400, 'invalid', 'The zone must touch the site.');
+    // An operating area defines the site; any other zone must touch it (or the demo boundary when there is none).
+    const others = this.geofencesOf(a.orgId, site.id).filter((g) => g.id !== id);
+    if (kind !== 'operating_area' && !poly.some((p) => insideSite(p, others, 'ugv') || insideSite(p, others, 'uav'))) fail(400, 'invalid', 'The zone must touch the site.');
     const appliesTo = ((input.appliesTo ?? existing?.appliesTo ?? ['ugv', 'uav']) as string[]).filter((k) => k === 'ugv' || k === 'uav') as Geofence['appliesTo'];
     if (!appliesTo.length) fail(400, 'invalid', 'appliesTo must include ugv and/or uav.');
     const g: Geofence = {
@@ -2878,13 +2887,17 @@ export class Platform {
     return { ok: true };
   }
 
-  /** Live geofence tracking: entering a keep-out or no-fly zone is a breach; caution zones are noted. */
+  /**
+   * Live geofence tracking: entering a keep-out or no-fly zone is a breach; caution zones are noted.
+   * Leaving the operating area is a breach during a mission and a warning otherwise.
+   */
   private trackFences(d: Device & { orgId: string; siteId: string }, now: number) {
     if (d.kind !== 'ugv' && d.kind !== 'uav') return;
     const fences = this.geofencesOf(d.orgId, d.siteId);
-    const nowIn = new Set(fencesAt(d.pos, fences, d.kind).map((f) => f.id));
-    const was = this.insideFences.get(d.id) ?? new Set<string>();
     const m = this.activeMission(d.id);
+    this.trackArea(d, d.kind, fences, m, now);
+    const nowIn = new Set(fencesAt(d.pos, fences, d.kind).filter((f) => f.kind !== 'operating_area').map((f) => f.id));
+    const was = this.insideFences.get(d.id) ?? new Set<string>();
     for (const id of nowIn) {
       if (was.has(id)) continue;
       const f = fences.find((x) => x.id === id)!;
@@ -2910,6 +2923,29 @@ export class Platform {
       if (f && f.kind !== 'caution') this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: 'info', text: `${d.id} left zone "${f.name}".` } });
     }
     this.insideFences.set(d.id, nowIn);
+  }
+
+  /** Outside every operating area of its site (only sites that have one, only with a position fix). */
+  private trackArea(d: Device & { orgId: string; siteId: string }, kind: FencedKind, fences: Geofence[], m: Mission | undefined, now: number) {
+    const areas = operatingAreas(fences, kind);
+    const out = areas.length > 0 && !d.noFix && !insideSite(d.pos, areas, kind);
+    const wasOut = this.outsideArea.has(d.id);
+    if (out === wasOut) return;
+    if (!out) {
+      this.outsideArea.delete(d.id);
+      this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: 'info', text: `${d.id} is back inside the operating area.` } });
+      return;
+    }
+    this.outsideArea.add(d.id);
+    const breach = !!m;
+    const text = `${d.id} is outside the operating area${m ? ` during ${m.id}` : ''}`;
+    if (m) this.event(null, d.orgId, d.siteId, m.incidentId, text, { actor: d.id, tone: 'alert', at: now });
+    this.audit(this.systemActor(d.orgId, 'system', 'Geofence'), 'geofence.breach', d.id, breach ? 'error' : 'ok', `${text} (${areas.map((f) => f.name).join(', ')})`);
+    this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: breach ? 'error' : 'warn', text: `${text}.` } });
+    if (breach) {
+      this.bus.emit('geofence', { orgId: d.orgId, deviceId: d.id, fence: areas[0], breach });
+      this.notify(d.orgId, { event: 'geofence.breach', title: text, text: 'Left the operating area', severity: 'high', incidentId: m.incidentId, data: { deviceId: d.id, fenceId: areas[0].id, pos: d.pos } });
+    }
   }
 
   // ---- usage counters, service, docking ---------------------------------------------
@@ -2998,7 +3034,7 @@ export class Platform {
     if (ih !== undefined) st.serviceIntervalH = ih;
     if (patch.dock === null) st.dock = undefined;
     else if (patch.dock) {
-      if (!Number.isFinite(patch.dock.x) || !Number.isFinite(patch.dock.y) || !insideDemoArea(patch.dock)) fail(400, 'invalid', 'dock must be {x, y} inside the site.');
+      if (!Number.isFinite(patch.dock.x) || !Number.isFinite(patch.dock.y) || !insideSite(patch.dock, this.geofencesOf(a.orgId, d.siteId), d.kind === 'uav' ? 'uav' : 'ugv')) fail(400, 'invalid', 'dock must be {x, y} inside the site.');
       st.dock = { x: patch.dock.x, y: patch.dock.y };
     }
     this.saveStats(d, true);
@@ -3067,7 +3103,7 @@ export class Platform {
   // ---- scheduled patrols ---------------------------------------------------------------
 
   listPatrols(a: Actor): (Patrol & { siteId: string })[] {
-    if (a.role === 'responder' || a.role === 'admin') return [];
+    if (a.role === 'responder') return [];
     const rows = this.db.prepare('SELECT site_id, data FROM patrols WHERE org_id = ? ORDER BY rowid').all(a.orgId) as { site_id: string; data: string }[];
     return rows.filter((r) => this.inScope(a, a.orgId, r.site_id)).map((r) => ({ ...(JSON.parse(r.data) as Patrol), siteId: r.site_id }));
   }
@@ -3095,10 +3131,15 @@ export class Platform {
     if ((d.kind !== 'ugv' && d.kind !== 'uav') || !d.commands.includes('start')) fail(400, 'invalid', `${d.id} cannot run patrols (no start command).`);
     const operatorId = String(input.operatorId ?? prev?.operatorId ?? '');
     const op = this.db.prepare('SELECT role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(operatorId, a.orgId) as { role: Role } | undefined;
-    if (!op || op.role !== 'operator') fail(400, 'invalid', 'Choose an active operator.');
+    if (!op || !can(op.role, 'mission.accept')) fail(400, 'invalid', 'Choose an active operator.');
+    // The patrol's standing approval is its creator's: they cannot also be its operator (two-person rule).
+    if (operatorId === (prev?.createdBy ?? a.userId)) fail(400, 'invalid', 'Choose someone else as the operator: whoever sets up a patrol approves its runs (two-person rule).');
     const raw = this.validRoute((input.route ?? prev?.route ?? []) as Point[]);
     // Indoor vehicles get the floor-plan checks below instead of the outdoor obstacle check.
     const route = d.indoor ? raw : this.clearRoute(a.orgId, d, raw);
+    // Outdoors the route has to stay on the site (its operating area when it has one), as approval requires.
+    const outside = d.indoor ? [] : routeOutsideSite(route, this.geofencesOf(a.orgId, d.siteId), d.kind as FencedKind);
+    if (outside.length) fail(400, 'invalid', `Checkpoints ${outside.join(', ')} are outside the site.`);
     if (d.indoor) {
       // Indoor vehicles patrol their floor: the route has to pass the same checks as an indoor mission.
       const bad = indoorRouteChecks(d, { checkpoints: route } as Mission).filter((c) => c.hard && !c.ok);
@@ -3206,8 +3247,11 @@ export class Platform {
     if (!isReadyAt(now, d, this.allMissions(orgId))) return skip(`${d.id} is on another mission.`);
     const hits = routeViolations(p.route, d.pos, this.geofencesOf(orgId, siteId), d.kind as 'ugv' | 'uav');
     if (hits.length) return skip(`route enters keep-out zone "${hits[0].name}".`);
+    const outside = d.indoor ? [] : routeOutsideSite(p.route, this.geofencesOf(orgId, siteId), d.kind as FencedKind);
+    if (outside.length) return skip(`checkpoints ${outside.join(', ')} are outside the site.`);
     const operator = this.db.prepare('SELECT name FROM users WHERE id = ? AND org_id = ? AND active = 1').get(p.operatorId, orgId) as { name: string } | undefined;
     if (!operator) return skip('the assigned operator is no longer active.');
+    if (p.operatorId === p.createdBy) return skip('its operator also approved it (two-person rule).');
     const source = trigger === 'schedule' ? 'Patrol scheduler' : a.name;
     const inc: Incident = {
       id: `${this.prefix(orgId)}INC-${String(nextNumber(this.db, orgId, 'incident', 1)).padStart(3, '0')}`,
@@ -3520,7 +3564,7 @@ export class Platform {
     const site = this.site(a, siteId);
     const want = (layers ?? []).map((l) => l.trim()).filter((l): l is GeoLayer => (GEO_LAYERS as string[]).includes(l));
     // Administrators manage the system but do not see incident data (same rule as the API).
-    const incidents = a.role === 'admin' ? [] : this.listIncidents(a, { siteId: site.id }).filter((i) => !['closed', 'duplicate', 'dismissed'].includes(i.status));
+    const incidents = this.listIncidents(a, { siteId: site.id }).filter((i) => !['closed', 'duplicate', 'dismissed'].includes(i.status));
     const fc = siteGeoJson({
       site,
       anchor: this.siteAnchor(a.orgId, site.id),
@@ -3594,12 +3638,12 @@ export class Platform {
 
   snapshot(a: Actor, siteId?: string): Snapshot {
     const site = this.site(a, siteId);
-    const incidents = a.role === 'admin' ? [] : this.listIncidents(a, { siteId: site.id });
+    const incidents = this.listIncidents(a, { siteId: site.id });
     const ids = new Set(incidents.map((i) => i.id));
     const timeline = (this.db.prepare('SELECT data FROM timeline WHERE org_id = ? ORDER BY at').all(a.orgId) as { data: string }[])
       .map((r) => JSON.parse(r.data) as TimelineEvent)
       .filter((e) => ids.has(e.incidentId));
-    const missions = a.role === 'responder' || a.role === 'admin' ? [] : this.allMissions(a.orgId).filter((m) => ids.has(m.incidentId));
+    const missions = a.role === 'responder' ? [] : this.allMissions(a.orgId).filter((m) => ids.has(m.incidentId));
     return {
       serverTime: this.now(),
       meta: this.meta(a.orgId),
@@ -3608,14 +3652,14 @@ export class Platform {
       incidents,
       devices: this.listDevices(a, site.id),
       missions,
-      commands: a.role === 'admin' ? [] : this.listCommands(a).filter((c) => missions.some((m) => m.id === c.missionId)),
+      commands: this.listCommands(a).filter((c) => missions.some((m) => m.id === c.missionId)),
       timeline,
       evidence: can(a.role as Role, 'evidence.view') ? this.evidenceFor(a, ids) : [],
       assignments: this.listAssignments(a).filter((x) => ids.has(x.incidentId)),
       geofences: this.geofencesOf(a.orgId, site.id),
       playbooks: getOrgSettings(this.db, a.orgId).playbooks,
       patrols:
-        a.role === 'admin' || a.role === 'responder'
+        a.role === 'responder'
           ? []
           : this.listPatrols(a)
               .filter((p) => p.siteId === site.id)
@@ -3631,9 +3675,8 @@ export class Platform {
     if (e.type === 'resync') return true;
     if (e.type === 'notice') return a.role !== 'responder' || (!!m.incidentId && this.hasAssignment(a, m.incidentId));
     if (e.type === 'geofence' || e.type === 'site') return true;
-    if (e.type === 'detection') return a.role !== 'responder' && a.role !== 'admin' && can(a.role as Role, 'media.view');
-    if (e.type === 'patrol') return a.role !== 'responder' && a.role !== 'admin';
-    if (a.role === 'admin') return e.type === 'audit' || e.type === 'device';
+    if (e.type === 'detection') return a.role !== 'responder' && can(a.role as Role, 'media.view');
+    if (e.type === 'patrol') return a.role !== 'responder';
     if (e.type === 'audit') return can(a.role as Role, 'audit.view');
     if (a.role === 'responder') {
       if (['device', 'telemetry', 'mission', 'command'].includes(e.type)) return false;

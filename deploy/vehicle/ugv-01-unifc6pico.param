@@ -73,10 +73,28 @@ MAV2_OPTIONS,4
 # No hardware safety button on this vehicle
 BRD_SAFETY_DEFLT,0
 #
-# Compasses off until calibrated outdoors
-COMPASS_USE,0
+# Compass: only the external one in the GPS module (QMC5883L). Calibrated outdoors on 2026-10-28 with the
+# large-vehicle method (nose pointed north, MAV_CMD_FIXED_MAG_CAL_YAW); offsets are vehicle-specific and not in this file.
+# The internal compass stays off: it sits near the motor and power wiring.
+COMPASS_USE,1
 COMPASS_USE2,0
 COMPASS_USE3,0
 #
 # Accelerometer: simple calibration done on the vehicle on level ground (2026-10-28 ~12:05).
 # Offsets are board-specific and are not copied by this file; redo the calibration on a new board.
+#
+# AUTO (waypoint missions), step 1 — 2026-10-28. Slow first runs; stuck or crashed in AUTO = HOLD.
+WP_SPEED,1
+FS_CRASH_CHECK,1
+# ArduPilot's own fence, a 30 m circle around the arming point, HOLD on breach.
+# Stored OFF so the vehicle can be armed indoors without GPS (a fence that is on at arming needs a position).
+# The edge gateway turns it on before each route and off after disarm ("missionFence": true in site.json).
+FENCE_ENABLE,0
+FENCE_TYPE,2
+FENCE_RADIUS,30
+FENCE_ACTION,2
+#
+# GPS: the u-blox module (with the QMC5883L compass) is plugged into the GPS2 port (SERIAL4).
+# The board takes the first GPS-protocol port as GPS 1, so the empty GPS1 port (SERIAL3) is off.
+SERIAL3_PROTOCOL,-1
+SERIAL4_PROTOCOL,5

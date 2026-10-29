@@ -242,8 +242,9 @@ describe('recordings', () => {
     expect(text).toMatch(/SIMULATED RECORDING/);
     expect((text.match(/<g transform/g) ?? []).length).toBe(6);
     expect((await fetch(srv.url + clip.body.url.replace(/sig=.{4}/, 'sig=0000'))).status).toBe(403);
-    // Auditors may not watch video.
-    expect((await (await Client.login(srv.url, 'priya')).get(`/media/CCTV-02/recordings`)).status).toBe(403);
+    // Auditors watch video (read-only); field responders do not.
+    expect((await (await Client.login(srv.url, 'priya')).get(`/media/CCTV-02/recordings`)).status).toBe(200);
+    expect((await (await Client.login(srv.url, 'kitti')).get(`/media/CCTV-02/recordings`)).status).toBe(403);
   });
 
   it('saves a stretch of recording to the incident as checksummed evidence', async () => {

@@ -11,13 +11,17 @@ import type { Point } from './types';
 // Geofences
 // ---------------------------------------------------------------------------
 
-export type GeofenceKind = 'keep_out' | 'caution' | 'no_fly';
+export type GeofenceKind = 'keep_out' | 'caution' | 'no_fly' | 'operating_area';
 export type FencedKind = 'ugv' | 'uav';
 
 export interface Geofence {
   id: string;
   name: string;
-  /** keep_out: vehicles must not enter (routes refused, live breach raised). caution: routes allowed, live entry noted. no_fly: aircraft only. */
+  /**
+   * keep_out: vehicles must not enter (routes refused, live breach raised). caution: routes allowed, live entry noted.
+   * no_fly: aircraft only. operating_area: where vehicles may work — once a site has one, routes must stay inside it
+   * (instead of the demo site boundary) and leaving it during a mission is a breach.
+   */
   kind: GeofenceKind;
   poly: Point[];
   active: boolean;
@@ -27,7 +31,8 @@ export interface Geofence {
   createdAt?: number;
 }
 
-export const GEOFENCE_KIND_LABEL: Record<GeofenceKind, string> = { keep_out: 'Keep-out', caution: 'Caution', no_fly: 'No-fly' };
+export const GEOFENCE_KIND_LABEL: Record<GeofenceKind, string> = { keep_out: 'Keep-out', caution: 'Caution', no_fly: 'No-fly', operating_area: 'Operating area' };
+export const GEOFENCE_KINDS = Object.keys(GEOFENCE_KIND_LABEL) as GeofenceKind[];
 
 /** Starting fences for the demo site. Administrators and supervisors change them in the console. */
 export const DEFAULT_GEOFENCES: Geofence[] = [
@@ -167,6 +172,41 @@ export function fencesAt(p: Point, fences: Geofence[], kind: FencedKind) {
   return fences.filter((f) => f.active && f.appliesTo.includes(kind) && insidePoly(p, f.poly));
 }
 
+/** Active operating areas for this kind of vehicle: where it may work. */
+export function operatingAreas(fences: Geofence[], kind: FencedKind) {
+  return fences.filter((f) => f.active && f.kind === 'operating_area' && f.appliesTo.includes(kind));
+}
+
+/** Inside the site: inside an operating area when the site has one for this kind, else inside the demo site boundary. */
+export function insideSite(p: Point, fences: Geofence[] = [], kind: FencedKind = 'ugv') {
+  const areas = operatingAreas(fences, kind);
+  return areas.length ? areas.some((f) => insidePoly(p, f.poly)) : insideDemoArea(p);
+}
+
+/** Metres between samples when checking that a leg stays inside an operating area (areas may be concave). */
+const LEG_STEP_M = 1;
+
+/**
+ * 1-based numbers of checkpoints that are outside the site, or that the route reaches by leaving
+ * the operating area on the way from the previous checkpoint. The leg from the vehicle to the
+ * first checkpoint is not checked: a vehicle parked outside may drive in.
+ */
+export function routeOutsideSite(route: Point[], fences: Geofence[] = [], kind: FencedKind = 'ugv'): number[] {
+  const areas = operatingAreas(fences, kind);
+  const inside = (p: Point) => (areas.length ? areas.some((f) => insidePoly(p, f.poly)) : insideDemoArea(p));
+  const out: number[] = [];
+  route.forEach((p, i) => {
+    let ok = inside(p);
+    if (ok && i > 0 && areas.length) {
+      const a = route[i - 1];
+      const n = Math.ceil(Math.hypot(p.x - a.x, p.y - a.y) / LEG_STEP_M);
+      for (let k = 1; k < n && ok; k++) ok = inside({ x: a.x + ((p.x - a.x) * k) / n, y: a.y + ((p.y - a.y) * k) / n });
+    }
+    if (!ok) out.push(i + 1);
+  });
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Planner
 // ---------------------------------------------------------------------------
@@ -198,7 +238,7 @@ const DIRS: [number, number, number][] = [
 function blockedTest(opts: PlanOptions) {
   const kind = opts.kind ?? 'ugv';
   const margin = opts.marginM ?? (kind === 'uav' ? 6 : 3);
-  const fences = (opts.fences ?? []).filter((f) => f.active && f.appliesTo.includes(kind) && (kind === 'uav' ? f.kind !== 'caution' : f.kind === 'keep_out'));
+  const fences = (opts.fences ?? []).filter((f) => f.active && f.appliesTo.includes(kind) && (f.kind === 'keep_out' || (kind === 'uav' && f.kind === 'no_fly')));
   const inflated = fences.map((f) => inflate(f.poly, margin * 0.5));
   return (p: Point) => {
     if (!insideDemoArea(p)) return true;
@@ -368,7 +408,7 @@ export function planRoute(from: Point, to: Point, opts: PlanOptions = {}): Plan 
   const cell = opts.cellM ?? 2;
   const blocked = blockedTest(opts);
   if (!insideDemoArea(to)) return { ok: false, reason: 'Destination is outside the site boundary.' };
-  const fences = (opts.fences ?? []).filter((f) => f.active && f.appliesTo.includes(kind) && (kind === 'uav' ? f.kind !== 'caution' : f.kind === 'keep_out'));
+  const fences = (opts.fences ?? []).filter((f) => f.active && f.appliesTo.includes(kind) && (f.kind === 'keep_out' || (kind === 'uav' && f.kind === 'no_fly')));
   const inside = fences.find((f) => insidePoly(to, f.poly));
   if (inside) return { ok: false, reason: `Destination is inside the ${GEOFENCE_KIND_LABEL[inside.kind].toLowerCase()} zone "${inside.name}".` };
   const legs = [from, ...(opts.via ?? []), to];

@@ -121,7 +121,7 @@ export function RemoteProvider({
       toasts: [],
       linkCut: {},
       selectedIncidentId: null,
-      view: initialUser.role === 'admin' ? 'admin' : 'overview',
+      view: 'overview',
       dataLabel: meta.dataLabel,
     };
   });

@@ -170,6 +170,13 @@ describe('overlay data', () => {
     expect(ids(d.accuracy)).toEqual(['UGV-02']);
   });
 
+  it('draws the demo site boundary only while the site has no operating area of its own', () => {
+    expect(buildOverlayData(input()).boundary.features).toHaveLength(1);
+    const area = { id: 'GF-1', name: 'Office yard', kind: 'operating_area' as const, active: true, appliesTo: ['ugv' as const], poly: [{ x: 0, y: -40 }, { x: 40, y: -40 }, { x: 40, y: 0 }] };
+    expect(buildOverlayData(input({ geofences: [area] })).boundary.features).toHaveLength(0);
+    expect(buildOverlayData(input({ geofences: [{ ...area, active: false }] })).boundary.features).toHaveLength(1);
+  });
+
   it('points the heading arrow to true north bearings (site grid heading + grid rotation)', () => {
     const d = buildOverlayData(input({ devices: [dev('UGV-01', { heading: 90 }), dev('CCTV-01', { kind: 'cctv' } as Partial<Device>)] }));
     const p = (id: string) => d.devices.features.find((f) => (f.properties as { id: string }).id === id)!.properties as Record<string, number>;

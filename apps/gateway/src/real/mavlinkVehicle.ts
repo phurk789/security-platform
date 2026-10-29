@@ -53,6 +53,13 @@ export interface MavlinkVehicleConfig {
   missionAltM?: number;
   /** Allow the platform to arm the vehicle. Default false — arm on the remote. */
   allowRemoteArm?: boolean;
+  /**
+   * ArduPilot: turn the geofence on (MAV_CMD_DO_FENCE_ENABLE) before a route starts, and off again
+   * once the vehicle is disarmed. Keep FENCE_ENABLE = 0 on the board: a fence that is on at arming
+   * needs a GPS position, so with it stored on the vehicle cannot be armed indoors. The fence
+   * itself (FENCE_TYPE / RADIUS / ACTION) is set on the board. Default false.
+   */
+  missionFence?: boolean;
   firmwareTested?: string;
   flightController?: string;
   radio?: string;
@@ -168,7 +175,16 @@ const MSG = {
   RADIO_STATUS: 109,
   STATUSTEXT: 253,
 };
-const CMD = { NAV_WAYPOINT: 16, DO_SET_RELAY: 181, DO_SET_MODE: 176, DO_PAUSE_CONTINUE: 193, MISSION_START: 300, COMPONENT_ARM_DISARM: 400, SET_MESSAGE_INTERVAL: 511 };
+const CMD = {
+  NAV_WAYPOINT: 16,
+  DO_SET_RELAY: 181,
+  DO_SET_MODE: 176,
+  DO_PAUSE_CONTINUE: 193,
+  DO_FENCE_ENABLE: 207,
+  MISSION_START: 300,
+  COMPONENT_ARM_DISARM: 400,
+  SET_MESSAGE_INTERVAL: 511,
+};
 const FRAME_GLOBAL_RELATIVE_ALT_INT = 6;
 const MAV_MODE_FLAG_SAFETY_ARMED = 128;
 const MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1;
@@ -264,6 +280,9 @@ export class MavlinkVehicleAdapter implements Adapter {
   private activeStop: { commandId: string; type: 'pause' | 'stop' } | null = null;
   private activeResume: { commandId: string; since: number } | null = null;
   private expectMode: number | null = null;
+  /** The platform turned the geofence on for a route (missionFence) and has not turned it off yet. */
+  private fenceOn = false;
+  private fenceOffBusy = false;
   private wasStale = false;
   private lastTel = 0;
 
@@ -609,6 +628,7 @@ export class MavlinkVehicleAdapter implements Adapter {
       this.wasStale = false;
       this.lastHeartbeat = now;
       this.armed = ((hb.baseMode as number) & MAV_MODE_FLAG_SAFETY_ARMED) !== 0;
+      if (!this.armed && this.fenceOn) this.fenceOff(); // retried every heartbeat until confirmed
       this.onMode(hb.customMode);
       return;
     }
@@ -836,6 +856,18 @@ export class MavlinkVehicleAdapter implements Adapter {
     });
   }
 
+  /** Turn the platform's geofence off again after the vehicle disarmed, so it can be armed indoors. */
+  private fenceOff() {
+    if (this.fenceOffBusy) return;
+    this.fenceOffBusy = true;
+    void this.command(CMD.DO_FENCE_ENABLE, [0]).then((r) => {
+      this.fenceOffBusy = false;
+      if (!r.ok) return this.ctx.log.warn(`${this.cfg.deviceId}: geofence not turned off yet (${r.detail}); retrying`);
+      this.fenceOn = false;
+      this.ctx.log.info(`${this.cfg.deviceId}: vehicle disarmed, geofence off`);
+    });
+  }
+
   private setMode(mode: number) {
     this.expectMode = mode;
     const px = this.cfg.profile.startsWith('px4');
@@ -897,6 +929,11 @@ export class MavlinkVehicleAdapter implements Adapter {
           if (!this.armed) {
             const a = await this.command(CMD.COMPONENT_ARM_DISARM, [1]);
             if (!a.ok) return fail(`Arming refused: ${a.detail}`);
+          }
+          if (this.cfg.missionFence) {
+            const f = await this.command(CMD.DO_FENCE_ENABLE, [1]);
+            if (!f.ok) return fail(`Geofence could not be turned on (${f.detail}). Route not started.`);
+            this.fenceOn = true;
           }
           const m = await this.setMode(M.auto[0]);
           if (!m.ok) return fail(`AUTO mode refused: ${m.detail}`);
