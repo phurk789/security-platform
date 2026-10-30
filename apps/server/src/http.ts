@@ -308,6 +308,11 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   app.post('/api/v1/geofences', async (req: Req) => p.saveGeofence(A(req), body(req) as any));
   app.patch('/api/v1/geofences/:id', async (req: Req) => p.saveGeofence(A(req), body(req) as any, req.params.id));
   app.delete('/api/v1/geofences/:id', async (req: Req) => p.deleteGeofence(A(req), req.params.id));
+  // Route library: routes kept per site for missions and patrols.
+  app.get('/api/v1/saved-routes', async (req: Req) => p.listSavedRoutes(A(req), (req.query.siteId as string) || undefined));
+  app.post('/api/v1/saved-routes', async (req: Req) => p.saveRoute(A(req), body(req) as any));
+  app.patch('/api/v1/saved-routes/:id', async (req: Req) => p.saveRoute(A(req), body(req) as any, req.params.id));
+  app.delete('/api/v1/saved-routes/:id', async (req: Req) => p.deleteSavedRoute(A(req), req.params.id));
   // Scheduled patrols.
   app.get('/api/v1/patrols', async (req: Req) => p.listPatrols(A(req)).map(({ siteId: _s, ...x }) => x));
   app.post('/api/v1/patrols', async (req: Req) => p.upsertPatrol(A(req), body(req) as any));

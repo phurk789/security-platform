@@ -160,7 +160,7 @@ function fakeRover(opts: { armed?: boolean } = {}) {
     speed: 0,
     mission: [] as { lat: number; lon: number }[],
     /** Items as stored, for reading the route back (MISSION_REQUEST_LIST). */
-    items: [] as { x: number; y: number; command: number }[],
+    items: [] as { x: number; y: number; command: number; p1?: number; p2?: number }[],
     /** Change a stored waypoint after the upload (a lost or garbled item), to test the read-back check. */
     garble: false,
     /** Answer the first PARAM_REQUEST_READ for WP_SPEED with this value (m/s). */
@@ -234,7 +234,7 @@ function fakeRover(opts: { armed?: boolean } = {}) {
         send(r);
       } else if (p.header.msgid === 73) {
         st.mission.push({ lat: d.x / 1e7, lon: d.y / 1e7 });
-        st.items.push({ x: d.x, y: d.y + (st.garble && st.items.length === 1 ? 500 : 0), command: d.command });
+        st.items.push({ x: d.x, y: d.y + (st.garble && st.items.length === 1 ? 500 : 0), command: d.command, p1: d.param1, p2: d.param2 });
         if (st.mission.length < st.expected) {
           const r = new common.MissionRequestInt();
           r.targetSystem = 255;
@@ -597,6 +597,36 @@ describe('MAVLink vehicle adapter (UniFC 6 Pico class, via UniRC datalink)', () 
     await wait(2500);
     expect(got.events.some((e) => e.kind === 'route_interrupted' || e.kind === 'fault')).toBe(false);
     expect(got.telemetry.at(-1)!.nextCp).toBeUndefined();
+  }, 20_000);
+
+  it('sends each point’s speed and wait as mission items, and maps them back to checkpoints', async () => {
+    const r = await fakeRover();
+    const a = rover(r.port);
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), r.close);
+    await until(() => got.telemetry.at(-1)?.routeSpeed === 1.2); // WP_SPEED known: the route goes back to it
+    expect(got.telemetry.at(-1)).toMatchObject({ armed: true, mode: 'HOLD' });
+    a.onCommand(
+      cmd('start', {
+        deviceId: 'UGV-06',
+        route: [
+          { x: 262, y: 218, speed: 0.5, holdS: 5, name: 'Gate' },
+          { x: 300, y: 218 },
+        ],
+      }),
+    );
+    await until(() => got.updates.some((u) => u.status === 'succeeded'), 8000);
+    // Home, speed 0.5, point 1 (wait 5 s), back to the route speed 1.2, point 2.
+    expect(r.st.items.map((i) => i.command)).toEqual([16, 178, 16, 178, 16]);
+    expect(r.st.items[1].p2).toBeCloseTo(0.5);
+    expect(r.st.items[2].p1).toBe(5);
+    expect(r.st.items[3].p2).toBeCloseTo(1.2);
+    expect(r.st.items[4].p1).toBe(0);
+    r.reach(2);
+    r.reach(4);
+    await until(() => got.events.some((e) => e.kind === 'route_complete'));
+    expect(got.events.filter((e) => e.kind === 'checkpoint').map((e) => e.checkpoint)).toEqual([0, 1]);
   }, 20_000);
 
   it('reports a disarm during the route once, and refuses resume until the pilot arms again', async () => {

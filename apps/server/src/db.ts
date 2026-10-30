@@ -113,6 +113,7 @@ CREATE INDEX IF NOT EXISTS detections_device ON detections(device_id, type, at);
 CREATE UNIQUE INDEX IF NOT EXISTS detections_external ON detections(org_id, external_id) WHERE external_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS geofences (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, site_id TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS patrols (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, site_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS saved_routes (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, site_id TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS device_stats (device_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, org_id TEXT NOT NULL, at INTEGER NOT NULL, channel_id TEXT NOT NULL, event TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS notifications_org_time ON notifications(org_id, at);

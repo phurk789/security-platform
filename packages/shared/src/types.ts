@@ -1,4 +1,5 @@
 import type { GeoAnchor } from './geo';
+import type { RoutePoint } from './route';
 // Domain model for the prototype. Names follow PRD R1 §4 and §6.
 import type { GimbalState, SimGimbal, StreamInfo } from './camera';
 import type { Geofence } from './routing';
@@ -136,6 +137,9 @@ export interface Device {
   latencyMs?: number;
   /** GNSS satellites in use (UGV/UAV). */
   satellites?: number;
+  /** Armed, and the autopilot mode by name (AUTO, HOLD, MANUAL…), as the vehicle reports them. */
+  armed?: boolean;
+  flightMode?: string;
   /** Speed the vehicle drives routes at (m/s), as set on its autopilot (ArduPilot WP_SPEED). */
   routeSpeed?: number;
   /** Motor / airframe temperature in °C. */
@@ -220,7 +224,7 @@ export interface Mission {
   patrolId?: string;
   deviceId: string;
   operatorId: string;
-  checkpoints: Point[];
+  checkpoints: RoutePoint[];
   planVersion: number;
   approvedVersion?: number;
   approvedBy?: string;

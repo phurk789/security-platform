@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Geofence } from '@13store/shared';
-import { MAX_CHECKPOINTS, MAX_ZONE_POINTS, addPoint, checkDraft, finishedDraft, insertPoint, maxPoints, movePoint, northUpRect, removePoint, routeDraft } from './routeDraft';
+import { MAX_CHECKPOINTS, MAX_ZONE_POINTS, addPoint, checkDraft, closeLoop, finishedDraft, insertPoint, isLoop, maxPoints, movePoint, northUpRect, removePoint, reverseRoute, routeDraft, setPointSettings } from './routeDraft';
 
 const keepOut: Geofence = {
   id: 'GF-X',
@@ -107,5 +107,37 @@ describe('drawing a route on the map', () => {
     routeDraft.clear();
     off();
     expect(seen).toEqual([1, 2, 1, 0, 0, -1]);
+  });
+});
+
+describe('route planner: checkpoint settings', () => {
+  const route = [
+    { x: 0, y: 0, name: 'Gate', holdS: 10, capture: true },
+    { x: 10, y: 0, speed: 0.5 },
+    { x: 10, y: 10 },
+  ];
+  it('keeps a checkpoint’s settings when it is moved, and edits or clears them', () => {
+    const moved = movePoint(route, 0, { x: 1.23, y: 2.34 });
+    expect(moved[0]).toEqual({ x: 1.2, y: 2.3, name: 'Gate', holdS: 10, capture: true });
+    const edited = setPointSettings(moved, 0, { name: 'Gate B', capture: false, holdS: undefined });
+    expect(edited[0]).toEqual({ x: 1.2, y: 2.3, name: 'Gate B' });
+    expect(setPointSettings(route, 9, { name: 'x' })).toBe(route);
+  });
+  it('reverses a route and closes it into a loop once', () => {
+    expect(reverseRoute(route).map((p) => p.x + p.y)).toEqual([20, 10, 0]);
+    const loop = closeLoop(route);
+    expect(loop).toHaveLength(4);
+    expect(loop[3]).toEqual({ x: 0, y: 0, name: 'Gate' }); // the start again, without its wait
+    expect(isLoop(loop)).toBe(true);
+    expect(closeLoop(loop)).toBe(loop);
+    expect(closeLoop([route[0]])).toHaveLength(1);
+  });
+  it('keeps settings through start, and selection follows the points', () => {
+    routeDraft.start({ purpose: 'mission-new', deviceId: 'UGV-01', points: route });
+    expect(routeDraft.get()!.points[0]).toMatchObject({ name: 'Gate', holdS: 10 });
+    routeDraft.select(2);
+    routeDraft.setPoints(removePoint(routeDraft.get()!.points, 2));
+    expect(routeDraft.get()!.selected).toBeUndefined();
+    routeDraft.clear();
   });
 });

@@ -27,7 +27,8 @@ import { ageMs, can, currentUser, fmtTime, freshness, isReady, userName } from '
 import { isTerminal, missionForIncident } from '../domain/reducer';
 import { constraintChecks } from '../domain/policy';
 import { finishedDraft, routeDraft, useRouteDraft } from '../domain/routeDraft';
-import { DEFAULT_ROUTE, planFor, rankUnits, routeLength, routeSpeedOf } from '@13store/shared';
+import { useSavedRoutes } from '../domain/savedRoutes';
+import { DEFAULT_ROUTE, insideSite, modeAllowsMotion, modeOf, operatingAreas, planFor, rankUnits, routeAreaCheck, routeLength, routeSpeedOf, routeTimeS, routeViolations } from '@13store/shared';
 import type { AppState, CommandType, Device, Incident, Mission, Point, Role } from '@13store/shared';
 import { LatLon } from './LatLon';
 import { useStore } from '../store';
@@ -591,7 +592,9 @@ function DeviceCard({
 }
 
 function PrepareMission({ inc }: { inc: Incident }) {
-  const { s, dispatch, mode } = useStore();
+  const { s, dispatch, mode, session } = useStore();
+  // The site's saved routes ("lib:<id>" in the route choice).
+  const library = useSavedRoutes(session?.api, s.site?.id);
   const t = useT();
   const me = currentUser(s);
   const [open, setOpen] = useState(false);
@@ -600,6 +603,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
   const [route, setRoute] = useState('direct');
   const picked = s.devices[deviceId];
   const demoRoutes = picked?.integration === 'simulated';
+  const saved = route.startsWith('lib:') ? library.find((r) => `lib:${r.id}` === route) : undefined;
   const indoorPlan = picked?.indoor ? floorPlan(picked.indoor.buildingId, picked.indoor.level) : undefined;
   // Checkpoints clicked on the real map (only the real map can be drawn on; indoor vehicles keep the floor plan).
   const draft = useRouteDraft();
@@ -691,8 +695,26 @@ function PrepareMission({ inc }: { inc: Incident }) {
                   : t('Draw checkpoints on the map…')}
               </option>
             )}
+            {!indoorPlan &&
+              library.map((r) => (
+                <option key={r.id} value={`lib:${r.id}`}>
+                  {t('Saved: {name} · {k} checkpoints', { name: r.name, k: r.points.length })}
+                </option>
+              ))}
           </select>
         </label>
+        {saved && canDraw && (
+          <button
+            className="btn-secondary small"
+            onClick={() => {
+              // Change a copy for this mission; the saved route stays as it is.
+              routeDraft.start({ purpose: 'mission-new', deviceId, points: saved.points });
+              setRoute('draw');
+            }}
+          >
+            <MapPinned size={14} /> {t('Change on the map')}
+          </button>
+        )}
         {route === 'draw' && canDraw && (
           <div className="row gap-s">
             {drawingHere ? (
@@ -737,7 +759,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
           </button>
           <button
             className="btn-primary grow"
-            disabled={!allowed || !deviceId || (route === 'draw' && !drawn)}
+            disabled={!allowed || !deviceId || (route === 'draw' && !drawn) || (route.startsWith('lib:') && !saved)}
             onClick={() => {
               dispatch({
                 type: 'createMission',
@@ -747,7 +769,9 @@ function PrepareMission({ inc }: { inc: Incident }) {
                 checkpoints:
                   route === 'draw' && drawn
                     ? drawn.points
-                    : route === 'indoor' && indoorPlan
+                    : saved
+                      ? saved.points
+                      : route === 'indoor' && indoorPlan
                       ? indoorPlan.patrolRoute
                       : route === 'auto' && autoPlan?.ok
                         ? autoPlan.checkpoints
@@ -847,7 +871,7 @@ function Planner({ m }: { m: Mission }) {
               {t('{k} checkpoints · {m} m · about {eta} at {v} m/s', {
                 k: m.checkpoints.length,
                 m: Math.round(lengthM),
-                eta: fmtEta(lengthM / speed),
+                eta: fmtEta(routeTimeS(m.checkpoints, dev && !dev.noFix ? dev.pos : undefined, speed)),
                 v: speed,
               })}
             </span>
@@ -933,6 +957,57 @@ function Planner({ m }: { m: Mission }) {
   );
 }
 
+/**
+ * Before the start: what the platform can see of the vehicle and its route, at a glance. The
+ * server checks the route again and the vehicle has the last word; this shows what to fix first.
+ */
+function Preflight({ m, d }: { m: Mission; d: Device }) {
+  const { s } = useStore();
+  const t = useT();
+  const kind = d.kind === 'uav' ? 'uav' : 'ugv';
+  const fences = s.geofences;
+  const areas = operatingAreas(fences, kind);
+  const f = freshness(s, d);
+  const mode = modeOf(d);
+  const area = routeAreaCheck(d, m.checkpoints, fences);
+  const hits = routeViolations(m.checkpoints, d.noFix ? undefined : d.pos, fences, kind);
+  const items: { label: string; ok: boolean; hard: boolean; detail?: string }[] = [
+    { label: 'Live data from the vehicle', ok: f === 'live', hard: true, detail: f === 'live' ? undefined : `Telemetry ${f}` },
+    {
+      label: 'Position fix',
+      ok: !d.noFix && d.accuracyM <= 3,
+      hard: true,
+      detail: d.noFix ? 'No GNSS fix' : `±${d.accuracyM.toFixed(1)} m${d.satellites ? ` · ${d.satellites} sats` : ''}`,
+    },
+    { label: 'Battery ≥ 30%', ok: (d.battery ?? 0) >= 30, hard: true, detail: `${Math.round(d.battery ?? 0)}%` },
+    // Only vehicles that report it (MAVLink); arming stays on the remote.
+    ...(d.armed !== undefined
+      ? [{ label: 'Armed on the remote', ok: d.armed, hard: false, detail: d.armed ? d.flightMode : 'Arm it on the remote after the safety check' }]
+      : []),
+    { label: 'Mode allows motion', ok: modeAllowsMotion(mode, 'person'), hard: true, detail: mode },
+    ...(areas.length ? [{ label: 'Vehicle inside the operating area', ok: !d.noFix && insideSite(d.pos, areas, kind), hard: true }] : []),
+    { label: area.label, ok: area.ok, hard: true, detail: area.detail },
+    { label: 'Route clear of keep-out zones', ok: hits.length === 0, hard: true, detail: hits.length ? `Enters ${hits.map((h) => h.name).join(', ')}` : undefined },
+  ];
+  const bad = items.filter((i) => !i.ok && i.hard).length;
+  return (
+    <div className="preflight">
+      <div className="row between">
+        <b>{t('Before the start')}</b>
+        <span className={bad ? 'warn-text' : 'ok-text'}>{bad ? t('{n} to fix', { n: bad }) : t('Ready to start')}</span>
+      </div>
+      <ul className="checks">
+        {items.map((i) => (
+          <li key={i.label} className={i.ok ? 'ok' : i.hard ? 'fail' : 'warn'}>
+            <span>{t(i.label)}</span>
+            {i.detail && <small>{t(i.detail)}</small>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function LiveMission({ m }: { m: Mission }) {
   const { s, dispatch } = useStore();
   const t = useT();
@@ -966,7 +1041,7 @@ export function LiveMission({ m }: { m: Mission }) {
           <MissionBadge status={m.status} />
         </div>
         <div className={`control-held${iHold ? ' me' : ''}`}>
-          <Lock size={15} /> CONTROL HELD · {t('Controlled by')} <strong>{userName(s, holder)}</strong>
+          <Lock size={15} /> {t('CONTROL HELD')} · {t('Controlled by')} <strong>{userName(s, holder)}</strong>
           {iHold && <span className="muted"> {t('(you)')}</span>}
         </div>
         {d.indoor && (
@@ -1022,6 +1097,7 @@ export function LiveMission({ m }: { m: Mission }) {
             <b>{t('{type} was not carried out:', { type: refused.type.toUpperCase() })}</b> {t(refused.detail!)}
           </p>
         )}
+        {m.status === 'assigned' && !d.indoor && <Preflight m={m} d={d} />}
         {m.status === 'assigned' && has('start') && (
           <button className="btn-primary wide big" disabled={!iHold || off || !!pending || m.approvedBy === me.id} onClick={() => send('start')}>
             <Play size={18} /> {pending?.type === 'start' ? t('Start requested — waiting for vehicle') : t('Send start request')}

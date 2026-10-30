@@ -444,8 +444,138 @@
 .route-mid:hover {
   background: var(--pt-color, #fbbf24);
 }
+
+/* Route planner: the checkpoint open in the panel, one where the vehicle waits or keeps the view, a leg's length. */
+.route-pt.sel {
+  box-shadow:
+    0 0 0 3px #0b1220,
+    0 0 0 6px #fbbf24;
+}
+.route-pt.acts::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid #0b1220;
+  background: #38bdf8;
+}
+.route-leg::after {
+  content: attr(data-len);
+  position: absolute;
+  top: 13px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(11, 18, 32, 0.82);
+  color: #fde68a;
+  font: 600 10px/16px system-ui, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.route-plan {
+  width: min(500px, calc(100% - 32px));
+  max-height: calc(100% - 80px);
+  overflow: auto;
+}
+.overview.hud .map-real .route-draft.route-plan {
+  width: min(500px, calc(100% - var(--view-l) - var(--view-r) - 32px));
+}
+.route-cps {
+  display: grid;
+  gap: 2px;
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.route-cps button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+}
+.route-cps button:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+.route-cps button.on {
+  border-color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+}
+.route-cp-n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fbbf24;
+  color: #0b1220;
+  font: 700 11px/1 system-ui, sans-serif;
+}
+.route-cp-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.route-cp-edit {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.06);
+}
+.route-cp-edit label {
+  display: grid;
+  gap: 2px;
+  color: var(--text-2);
+  font-size: 0.74rem;
+}
+.route-cp-edit label input {
+  min-width: 0;
+}
+.route-cp-edit label.check,
+.route-cp-edit .route-draft-actions {
+  grid-column: 1 / -1;
+}
+.route-cp-edit label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  font-size: 0.8rem;
+}
+.route-lib {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.route-lib select {
+  max-width: 170px;
+  font-size: 0.78rem;
+}
 @media (max-width: 640px) {
-  .zone-fields {
+  .zone-fields,
+  .route-cp-edit {
     grid-template-columns: 1fr;
   }
 }

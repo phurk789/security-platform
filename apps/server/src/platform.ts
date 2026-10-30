@@ -16,6 +16,11 @@ import {
   canMove,
   constraintChecksAt,
   routeAreaCheck,
+  sanitizeRoute,
+  checkpointLabel,
+  CAPTURE_DEFAULT_S,
+  type RoutePoint,
+  type SavedRoute,
   MISSION_BATTERY_HOLD_PCT,
   MISSION_BATTERY_WARN_PCT,
   fmtDate,
@@ -1256,11 +1261,10 @@ export class Platform {
     return fail(409, 'conflict', `Checkpoints ${routeOutsideSite(pts, fences, d.kind).join(', ')} are outside the ${hasArea ? 'operating area' : 'site'}.`);
   }
 
-  private validRoute(pts: Point[]) {
-    if (!Array.isArray(pts) || pts.length < 1 || pts.length > 50) fail(400, 'invalid', 'Route needs 1–50 checkpoints.');
-    for (const p of pts)
-      if (typeof p?.x !== 'number' || typeof p?.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y)) fail(400, 'invalid', 'Checkpoints must be {x, y} numbers.');
-    return pts.map((p) => ({ x: p.x, y: p.y }));
+  /** Route points with their settings (name, speed, wait, capture), checked; anything else is dropped. */
+  private validRoute(pts: unknown): RoutePoint[] {
+    const r = sanitizeRoute(pts);
+    return typeof r === 'string' ? fail(400, 'invalid', r) : r;
   }
 
   createMission(a: Actor, input: { incidentId: string; deviceId: string; operatorId: string; checkpoints: Point[] }) {
@@ -1813,6 +1817,8 @@ export class Platform {
     if (t.signal !== undefined) d.signal = t.signal;
     if (t.satellites !== undefined) d.satellites = t.satellites;
     if (typeof t.routeSpeed === 'number' && t.routeSpeed > 0 && t.routeSpeed < 50) d.routeSpeed = Math.round(t.routeSpeed * 100) / 100;
+    if (typeof t.armed === 'boolean') d.armed = t.armed;
+    if (typeof t.mode === 'string' && t.mode) d.flightMode = t.mode.slice(0, 24);
     if (d.indoor) d.floorPatrol = t.floorPatrol === true || undefined;
     if (t.temperatureC !== undefined) d.temperatureC = t.temperatureC;
     if (d.indoor && Number.isFinite(t.level)) d.indoor = { ...d.indoor, level: Math.round(t.level as number) };
@@ -2146,9 +2152,13 @@ export class Platform {
             this.onMissionCompleted(orgId, d.siteId, m, e.at);
           }
           break;
-        case 'checkpoint':
-          if (m) this.event(null, orgId, d.siteId, m.incidentId, `${d.id} passed checkpoint ${(e.checkpoint ?? 0) + 1}`, { actor: d.id, at: e.at });
+        case 'checkpoint': {
+          if (!m) break;
+          const i = e.checkpoint ?? 0;
+          this.event(null, orgId, d.siteId, m.incidentId, `${d.id} passed checkpoint ${checkpointLabel(m.checkpoints, i)}`, { actor: d.id, at: e.at });
+          if (m.checkpoints[i]?.capture) this.scheduleCapture(orgId, d, m, i, e.at);
           break;
+        }
         case 'failsafe_stop':
           if (m && (m.status === 'executing' || m.status === 'paused')) {
             m.status = 'paused';
@@ -3022,6 +3032,92 @@ export class Platform {
     }
   }
 
+  /**
+   * A capture point: once the wait there is over, keep that stretch of the vehicle's video as
+   * evidence on the mission's incident (a recording from the site media server; a storyboard for
+   * simulated vehicles). A real vehicle without recordings gets a note instead.
+   */
+  private scheduleCapture(orgId: string, d: Device & { orgId: string; siteId: string }, m: Mission, i: number, at: number) {
+    const dur = m.checkpoints[i].holdS || CAPTURE_DEFAULT_S;
+    const label = checkpointLabel(m.checkpoints, i);
+    const timer = setTimeout(
+      () => {
+        if (d.integration !== 'simulated' && !this.playbackOf(d)) {
+          this.event(null, orgId, d.siteId, m.incidentId, `View at checkpoint ${label} not kept`, {
+            actor: d.id,
+            tone: 'warn',
+            detail: `${d.id} has no recordings on the site media server.`,
+          });
+          return;
+        }
+        this.clipToEvidence(this.systemActor(orgId, 'system', `${d.id} route`), m.incidentId, d.id, at, dur)
+          .then((ev) => this.event(null, orgId, d.siteId, m.incidentId, `View at checkpoint ${label} kept as evidence`, { actor: d.id, tone: 'ok', detail: ev.title }))
+          .catch((err) =>
+            this.event(null, orgId, d.siteId, m.incidentId, `View at checkpoint ${label} not kept`, { actor: d.id, tone: 'warn', detail: err instanceof Error ? err.message : String(err) }),
+          );
+      },
+      (dur + 3) * 1000,
+    );
+    timer.unref?.();
+  }
+
+  // ---- saved routes (a route library per site) ---------------------------------------
+
+  listSavedRoutes(a: Actor, siteId?: string): SavedRoute[] {
+    this.require(a, 'mission.prepare', 'saved_routes', { mutating: false });
+    const site = this.site(a, siteId);
+    const rows = this.db.prepare('SELECT data FROM saved_routes WHERE org_id = ? AND site_id = ? ORDER BY rowid').all(a.orgId, site.id) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as SavedRoute);
+  }
+
+  private savedRoute(a: Actor, id: string) {
+    const r = this.db.prepare('SELECT site_id, data FROM saved_routes WHERE id = ? AND org_id = ?').get(id, a.orgId) as { site_id: string; data: string } | undefined;
+    if (!r || !this.inScope(a, a.orgId, r.site_id)) return fail(404, 'not_found', 'Saved route not found.');
+    return JSON.parse(r.data) as SavedRoute;
+  }
+
+  /**
+   * Save a route for reuse on a site (new, or `id` to change one). It must stay inside the site's
+   * operating area when one is drawn and keep clear of keep-out zones; each mission and patrol made
+   * from it is checked again against its own vehicle.
+   */
+  saveRoute(a: Actor, input: { siteId?: unknown; name?: unknown; points?: unknown }, id?: string): SavedRoute {
+    this.require(a, 'mission.prepare', id ?? 'saved_route');
+    const prev = id ? this.savedRoute(a, id) : undefined;
+    const site = this.site(a, prev?.siteId ?? (typeof input.siteId === 'string' && input.siteId ? input.siteId : undefined));
+    const name = String(input.name ?? prev?.name ?? '').trim();
+    if (!name || name.length > 60) fail(400, 'invalid', 'A route name of up to 60 characters is required.');
+    const points = input.points !== undefined ? this.validRoute(input.points) : prev!.points;
+    const fences = this.geofencesOf(a.orgId, site.id);
+    if (operatingAreas(fences, 'ugv').length) {
+      const out = routeOutsideSite(points, fences, 'ugv');
+      if (out.length) fail(409, 'conflict', `Checkpoints ${out.join(', ')} are outside the operating area.`);
+    }
+    const hits = routeViolations(points, undefined, fences, 'ugv');
+    if (hits.length) fail(409, 'conflict', `Route enters ${hits.map((h) => `${GEOFENCE_KIND_LABEL[h.kind].toLowerCase()} zone "${h.name}"`).join(' and ')}. Plan around it.`);
+    const same = this.listSavedRoutes(a, site.id).find((r) => r.name.toLowerCase() === name.toLowerCase() && r.id !== prev?.id);
+    if (same) fail(409, 'conflict', `A route named "${same.name}" is already saved on this site.`);
+    const r: SavedRoute = {
+      id: prev?.id ?? `${this.prefix(a.orgId)}RTE-${String(nextNumber(this.db, a.orgId, 'route')).padStart(3, '0')}`,
+      siteId: site.id,
+      name,
+      points,
+      createdBy: prev?.createdBy ?? a.name,
+      updatedAt: this.now(),
+    };
+    this.db.prepare('INSERT INTO saved_routes (id, org_id, site_id, data) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data = excluded.data').run(r.id, a.orgId, site.id, JSON.stringify(r));
+    this.audit(a, prev ? 'route.update' : 'route.save', r.id, 'ok', `${name} · ${points.length} checkpoints`);
+    return r;
+  }
+
+  deleteSavedRoute(a: Actor, id: string) {
+    this.require(a, 'mission.prepare', id);
+    const r = this.savedRoute(a, id);
+    this.db.prepare('DELETE FROM saved_routes WHERE id = ?').run(r.id);
+    this.audit(a, 'route.delete', r.id, 'ok', r.name);
+    return { ok: true };
+  }
+
   /** During a route: warn once when the battery runs low, and hold the vehicle at the hold level. */
   private checkRouteBattery(d: Device & { orgId: string; siteId: string }, pct: number) {
     const m = this.activeMission(d.id);
@@ -3242,7 +3338,7 @@ export class Platform {
     if (!op || !can(op.role, 'mission.accept')) fail(400, 'invalid', 'Choose an active operator.');
     // The patrol's standing approval is its creator's: they cannot also be its operator (two-person rule).
     if (operatorId === (prev?.createdBy ?? a.userId)) fail(400, 'invalid', 'Choose someone else as the operator: whoever sets up a patrol approves its runs (two-person rule).');
-    const raw = this.validRoute((input.route ?? prev?.route ?? []) as Point[]);
+    const raw = this.validRoute(input.route ?? prev?.route ?? []);
     // Indoor vehicles get the floor-plan checks below instead of the outdoor obstacle check.
     const route = d.indoor ? raw : this.clearRoute(a.orgId, d, raw);
     // Outdoors the route has to stay on the site (its operating area when it has one), as approval requires.
@@ -3730,7 +3826,7 @@ export class Platform {
     tx(this.db, () => {
       for (const u of users) this.db.prepare('UPDATE users SET site_ids = ? WHERE id = ?').run(JSON.stringify(u.ids.filter((x) => x !== site.id)), u.id);
       for (const k of keys) this.db.prepare('UPDATE api_keys SET site_ids = ? WHERE id = ?').run(JSON.stringify(k.ids.filter((x) => x !== site.id)), k.id);
-      for (const t of ['geofences', 'edge_origins', 'pairing_codes']) this.db.prepare(`DELETE FROM ${t} WHERE site_id = ?`).run(site.id);
+      for (const t of ['geofences', 'edge_origins', 'pairing_codes', 'saved_routes']) this.db.prepare(`DELETE FROM ${t} WHERE site_id = ?`).run(site.id);
       this.db.prepare('DELETE FROM sites WHERE id = ?').run(site.id);
       this.fenceCache.delete(site.id);
       this.audit(a, 'site.delete', site.id, 'ok', site.name);

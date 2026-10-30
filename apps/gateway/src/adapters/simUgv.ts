@@ -13,6 +13,7 @@ import {
   stepSensors,
   type Device,
   type Point,
+  type RoutePoint,
   type SensorState,
   type SrvCommand,
   type SrvDrive,
@@ -57,6 +58,8 @@ export class SimUgv extends SimDevice {
   private failsafeTimer?: ReturnType<typeof setTimeout>;
   private physics?: ReturnType<typeof setInterval>;
   private lastPhysics = 0;
+  /** Waiting at a checkpoint (its holdS) until this time, like the autopilot's hold time. */
+  private holdUntil = 0;
   // console driving
   private drive = new DriveState(SIM_TELEOP.deadmanMs);
   /** Signed speed while driven from the console (m/s, negative = reversing). */
@@ -129,6 +132,12 @@ export class SimUgv extends SimDevice {
       return;
     }
     this.roundStep(now);
+    if (now < this.holdUntil && this.mode !== 'idle') {
+      // A checkpoint with a wait: stand still until it is over.
+      this.motion.speed = 0;
+      stepSensors(this.sensors, dt, 'ugv', 0);
+      return;
+    }
     const r = stepMotion(this.motion, dt);
     stepSensors(this.sensors, dt, 'ugv', this.motion.speed);
     // Docked: idle within 3 m of the home position → the charger tops the battery up (~1 % per 20 s).
@@ -137,7 +146,10 @@ export class SimUgv extends SimDevice {
     if (this.round) return; // the robot's own round: no checkpoint or completion events for the platform
     const route = this.motion.route;
     for (const cp of r.checkpoints) {
-      if (route && cp < route.length) this.emit({ kind: 'checkpoint', checkpoint: cp, detail: `Reached checkpoint ${cp + 1} of ${route.length}` });
+      if (!route || cp >= route.length) continue;
+      this.emit({ kind: 'checkpoint', checkpoint: cp, detail: `Reached checkpoint ${cp + 1} of ${route.length}` });
+      const hold = (route[cp] as RoutePoint).holdS;
+      if (hold && cp < route.length - 1) this.holdUntil = now + hold * 1000;
     }
     if (r.completed) {
       this.mode = 'idle';
@@ -313,6 +325,7 @@ export class SimUgv extends SimDevice {
         m.route = cmd.route!.map((p) => ({ ...p }));
         m.nextCp = 0;
         m.done = false;
+        this.holdUntil = 0;
         m.intent = 'drive';
         m.brake = 'normal';
         this.mode = 'moving';
