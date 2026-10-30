@@ -19,7 +19,7 @@ export const MISSION_FLOW: Record<MissionStatus, MissionStatus[]> = {
   approved: ['assigned', 'pending_approval', 'cancelled'],
   assigned: ['executing', 'pending_approval', 'cancelled'],
   executing: ['paused', 'completed', 'cancelled', 'failed'],
-  paused: ['executing', 'cancelled', 'failed'],
+  paused: ['executing', 'completed', 'cancelled', 'failed'],
   rejected: ['pending_approval', 'cancelled', 'rejected'],
   completed: [],
   cancelled: [],

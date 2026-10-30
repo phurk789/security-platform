@@ -1,8 +1,8 @@
 // Rules shared by the server (authoritative) and the clients (to hide what a role cannot do).
 import { BUILDINGS, atBuilding } from './site';
-import { routeOutsideSite, routeViolations, type Geofence } from './routing';
+import { operatingAreas, routeOutsideSite, routeViolations, type Geofence } from './routing';
 import { floorPlan, inNoGo, routeCrossesWalls } from './indoor';
-import type { Device, Freshness, Mission, OperationalMode, Role } from './types';
+import type { Device, Freshness, Mission, OperationalMode, Point, Role } from './types';
 
 /** Telemetry older than this is stale (PRD §9: 5 s default for the demo vehicle). */
 export const STALE_AFTER_MS = 5_000;
@@ -16,6 +16,18 @@ export const COMMAND_TTL_MS = 10_000;
 export const UGV_SPEED = 6;
 /** Indoor UGVs (corridors, people nearby): walking pace. */
 export const INDOOR_UGV_SPEED = 1.5;
+/** Route speed assumed for a real vehicle until its autopilot reports one (m/s). */
+export const REAL_ROUTE_SPEED = 1;
+/** During a route: warn at this battery level, and hold the vehicle at the second. */
+export const MISSION_BATTERY_WARN_PCT = 20;
+export const MISSION_BATTERY_HOLD_PCT = 15;
+
+/** Speed to plan arrival times with: the autopilot's route speed, else the demo or a cautious default. */
+export function routeSpeedOf(d: Pick<Device, 'routeSpeed' | 'integration' | 'indoor'>) {
+  if (d.routeSpeed && d.routeSpeed > 0) return d.routeSpeed;
+  if (d.indoor) return INDOOR_UGV_SPEED;
+  return d.integration === 'simulated' ? UGV_SPEED : REAL_ROUTE_SPEED;
+}
 /** Sensitive actions need a password check within this window (risk-based auth, PRD §8). */
 export const STEP_UP_WINDOW_MS = 15 * 60_000;
 
@@ -206,17 +218,33 @@ export interface Check {
   detail: string;
 }
 
+/**
+ * Where a route may go: inside the site's operating area, legs included. A real vehicle needs one
+ * drawn; simulated vehicles on a site without one keep the demo site boundary.
+ */
+export function routeAreaCheck(d: Pick<Device, 'kind' | 'integration'>, route: Point[], fences: Geofence[]): Check {
+  const kind = d.kind === 'uav' ? 'uav' : 'ugv';
+  const hasArea = operatingAreas(fences, kind).length > 0;
+  if (!hasArea && d.integration !== 'simulated') return { label: 'Route inside the operating area', ok: false, hard: true, detail: 'No operating area drawn for this site' };
+  const out = route.length ? routeOutsideSite(route, fences, kind) : [];
+  return {
+    label: hasArea ? 'Route inside the operating area' : 'Route inside the site boundary',
+    ok: route.length > 0 && out.length === 0,
+    hard: true,
+    detail: out.length ? `Checkpoints ${out.join(', ')} outside` : `${route.length} checkpoints inside`,
+  };
+}
+
 /** Pre-approval checks shown to the supervisor and re-run by the server on approve. */
 export function constraintChecksAt(now: number, d: Device, m: Mission, nameOf: (id?: string) => string, fences: Geofence[] = []): Check[] {
   const fresh = freshnessAt(now, d);
-  // Inside the site's operating area when it has one, else the demo site boundary (legs included).
-  const inside = m.checkpoints.length > 0 && routeOutsideSite(m.checkpoints, fences, d.kind === 'uav' ? 'uav' : 'ugv').length === 0;
+  const area = routeAreaCheck(d, m.checkpoints, fences);
   const battery = d.battery ?? 0;
   const hits = d.kind === 'ugv' || d.kind === 'uav' ? routeViolations(m.checkpoints, d.pos, fences, d.kind) : [];
   const routeChecks: Check[] = d.indoor
     ? indoorRouteChecks(d, m)
     : [
-        { label: 'Route inside demo area', ok: inside, hard: true, detail: `${m.checkpoints.length} checkpoints inside site boundary` },
+        area,
         ...(fences.length
           ? [
               {

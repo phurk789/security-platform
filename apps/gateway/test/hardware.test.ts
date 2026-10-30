@@ -159,6 +159,12 @@ function fakeRover(opts: { armed?: boolean } = {}) {
     pos: { x: 214, y: 218 },
     speed: 0,
     mission: [] as { lat: number; lon: number }[],
+    /** Items as stored, for reading the route back (MISSION_REQUEST_LIST). */
+    items: [] as { x: number; y: number; command: number }[],
+    /** Change a stored waypoint after the upload (a lost or garbled item), to test the read-back check. */
+    garble: false,
+    /** Answer the first PARAM_REQUEST_READ for WP_SPEED with this value (m/s). */
+    wpSpeed: 1.2,
     expected: 0,
     received: [] as number[],
     silent: false,
@@ -172,6 +178,8 @@ function fakeRover(opts: { armed?: boolean } = {}) {
     fenceRefuse: false,
     /** COMMAND_LONG ids in the order they arrived. */
     commands: [] as number[],
+    /** Accept AUTO but do not move (throttle limit, failsafe). */
+    stuck: false,
   };
   const send = (m: unknown) => gcs && !st.silent && sock.send(proto.serialize(m as never, seq++ & 0xff), gcs.port, gcs.address);
   input
@@ -183,9 +191,42 @@ function fakeRover(opts: { armed?: boolean } = {}) {
       const clazz = reg[p.header.msgid];
       if (!clazz) return;
       const d = p.protocol.data(p.payload, clazz) as unknown as Record<string, number>;
-      if (p.header.msgid === 44) {
+      if (p.header.msgid === 20) {
+        // PARAM_REQUEST_READ
+        const id = String(d.paramId).replace(/\0/g, '');
+        if (id === 'WP_SPEED' || id === 'CRUISE_SPEED') {
+          const v = new common.ParamValue();
+          v.paramId = id;
+          v.paramValue = id === 'WP_SPEED' ? st.wpSpeed : 2;
+          v.paramType = 9 as never;
+          v.paramCount = 900;
+          v.paramIndex = 1;
+          send(v);
+        }
+      } else if (p.header.msgid === 43) {
+        // MISSION_REQUEST_LIST: the route as stored
+        const c = new common.MissionCount();
+        c.targetSystem = 255;
+        c.targetComponent = 190;
+        c.count = st.items.length;
+        send(c);
+      } else if (p.header.msgid === 51) {
+        // MISSION_REQUEST_INT from the ground station: send the stored item back
+        const s = st.items[d.seq];
+        if (!s) return;
+        const it = new common.MissionItemInt();
+        it.targetSystem = 255;
+        it.targetComponent = 190;
+        it.seq = d.seq;
+        it.frame = 6 as never;
+        it.command = s.command as never;
+        it.x = s.x;
+        it.y = s.y;
+        send(it);
+      } else if (p.header.msgid === 44) {
         st.expected = d.count;
         st.mission = [];
+        st.items = [];
         const r = new common.MissionRequestInt();
         r.targetSystem = 255;
         r.targetComponent = 190;
@@ -193,6 +234,7 @@ function fakeRover(opts: { armed?: boolean } = {}) {
         send(r);
       } else if (p.header.msgid === 73) {
         st.mission.push({ lat: d.x / 1e7, lon: d.y / 1e7 });
+        st.items.push({ x: d.x, y: d.y + (st.garble && st.items.length === 1 ? 500 : 0), command: d.command });
         if (st.mission.length < st.expected) {
           const r = new common.MissionRequestInt();
           r.targetSystem = 255;
@@ -212,9 +254,9 @@ function fakeRover(opts: { armed?: boolean } = {}) {
         ack.result = 0 as never;
         if (d.command === 176) {
           st.mode = d._param2;
-          st.speed = st.mode === 10 ? 2 : 0;
+          st.speed = st.mode === 10 && !st.stuck ? 2 : 0;
         }
-        if (d.command === 193) st.speed = d._param1 ? 2 : 0;
+        if (d.command === 193) st.speed = d._param1 && !st.stuck ? 2 : 0;
         if (d.command === 181) st.relays[d._param1] = d._param2; // DO_SET_RELAY
         if (d.command === 207) {
           // DO_FENCE_ENABLE
@@ -262,11 +304,18 @@ function fakeRover(opts: { armed?: boolean } = {}) {
     sys.batteryRemaining = 76;
     send(sys);
   }, 200);
-  return new Promise<{ port: number; st: typeof st; close: () => void }>((resolve) =>
+  /** The autopilot reached mission item `seq` (ArduPilot: route point n is item n, item 0 is home). */
+  const reach = (seq: number) => {
+    const r = new common.MissionItemReached();
+    r.seq = seq;
+    send(r);
+  };
+  return new Promise<{ port: number; st: typeof st; reach: typeof reach; close: () => void }>((resolve) =>
     sock.bind(0, '127.0.0.1', () =>
       resolve({
         port: (sock.address() as { port: number }).port,
         st,
+        reach,
         close: () => {
           clearInterval(timer);
           sock.close();
@@ -318,6 +367,13 @@ describe('MAVLink vehicle adapter (UniFC 6 Pico class, via UniRC datalink)', () 
     const statuses = got.updates.map((u) => u.status);
     expect(statuses.indexOf('acknowledged')).toBeLessThan(statuses.indexOf('executing'));
     expect(statuses.indexOf('executing')).toBeLessThan(statuses.indexOf('succeeded'));
+    // The platform hears at once that the route is on its way, then that it was read back and matched.
+    expect(got.updates[0]).toMatchObject({ status: 'acknowledged', detail: expect.stringMatching(/Sending the route/) });
+    expect(got.updates.find((u) => u.status === 'executing')!.detail).toMatch(/checked \(2 waypoints\)/);
+    expect(rover.st.received).toContain(43); // MISSION_REQUEST_LIST: read back after the upload
+    expect(got.updates.find((u) => u.status === 'succeeded')!.detail).toMatch(/Moving/);
+    // Route speed from the autopilot (WP_SPEED) for arrival times.
+    await until(() => got.telemetry.at(-1)?.routeSpeed === 1.2);
     // ArduPilot: item 0 is home, then the route; coordinates land back on the route points.
     expect(rover.st.mission).toHaveLength(3);
     const p1 = geoToSite(GEO, rover.st.mission[1]);
@@ -469,7 +525,7 @@ describe('MAVLink vehicle adapter (UniFC 6 Pico class, via UniRC datalink)', () 
     expect(got.camera[2]).toMatchObject({ ok: false, confirmed: false });
   }, 15_000);
 
-  it('reports a mode change made on the remote and goes quiet when the link drops', async () => {
+  it('reports a mode change made on the remote as an interruption, the switch back as a resume, and goes quiet when the link drops', async () => {
     const rover = await fakeRover();
     const a = new MavlinkVehicleAdapter({ deviceId: 'UGV-04', kind: 'ugv', profile: 'ardupilot-rover', link: { mode: 'client', host: '127.0.0.1', port: rover.port }, geo: GEO });
     const { ctx, got } = fakeCtx();
@@ -479,11 +535,83 @@ describe('MAVLink vehicle adapter (UniFC 6 Pico class, via UniRC datalink)', () 
     a.onCommand(cmd('start', { deviceId: 'UGV-04', route: [{ x: 300, y: 218 }] }));
     await until(() => got.updates.some((u) => u.status === 'succeeded'), 8000);
     rover.st.mode = 0; // pilot flips to MANUAL on the remote
-    await until(() => got.events.some((e) => e.kind === 'fault' && /MANUAL/.test(e.detail ?? '')));
+    await until(() => got.events.some((e) => e.kind === 'route_interrupted' && /MANUAL/.test(e.detail ?? '')), 5000);
+    expect(got.events.filter((e) => e.kind === 'route_interrupted')).toHaveLength(1); // once, not every heartbeat
+    rover.st.mode = 10; // and back to AUTO
+    await until(() => got.events.some((e) => e.kind === 'route_resumed'), 5000);
     rover.st.silent = true;
     await wait(3300);
     const n = got.telemetry.length;
     await wait(1200);
     expect(got.telemetry.length).toBe(n);
   }, 20_000);
+
+  const rover = (port: number, extra: Partial<ConstructorParameters<typeof MavlinkVehicleAdapter>[0]> = {}) =>
+    new MavlinkVehicleAdapter({ deviceId: 'UGV-06', kind: 'ugv', profile: 'ardupilot-rover', link: { mode: 'client', host: '127.0.0.1', port }, geo: GEO, ...extra });
+
+  it('does not start when the route read back from the vehicle differs from the one sent', async () => {
+    const r = await fakeRover();
+    r.st.garble = true;
+    const a = rover(r.port);
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), r.close);
+    await until(() => got.telemetry.length > 0);
+    a.onCommand(cmd('start', { deviceId: 'UGV-06', route: [{ x: 262, y: 218 }, { x: 300, y: 230 }] }));
+    await until(() => got.updates.some((u) => u.status === 'failed'), 8000);
+    expect(got.updates.find((u) => u.status === 'failed')!.detail).toMatch(/Waypoint 1 on the vehicle differs/);
+    expect(r.st.commands).not.toContain(176); // never asked for AUTO
+  }, 15_000);
+
+  it('holds the vehicle and fails the start when it does not move in AUTO', async () => {
+    const r = await fakeRover();
+    r.st.stuck = true;
+    const a = rover(r.port, { moveTimeoutMs: 1500 });
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), r.close);
+    await until(() => got.telemetry.length > 0);
+    a.onCommand(cmd('start', { deviceId: 'UGV-06', route: [{ x: 262, y: 218 }] }));
+    await until(() => got.updates.some((u) => u.status === 'failed'), 8000);
+    expect(got.updates.some((u) => u.status === 'succeeded')).toBe(false);
+    expect(got.updates.find((u) => u.status === 'failed')!.detail).toMatch(/No movement 2 s after start .*Set to HOLD/);
+    await until(() => r.st.mode === 4); // HOLD
+    expect(got.events.some((e) => e.kind === 'route_interrupted')).toBe(false); // the platform's own hold
+  }, 15_000);
+
+  it('ends the route at the last checkpoint: completes, holds, and leaves later mode changes to the pilot', async () => {
+    const r = await fakeRover();
+    const a = rover(r.port);
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), r.close);
+    await until(() => got.telemetry.length > 0);
+    a.onCommand(cmd('start', { deviceId: 'UGV-06', route: [{ x: 262, y: 218 }, { x: 300, y: 218 }] }));
+    await until(() => got.updates.some((u) => u.status === 'succeeded'), 8000);
+    r.reach(1);
+    r.reach(2);
+    await until(() => got.events.some((e) => e.kind === 'route_complete'));
+    expect(got.events.filter((e) => e.kind === 'checkpoint').map((e) => e.checkpoint)).toEqual([0, 1]);
+    await until(() => r.st.mode === 4); // held at the end
+    r.st.mode = 0; // the pilot takes it back in MANUAL
+    await wait(2500);
+    expect(got.events.some((e) => e.kind === 'route_interrupted' || e.kind === 'fault')).toBe(false);
+    expect(got.telemetry.at(-1)!.nextCp).toBeUndefined();
+  }, 20_000);
+
+  it('reports a disarm during the route once, and refuses resume until the pilot arms again', async () => {
+    const r = await fakeRover();
+    const a = rover(r.port);
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), r.close);
+    await until(() => got.telemetry.length > 0);
+    a.onCommand(cmd('start', { deviceId: 'UGV-06', route: [{ x: 300, y: 218 }] }));
+    await until(() => got.updates.some((u) => u.status === 'succeeded'), 8000);
+    r.st.armed = false;
+    await until(() => got.events.some((e) => e.kind === 'route_interrupted' && /disarmed/.test(e.detail ?? '')), 4000);
+    a.onCommand(cmd('resume', { deviceId: 'UGV-06' }));
+    await until(() => got.updates.some((u) => u.status === 'rejected'));
+    expect(got.updates.find((u) => u.status === 'rejected')!.detail).toMatch(/Arm it on the remote/);
+  }, 15_000);
 });

@@ -115,6 +115,8 @@ export interface GwTelemetry {
   /** Radio link quality 0–100 as measured by the device. */
   signal?: number;
   satellites?: number;
+  /** Speed the vehicle drives routes at (m/s), read from the autopilot (ArduPilot WP_SPEED). */
+  routeSpeed?: number;
   temperatureC?: number;
   /** Gimbal camera attitude/zoom (SIYI and similar). */
   gimbal?: GimbalState;
@@ -136,7 +138,11 @@ export interface GwDeviceEvent {
   t: 'event';
   deviceId: string;
   at: number;
-  kind: 'failsafe_stop' | 'route_complete' | 'checkpoint' | 'snapshot' | 'fault' | 'detection' | 'analytics';
+  /**
+   * route_interrupted: the vehicle left AUTO or was disarmed during a route without the platform
+   * asking (remote switch, vehicle failsafe). route_resumed: it went back to AUTO the same way.
+   */
+  kind: 'failsafe_stop' | 'route_complete' | 'route_interrupted' | 'route_resumed' | 'checkpoint' | 'snapshot' | 'fault' | 'detection' | 'analytics';
   detail?: string;
   /** For snapshot: base64 SVG/JPEG frame. */
   frame?: { mime: string; base64: string };

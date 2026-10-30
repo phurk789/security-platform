@@ -108,6 +108,8 @@ export interface MavlinkVehicleConfig {
   gcsRelay?: boolean | { host?: string; port?: number };
   /** How long a silent ground station counts as connected (tests). */
   gcsRelayStaleMs?: number;
+  /** How long a start or resume may take to show movement (tests; default START_MOVE_TIMEOUT_MS). */
+  moveTimeoutMs?: number;
 }
 
 /** Live driving from the console. Every field is optional; see TELEOP_DEFAULTS. */
@@ -174,12 +176,15 @@ const MSG = {
   SYS_STATUS: 1,
   GPS_RAW_INT: 24,
   LOCAL_POSITION_NED: 32,
+  PARAM_VALUE: 22,
   GLOBAL_POSITION_INT: 33,
   MISSION_REQUEST: 40,
   MISSION_CURRENT: 42,
+  MISSION_COUNT: 44,
   MISSION_ITEM_REACHED: 46,
   MISSION_ACK: 47,
   MISSION_REQUEST_INT: 51,
+  MISSION_ITEM_INT: 73,
   VFR_HUD: 74,
   COMMAND_ACK: 77,
   RC_CHANNELS_OVERRIDE: 70,
@@ -187,7 +192,7 @@ const MSG = {
   STATUSTEXT: 253,
 };
 /** Answers the vehicle addresses to one ground station (target_component). */
-const REPLIES = new Set([MSG.COMMAND_ACK, MSG.MISSION_REQUEST, MSG.MISSION_REQUEST_INT, MSG.MISSION_ACK]);
+const REPLIES = new Set([MSG.COMMAND_ACK, MSG.MISSION_REQUEST, MSG.MISSION_REQUEST_INT, MSG.MISSION_ACK, MSG.MISSION_COUNT, MSG.MISSION_ITEM_INT]);
 const CMD = {
   NAV_WAYPOINT: 16,
   DO_SET_RELAY: 181,
@@ -204,6 +209,12 @@ const MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1;
 const LINK_STALE_MS = 3000;
 /** A position older than this (no fresh fix) is not reported: the sample goes out without one. */
 const POS_STALE_MS = 3000;
+/** A start or resume counts only once the vehicle moves (or reaches a checkpoint) within this time; otherwise it is held. */
+export const START_MOVE_TIMEOUT_MS = 15_000;
+/** Pause and stop must bring the vehicle to a standstill within this time. */
+export const STOP_TIMEOUT_MS = 10_000;
+/** A mode change out of AUTO is reported after this delay, so the hold at the end of a route is not taken for one. */
+const INTERRUPT_DELAY_MS = 1500;
 
 /** Flight-mode numbers per autopilot. */
 const MODES: Record<VehicleProfile, { auto: number[]; hold: number[]; manual: number[]; failsafe: number[]; name: (m: number) => string }> = {
@@ -250,6 +261,8 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
+type MissionItems = InstanceType<typeof common.MissionItemInt>[];
+
 export class MavlinkVehicleAdapter implements Adapter {
   readonly declaration: AdapterDeclaration;
   private ctx!: AdapterContext;
@@ -263,7 +276,9 @@ export class MavlinkVehicleAdapter implements Adapter {
   private ledger = new CommandLedger();
   private input = new PassThrough();
   private ackWaiters = new Map<number, Pending>();
-  private missionWaiter: { items: ReturnType<MavlinkVehicleAdapter['buildMission']>; done: Pending } | null = null;
+  private missionWaiter: { items: MissionItems; done: Pending } | null = null;
+  /** Reading the route back after an upload: what was sent, and the next item asked for. */
+  private missionCheck: { sent: MissionItems; next: number; done: Pending } | null = null;
 
   // vehicle state
   private sys = 0;
@@ -290,8 +305,15 @@ export class MavlinkVehicleAdapter implements Adapter {
   private missionLength = 0;
   private nextCp = 0;
   private activeStart: { cmd: SrvCommand; commandId: string; since: number } | null = null;
-  private activeStop: { commandId: string; type: 'pause' | 'stop' } | null = null;
+  private activeStop: { commandId: string; type: 'pause' | 'stop'; since: number } | null = null;
   private activeResume: { commandId: string; since: number } | null = null;
+  /** The route stopped without the platform asking; reported once until it runs again. */
+  private interrupted = false;
+  private interruptTimer?: ReturnType<typeof setTimeout>;
+  /** Route speed from the autopilot (WP_SPEED, else CRUISE_SPEED), m/s. */
+  private routeSpeed?: number;
+  private paramAsks = 0;
+  private speedParams: { wp?: number; cruise?: number } = {};
   private expectMode: number | null = null;
   /** The platform turned the geofence on for a route (missionFence) and has not turned it off yet. */
   private fenceOn = false;
@@ -678,6 +700,8 @@ export class MavlinkVehicleAdapter implements Adapter {
       }
       if (p.header.sysid !== this.sys) return;
       const now = this.ctx.now();
+      // Route speed for arrival times: asked on the first heartbeats until the autopilot answers.
+      if (this.cfg.profile === 'ardupilot-rover' && this.routeSpeed === undefined && this.paramAsks < 6) this.askParam(this.paramAsks++ % 2 ? 'CRUISE_SPEED' : 'WP_SPEED');
       this.comps.set('fc', {
         status: 'ok',
         version: (hb.autopilot as number) === 12 ? 'PX4' : (hb.autopilot as number) === 3 ? 'ArduPilot' : `autopilot ${hb.autopilot}`,
@@ -686,7 +710,11 @@ export class MavlinkVehicleAdapter implements Adapter {
       if (this.wasStale && this.lastHeartbeat) this.onReconnect(hb.customMode);
       this.wasStale = false;
       this.lastHeartbeat = now;
+      const wasArmed = this.armed;
       this.armed = ((hb.baseMode as number) & MAV_MODE_FLAG_SAFETY_ARMED) !== 0;
+      // The platform never disarms: a disarm during a route came from the remote or a vehicle failsafe.
+      if (wasArmed && !this.armed && this.missionLength)
+        this.interrupt(`Vehicle disarmed during the route (remote switch or vehicle failsafe) at checkpoint ${this.cpText()}. Arm it on the remote to resume.`);
       if (!this.armed && this.fenceOn) this.fenceOff(); // retried every heartbeat until confirmed
       this.onMode(hb.customMode);
       return;
@@ -753,6 +781,19 @@ export class MavlinkVehicleAdapter implements Adapter {
           this.comps.set('radio', { status: this.signal < 25 ? 'warn' : 'ok', detail: `RSSI ${this.signal}%` });
         }
         break;
+      case MSG.PARAM_VALUE: {
+        const id = String(data.paramId ?? '').replace(/\0/g, '');
+        const v = Number(data.paramValue);
+        if (!Number.isFinite(v)) break;
+        if (id === 'WP_SPEED') this.speedParams.wp = v;
+        else if (id === 'CRUISE_SPEED') this.speedParams.cruise = v;
+        else break;
+        // Rover: WP_SPEED 0 means "use CRUISE_SPEED".
+        const { wp, cruise } = this.speedParams;
+        const s = wp !== undefined && wp > 0 ? wp : wp === 0 && cruise !== undefined && cruise > 0 ? cruise : undefined;
+        if (s !== undefined) this.routeSpeed = Math.round(s * 100) / 100;
+        break;
+      }
       case MSG.MISSION_CURRENT:
         this.nextCp = Math.max(0, Math.min(this.missionLength, (data.seq as number) - this.missionOffset));
         break;
@@ -761,7 +802,40 @@ export class MavlinkVehicleAdapter implements Adapter {
         if (idx >= 0 && idx < this.missionLength) {
           this.ctx.event({ kind: 'checkpoint', checkpoint: idx });
           this.nextCp = idx + 1;
-          if (idx === this.missionLength - 1) this.ctx.event({ kind: 'route_complete' });
+          this.confirmMotion(`Reached checkpoint ${idx + 1} of ${this.missionLength}.`);
+          if (idx === this.missionLength - 1) this.finishRoute();
+        }
+        break;
+      }
+      case MSG.MISSION_COUNT: {
+        const c = this.missionCheck;
+        if (!c) break;
+        const want = c.sent.length;
+        if ((data.count as number) !== want)
+          this.endCheck(false, `The vehicle holds ${(data.count as number) - this.missionOffset} waypoints instead of ${want - this.missionOffset}. Route not started.`);
+        else this.requestItem(c.next);
+        break;
+      }
+      case MSG.MISSION_ITEM_INT: {
+        const c = this.missionCheck;
+        if (!c || (data.seq as number) !== c.next) break;
+        const s = c.sent[c.next];
+        // Item 0 is ArduPilot's home, which the vehicle rewrites itself: compare the route only.
+        const same = (data.command as number) === (s.command as number) && Math.abs((data.x as number) - s.x) <= 1 && Math.abs((data.y as number) - s.y) <= 1;
+        if (!same) {
+          this.endCheck(false, `Waypoint ${c.next - this.missionOffset + 1} on the vehicle differs from the route sent. Route not started.`);
+          break;
+        }
+        c.next++;
+        if (c.next < c.sent.length) this.requestItem(c.next);
+        else {
+          const ack = new common.MissionAck();
+          ack.targetSystem = this.sys;
+          ack.targetComponent = this.comp;
+          ack.type = 0 as never;
+          ack.missionType = 0 as never;
+          this.send(ack);
+          this.endCheck(true);
         }
         break;
       }
@@ -804,10 +878,66 @@ export class MavlinkVehicleAdapter implements Adapter {
     this.mode = mode;
     if (prev === -1 || prev === mode) return;
     const M = MODES[this.cfg.profile];
-    // Someone changed mode on the remote while we were running a route: report the override.
-    if (this.expectMode !== mode && (M.manual.includes(mode) || M.failsafe.includes(mode)) && (this.activeStart || this.missionLength)) {
-      this.ctx.event({ kind: 'fault', detail: `Mode changed to ${M.name(mode)} outside the platform (remote override or failsafe). The platform will not change it back.` });
+    if (this.expectMode === mode || !this.missionLength) return;
+    // Someone changed mode on the remote (or a vehicle failsafe did) during a route: report it, never fight it.
+    if (M.auto.includes(prev) && !M.auto.includes(mode)) {
+      const detail = `Mode changed to ${M.name(mode)} outside the platform (remote switch or vehicle failsafe) at checkpoint ${this.cpText()}. The platform will not change it back.`;
+      this.expectMode = mode; // so a switch back to AUTO on the remote is seen as one
+      clearTimeout(this.interruptTimer);
+      // At the last checkpoint the autopilot holds by itself; its "reached" message may come just after.
+      this.interruptTimer = setTimeout(() => this.interrupt(detail), INTERRUPT_DELAY_MS);
+    } else if (M.auto.includes(mode)) {
+      clearTimeout(this.interruptTimer);
+      this.interrupted = false;
+      this.ctx.event({ kind: 'route_resumed', detail: `Mode changed back to ${M.name(mode)} on the remote; the route continues at checkpoint ${this.cpText()}.` });
     }
+  }
+
+  /** "3 of 5": the checkpoint the vehicle is heading to. */
+  private cpText() {
+    return `${Math.min(this.nextCp + 1, this.missionLength)} of ${this.missionLength}`;
+  }
+
+  /** The route stopped without the platform asking (remote switch, vehicle failsafe): tell the platform once. */
+  private interrupt(detail: string) {
+    if (this.interrupted || !this.missionLength) return;
+    this.interrupted = true;
+    this.ctx.event({ kind: 'route_interrupted', detail });
+  }
+
+  /** A pending start or resume is proven by movement or by a checkpoint reached. */
+  private confirmMotion(detail: string) {
+    if (this.activeStart) {
+      this.ctx.commandUpdate({ commandId: this.activeStart.commandId, status: 'succeeded', detail });
+      this.ledger.record(this.activeStart.cmd, 'succeeded');
+      this.activeStart = null;
+    }
+    if (this.activeResume) {
+      this.ctx.commandUpdate({ commandId: this.activeResume.commandId, status: 'succeeded', detail });
+      this.activeResume = null;
+    }
+  }
+
+  /** Last checkpoint reached: the route is over. A ground vehicle holds there; later mode changes are the pilot's. */
+  private finishRoute() {
+    clearTimeout(this.interruptTimer);
+    this.ctx.event({ kind: 'route_complete' });
+    this.missionLength = 0;
+    this.interrupted = false;
+    if (this.cfg.kind !== 'ugv') return;
+    const M = MODES[this.cfg.profile];
+    // ArduPilot Rover holds by itself (MIS_DONE_BEHAVE 0); asking again covers other settings.
+    if (!M.hold.includes(this.mode)) void this.setMode(M.hold[0]);
+    else this.expectMode = this.mode;
+  }
+
+  private askParam(id: string) {
+    const r = new common.ParamRequestRead();
+    r.targetSystem = this.sys;
+    r.targetComponent = this.comp;
+    r.paramId = id;
+    r.paramIndex = -1;
+    this.send(r);
   }
 
   private onReconnect(mode: number) {
@@ -845,6 +975,7 @@ export class MavlinkVehicleAdapter implements Adapter {
         heading: this.headingDeg,
         signal: this.signal,
         satellites: this.cfg.indoor ? undefined : this.satellites,
+        routeSpeed: this.routeSpeed,
         level: this.cfg.indoor?.level,
         // 4-in-1 module state as last confirmed by the flight controller (no gimbal on this device)
         gimbal: this.cfg.payload ? { yaw: 0, pitch: 0, spotlight: this.payloadState.spotlight, beacon: this.payloadState.beacon } : undefined,
@@ -852,19 +983,36 @@ export class MavlinkVehicleAdapter implements Adapter {
       } as Parameters<AdapterContext['telemetry']>[0]);
     }
     const M = MODES[this.cfg.profile];
-    // Confirm effects from telemetry, never from the request alone.
-    if (this.activeStart && M.auto.includes(this.mode) && this.armed && (this.speed > 0.3 || now - this.activeStart.since > 3000)) {
-      this.ctx.commandUpdate({ commandId: this.activeStart.commandId, status: 'succeeded' });
-      this.ledger.record(this.activeStart.cmd, 'succeeded');
-      this.activeStart = null;
-    }
-    if (this.activeResume && M.auto.includes(this.mode) && (this.speed > 0.3 || now - this.activeResume.since > 3000)) {
-      this.ctx.commandUpdate({ commandId: this.activeResume.commandId, status: 'succeeded' });
-      this.activeResume = null;
+    // Confirm effects from telemetry, never from the request alone: a start or resume counts once
+    // the vehicle moves in AUTO (or reaches a checkpoint, see MISSION_ITEM_REACHED).
+    if ((this.activeStart || this.activeResume) && M.auto.includes(this.mode) && this.armed && this.speed > 0.3) this.confirmMotion('Moving along the route.');
+    const waiting = this.activeStart ?? this.activeResume;
+    if (waiting && now - waiting.since > (this.cfg.moveTimeoutMs ?? START_MOVE_TIMEOUT_MS)) {
+      // Not moving: hold it, so the vehicle cannot set off later while the platform shows it standing.
+      const what = this.activeStart ? 'start' : 'resume';
+      const detail = `No movement ${Math.round((this.cfg.moveTimeoutMs ?? START_MOVE_TIMEOUT_MS) / 1000)} s after ${what} (mode ${M.name(this.mode)}, ${this.armed ? 'armed' : 'disarmed'}). Set to HOLD. Check the arming switch, the throttle limit and WP_SPEED, then try again.`;
+      if (this.activeStart) {
+        this.ledger.record(this.activeStart.cmd, 'failed', detail);
+        this.missionLength = 0; // the start failed: no route is running
+      }
+      this.ctx.commandUpdate({ commandId: waiting.commandId, status: 'failed', detail });
+      this.activeStart = this.activeResume = null;
+      void this.setMode(M.hold[0]);
     }
     if (this.activeStop && this.speed < 0.2) {
       this.ctx.commandUpdate({ commandId: this.activeStop.commandId, status: 'succeeded', detail: 'Vehicle reports speed 0.' });
-      if (this.activeStop.type === 'stop') this.missionLength = 0;
+      if (this.activeStop.type === 'stop') {
+        this.missionLength = 0;
+        this.interrupted = false;
+        clearTimeout(this.interruptTimer);
+      }
+      this.activeStop = null;
+    } else if (this.activeStop && now - this.activeStop.since > STOP_TIMEOUT_MS) {
+      this.ctx.commandUpdate({
+        commandId: this.activeStop.commandId,
+        status: 'failed',
+        detail: `Still moving at ${this.speed.toFixed(1)} m/s ${STOP_TIMEOUT_MS / 1000} s after HOLD was asked. Stop it on the remote.`,
+      });
       this.activeStop = null;
     }
   }
@@ -898,17 +1046,17 @@ export class MavlinkVehicleAdapter implements Adapter {
     });
   }
 
-  private uploadMission(route: Point[]): Promise<{ ok: boolean; detail?: string }> {
+  private uploadMission(route: Point[]): Promise<{ ok: boolean; detail?: string; items: MissionItems }> {
     return new Promise((resolve) => {
       const items = this.buildMission(route);
       const timer = setTimeout(
         () => {
           this.missionWaiter = null;
-          resolve({ ok: false, detail: 'Mission upload timed out.' });
+          resolve({ ok: false, detail: 'Route upload timed out. Check the radio link and try again.', items });
         },
         2000 + items.length * 700,
       );
-      this.missionWaiter = { items, done: { timer, resolve: (ok, detail) => resolve({ ok, detail }) } };
+      this.missionWaiter = { items, done: { timer, resolve: (ok, detail) => resolve({ ok, detail, items }) } };
       const count = new common.MissionCount();
       count.targetSystem = this.sys;
       count.targetComponent = this.comp;
@@ -916,6 +1064,42 @@ export class MavlinkVehicleAdapter implements Adapter {
       count.missionType = 0 as never;
       this.send(count);
     });
+  }
+
+  /** Read the route back from the vehicle and compare it with what was sent, so a lost or changed item cannot go unnoticed. */
+  private checkMission(sent: MissionItems): Promise<{ ok: boolean; detail?: string }> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(
+        () => {
+          this.missionCheck = null;
+          resolve({ ok: false, detail: 'Reading the route back from the vehicle timed out. Route not started.' });
+        },
+        2000 + sent.length * 700,
+      );
+      this.missionCheck = { sent, next: this.missionOffset, done: { timer, resolve: (ok, detail) => resolve({ ok, detail }) } };
+      const req = new common.MissionRequestList();
+      req.targetSystem = this.sys;
+      req.targetComponent = this.comp;
+      req.missionType = 0 as never;
+      this.send(req);
+    });
+  }
+
+  private requestItem(seq: number) {
+    const r = new common.MissionRequestInt();
+    r.targetSystem = this.sys;
+    r.targetComponent = this.comp;
+    r.seq = seq;
+    r.missionType = 0 as never;
+    this.send(r);
+  }
+
+  private endCheck(ok: boolean, detail?: string) {
+    const c = this.missionCheck;
+    if (!c) return;
+    this.missionCheck = null;
+    clearTimeout(c.done.timer);
+    c.done.resolve(ok, detail);
   }
 
   /** Turn the platform's geofence off again after the vehicle disarmed, so it can be armed indoors. */
@@ -983,25 +1167,40 @@ export class MavlinkVehicleAdapter implements Adapter {
         case 'start': {
           if (!cmd.route?.length) return fail('No route in the start command.', 'rejected');
           if (!this.armed && !this.cfg.allowRemoteArm) return fail('Vehicle is disarmed. Arm it on the remote after the safety check, then send start again.', 'rejected');
+          if (this.missionWaiter || this.missionCheck) return fail('Another route is being sent to the vehicle. Wait for it to finish.', 'rejected');
+          const n = cmd.route.length;
+          // Answer at once: a long route takes a while over the radio, and silence would look like a lost command.
+          this.ctx.commandUpdate({ commandId: cmd.commandId, status: 'acknowledged', detail: `Sending the route to the vehicle (${n} waypoints)…` });
+          if (this.cfg.profile === 'ardupilot-rover') this.askParam('WP_SPEED'); // arrival times follow a changed speed
           const up = await this.uploadMission(cmd.route);
-          if (!up.ok) return fail(up.detail ?? 'Mission upload failed.');
-          this.missionLength = cmd.route.length;
+          if (!up.ok) return fail(up.detail ?? 'Route upload failed.');
+          const check = await this.checkMission(up.items);
+          if (!check.ok) return fail(check.detail ?? 'The route on the vehicle could not be checked. Route not started.');
+          this.missionLength = n;
           this.nextCp = 0;
-          this.ctx.commandUpdate({ commandId: cmd.commandId, status: 'acknowledged', detail: `Route uploaded (${cmd.route.length} waypoints).` });
+          this.interrupted = false;
+          // A refusal from here on leaves no route running on the platform's side.
+          const abort = (detail: string) => {
+            this.missionLength = 0;
+            fail(detail);
+          };
+          this.ctx.commandUpdate({ commandId: cmd.commandId, status: 'executing', detail: `Route on the vehicle and checked (${n} waypoints). Starting…` });
           if (!this.armed) {
             const a = await this.command(CMD.COMPONENT_ARM_DISARM, [1]);
-            if (!a.ok) return fail(`Arming refused: ${a.detail}`);
+            if (!a.ok) return abort(`Arming refused: ${a.detail}`);
           }
           if (this.cfg.missionFence) {
             const f = await this.command(CMD.DO_FENCE_ENABLE, [1]);
-            if (!f.ok) return fail(`Geofence could not be turned on (${f.detail}). Route not started.`);
+            if (!f.ok) return abort(`Geofence could not be turned on (${f.detail}). Route not started.`);
             this.fenceOn = true;
           }
           const m = await this.setMode(M.auto[0]);
-          if (!m.ok) return fail(`AUTO mode refused: ${m.detail}`);
+          if (!m.ok) return abort(`AUTO mode refused: ${m.detail}`);
           const s = await this.command(CMD.MISSION_START, [0, 0]);
-          if (!s.ok && !M.auto.includes(this.mode)) return fail(`Mission start refused: ${s.detail}`);
-          this.ctx.commandUpdate({ commandId: cmd.commandId, status: 'executing' });
+          if (!s.ok && !M.auto.includes(this.mode)) {
+            this.missionLength = 0;
+            return fail(`Mission start refused: ${s.detail}`);
+          }
           this.activeStart = { cmd, commandId: cmd.commandId, since: this.ctx.now() };
           return;
         }
@@ -1010,13 +1209,21 @@ export class MavlinkVehicleAdapter implements Adapter {
           const ok = r.ok || (await this.setMode(M.hold[0])).ok;
           if (!ok) return fail('Pause refused by the vehicle.');
           this.ctx.commandUpdate({ commandId: cmd.commandId, status: 'executing', detail: 'Waiting for the vehicle to stop.' });
-          this.activeStop = { commandId: cmd.commandId, type: 'pause' };
+          this.activeStop = { commandId: cmd.commandId, type: 'pause', since: this.ctx.now() };
           return;
         }
         case 'resume': {
+          // After a disarm on the remote (or a failsafe) the vehicle must be armed again before it can go on.
+          if (!this.armed) {
+            if (!this.cfg.allowRemoteArm) return fail('Vehicle is disarmed. Arm it on the remote after the safety check, then resume.', 'rejected');
+            const a = await this.command(CMD.COMPONENT_ARM_DISARM, [1]);
+            if (!a.ok) return fail(`Arming refused: ${a.detail}`);
+          }
           const r = await this.command(CMD.DO_PAUSE_CONTINUE, [1]);
-          const ok = r.ok || (await this.setMode(M.auto[0])).ok;
+          // Not in AUTO (held, or switched on the remote): set AUTO, which carries on at the current checkpoint.
+          const ok = (r.ok && M.auto.includes(this.mode)) || (await this.setMode(M.auto[0])).ok;
           if (!ok) return fail('Resume refused by the vehicle.');
+          this.interrupted = false;
           this.ctx.commandUpdate({ commandId: cmd.commandId, status: 'executing' });
           this.activeResume = { commandId: cmd.commandId, since: this.ctx.now() };
           return;
@@ -1025,7 +1232,7 @@ export class MavlinkVehicleAdapter implements Adapter {
           const r = await this.setMode(M.hold[0]);
           if (!r.ok) return fail(`Hold mode refused: ${r.detail}`);
           this.ctx.commandUpdate({ commandId: cmd.commandId, status: 'executing', detail: 'Hold requested. Waiting for speed 0.' });
-          this.activeStop = { commandId: cmd.commandId, type: 'stop' };
+          this.activeStop = { commandId: cmd.commandId, type: 'stop', since: this.ctx.now() };
           return;
         }
       }

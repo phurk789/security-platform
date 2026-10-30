@@ -26,31 +26,34 @@ const IN_YARD = [
   { x: 10, y: -10 },
   { x: 30, y: -30 },
 ];
-const label = 'Route inside demo area';
+const label = 'Route inside the operating area';
 const breaches = (dev: string) =>
   (srv.db.prepare("SELECT result, detail FROM audit WHERE action = 'geofence.breach' AND object = ? ORDER BY seq").all(dev) as { result: string; detail: string }[]).filter((r) =>
     r.detail.includes('operating area'),
   );
 
 describe('operating area', () => {
-  it('lets a route in the yard pass the approval checks once the yard is the operating area', async () => {
+  it('refuses a route in the yard until the yard is the operating area, then passes the approval checks', async () => {
     await alex.post('/incidents/INC-024/triage');
     await alex.post('/incidents/INC-024/confirm');
-    const m = await alex.post('/missions', { incidentId: 'INC-024', deviceId: 'UGV-01', operatorId: 'u-somchai', checkpoints: IN_YARD });
-    expect(m.status).toBe(200);
-    const before = (await alex.get(`/missions/${m.body.id}/checks`)).body as any[];
-    expect(before.find((c) => c.label === label)).toMatchObject({ ok: false, hard: true });
+    const mission = { incidentId: 'INC-024', deviceId: 'UGV-01', operatorId: 'u-somchai', checkpoints: IN_YARD };
+    // Without an operating area the demo boundary rules, and the yard lies outside it.
+    const outside = await alex.post('/missions', mission);
+    expect(outside.status).toBe(409);
+    expect(outside.body.error).toMatch(/Checkpoints 1, 2 are outside the site/);
 
     const area = await nida.post('/geofences', { name: 'Office yard', kind: 'operating_area', appliesTo: ['ugv', 'uav'], poly: YARD });
     expect(area.status).toBe(200);
     expect(area.body.kind).toBe('operating_area');
-    const after = (await alex.get(`/missions/${m.body.id}/checks`)).body as any[];
-    expect(after.find((c) => c.label === label)).toMatchObject({ ok: true, hard: true });
+    const m = await alex.post('/missions', mission);
+    expect(m.status).toBe(200);
+    const checks = (await alex.get(`/missions/${m.body.id}/checks`)).body as any[];
+    expect(checks.find((c) => c.label === label)).toMatchObject({ ok: true, hard: true });
 
-    // The demo car park is now outside the site.
-    expect((await alex.patch(`/missions/${m.body.id}/route`, { checkpoints: [{ x: 262, y: 218 }] })).status).toBe(200);
-    const moved = (await alex.get(`/missions/${m.body.id}/checks`)).body as any[];
-    expect(moved.find((c) => c.label === label)?.ok).toBe(false);
+    // The demo car park is now outside the site: the route cannot be moved there.
+    const moved = await alex.patch(`/missions/${m.body.id}/route`, { checkpoints: [{ x: 262, y: 218 }] });
+    expect(moved.status).toBe(409);
+    expect(moved.body.error).toMatch(/Checkpoints 1 are outside the operating area/);
     await alex.post(`/missions/${m.body.id}/cancel`);
   });
 

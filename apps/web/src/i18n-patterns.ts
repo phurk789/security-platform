@@ -44,6 +44,57 @@ const RULES: Rule[] = [
     /^License limit reached: (\d+) (sites|devices|users)( \(evaluation\))?\. Contact 13STORE to extend it\.$/,
     (m) => `ถึงขีดจำกัดของ License แล้ว: ${m[1]} ${NOUN[m[2]] ?? m[2]}${m[3] ? ' (รุ่นทดลอง)' : ''} ติดต่อ 13STORE เพื่อขยาย`,
   ],
+  // AUTO routes: wrappers first (they carry another message inside).
+  [/^Ended after: (.+)$/, (m, inner) => `จบภารกิจหลังจาก: ${inner(m[1])}`],
+  [/^(.+) Mission paused: resume when it is safe, or stop it\.$/, (m, inner) => `${inner(m[1])} ภารกิจหยุดรอแล้ว: สั่งวิ่งต่อเมื่อปลอดภัย หรือสั่งหยุดภารกิจ`],
+  [/^(.+) Resume when it is safe, or stop the mission\.$/, (m, inner) => `${inner(m[1])} สั่งวิ่งต่อเมื่อปลอดภัย หรือสั่งหยุดภารกิจ`],
+  [/^(.+) The zones changed since approval: edit the route\.$/, (m, inner) => `${inner(m[1])} โซนเปลี่ยนไปหลังอนุมัติ ให้แก้เส้นทางใหม่`],
+  [/^(\S+): route interrupted\. (.+)$/, (m, inner) => `${m[1]}: เส้นทางถูกขัดจังหวะ ${inner(m[2])}`],
+  [/^(\S+): automatic hold not sent \((.+)\)\. Stop it on the remote\.$/, (m, inner) => `${m[1]}: ส่งคำสั่งหยุดรออัตโนมัติไม่สำเร็จ (${inner(m[2])}) ให้หยุดรถที่รีโมต`],
+  [/^(.+) — hold not sent: (.+) Stop it on the remote\.$/, (m, inner) => `${inner(m[1])} — ส่งคำสั่งหยุดรอไม่สำเร็จ: ${inner(m[2])} ให้หยุดรถที่รีโมต`],
+  [
+    /^Mode changed to (\S+) outside the platform \(remote switch or vehicle failsafe\) at checkpoint (\d+) of (\d+)\. The platform will not change it back\.$/,
+    (m) => `โหมดถูกเปลี่ยนเป็น ${m[1]} นอกแพลตฟอร์ม (สวิตช์ที่รีโมตหรือระบบป้องกันของรถ) ที่จุดตรวจ ${m[2]} จาก ${m[3]} แพลตฟอร์มจะไม่เปลี่ยนกลับให้`,
+  ],
+  [
+    /^Vehicle disarmed during the route \(remote switch or vehicle failsafe\) at checkpoint (\d+) of (\d+)\. Arm it on the remote to resume\.$/,
+    (m) => `รถถูก disarm ระหว่างเส้นทาง (สวิตช์ที่รีโมตหรือระบบป้องกันของรถ) ที่จุดตรวจ ${m[1]} จาก ${m[2]} ให้ arm ที่รีโมตก่อนสั่งวิ่งต่อ`,
+  ],
+  [/^Mode changed back to (\S+) on the remote; the route continues at checkpoint (\d+) of (\d+)\.$/, (m) => `เปลี่ยนกลับเป็น ${m[1]} ที่รีโมตแล้ว รถวิ่งต่อที่จุดตรวจ ${m[2]} จาก ${m[3]}`],
+  [/^(\S+) route interrupted$/, (m) => `${m[1]} เส้นทางถูกขัดจังหวะ`],
+  [/^(\S+) resumed on the remote$/, (m) => `${m[1]} วิ่งต่อจากรีโมต`],
+  [/^(\S+) held automatically$/, (m) => `${m[1]} ถูกสั่งหยุดรออัตโนมัติ`],
+  [/^Automatic hold of (\S+) not sent$/, (m) => `ส่งคำสั่งหยุดรออัตโนมัติให้ ${m[1]} ไม่สำเร็จ`],
+  [/^(\S+) stopped — mission failed$/, (m) => `${m[1]} หยุดแล้ว — ภารกิจล้มเหลว`],
+  [/^(\S+) left the operating area\.$/, (m) => `${m[1]} ออกนอกพื้นที่ปฏิบัติงาน`],
+  [/^(\S+) passed checkpoint (\d+)$/, (m) => `${m[1]} ผ่านจุดตรวจ ${m[2]}`],
+  [/^(\S+) reached final checkpoint$/, (m) => `${m[1]} ถึงจุดตรวจสุดท้ายแล้ว`],
+  [
+    /^Battery (\d+)% on (\S+) \(hold level (\d+)%\)\. Bring it back on the remote or change the battery\.$/,
+    (m) => `แบต ${m[2]} เหลือ ${m[1]}% (ระดับหยุดรอ ${m[3]}%) ให้ขับกลับด้วยรีโมตหรือเปลี่ยนแบต`,
+  ],
+  [/^(\S+) battery low \((\d+)%\)(?:\. It will be held automatically at (\d+)%\.)?$/, (m) => `${m[1]} แบตต่ำ (${m[2]}%)${m[3] ? ` จะหยุดรออัตโนมัติที่ ${m[3]}%` : ''}`],
+  [/^It will be held automatically at (\d+)%\.$/, (m) => `จะหยุดรออัตโนมัติที่ ${m[1]}%`],
+  [/^No operating area is drawn for this site\. Draw one on the map before sending (\S+) on a route\.$/, (m) => `ไซต์นี้ยังไม่ได้วาดพื้นที่ปฏิบัติงาน ให้วาดบนแผนที่ก่อนส่ง ${m[1]} วิ่งตามเส้นทาง`],
+  [/^Checkpoints (.+) are outside the operating area\.$/, (m) => `จุดตรวจ ${m[1]} อยู่นอกพื้นที่ปฏิบัติงาน`],
+  [/^Checkpoints (.+) outside$/, (m) => `จุดตรวจ ${m[1]} อยู่นอกพื้นที่`],
+  [/^(\d+) checkpoints inside$/, (m) => `จุดตรวจทั้ง ${m[1]} จุดอยู่ในพื้นที่`],
+  [/^(\d+) active zones checked$/, (m) => `ตรวจแล้ว ${m[1]} โซนที่เปิดใช้`],
+  [/^Enters (.+)$/, (m) => `ผ่าน ${m[1]}`],
+  [/^Held by (.+)$/, (m) => `${m[1]} ถือสิทธิ์อยู่`],
+  [/^Telemetry (live|stale|offline)$/, (m) => `ข้อมูลอุปกรณ์ ${m[1].toUpperCase()}`],
+  // Route commands, as the gateway reports them.
+  [/^Sending the route to the vehicle \((\d+) waypoints\)…$/, (m) => `กำลังส่งเส้นทางให้รถ (${m[1]} จุด)…`],
+  [/^Route on the vehicle and checked \((\d+) waypoints\)\. Starting…$/, (m) => `รถได้รับเส้นทางและตรวจตรงกันแล้ว (${m[1]} จุด) กำลังเริ่ม…`],
+  [/^Reached checkpoint (\d+) of (\d+)\.$/, (m) => `ถึงจุดตรวจ ${m[1]} จาก ${m[2]}`],
+  [
+    /^No movement (\d+) s after (start|resume) \(mode (\S+), (armed|disarmed)\)\. Set to HOLD\. Check the arming switch, the throttle limit and WP_SPEED, then try again\.$/,
+    (m) =>
+      `รถไม่ขยับ ${m[1]} วินาทีหลังสั่ง${m[2] === 'start' ? 'เริ่ม' : 'วิ่งต่อ'} (โหมด ${m[3]}, ${m[4] === 'armed' ? 'arm แล้ว' : 'ยังไม่ arm'}) จึงสั่ง HOLD ไว้ ตรวจสวิตช์ arm, ค่าจำกัดคันเร่ง และ WP_SPEED แล้วลองใหม่`,
+  ],
+  [/^Still moving at ([\d.]+) m\/s (\d+) s after HOLD was asked\. Stop it on the remote\.$/, (m) => `รถยังวิ่งอยู่ ${m[1]} ม./วิ ${m[2]} วินาทีหลังสั่ง HOLD ให้หยุดรถที่รีโมต`],
+  [/^Waypoint (\d+) on the vehicle differs from the route sent\. Route not started\.$/, (m) => `จุดที่ ${m[1]} บนรถไม่ตรงกับเส้นทางที่ส่ง จึงไม่เริ่มวิ่ง`],
+  [/^The vehicle holds (-?\d+) waypoints instead of (\d+)\. Route not started\.$/, (m) => `รถมีเส้นทาง ${m[1]} จุด แทนที่จะเป็น ${m[2]} จุด จึงไม่เริ่มวิ่ง`],
 ];
 
 /** Thai for a message with names or numbers in it, or undefined when no rule matches. */

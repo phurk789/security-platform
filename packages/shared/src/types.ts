@@ -136,6 +136,8 @@ export interface Device {
   latencyMs?: number;
   /** GNSS satellites in use (UGV/UAV). */
   satellites?: number;
+  /** Speed the vehicle drives routes at (m/s), as set on its autopilot (ArduPilot WP_SPEED). */
+  routeSpeed?: number;
   /** Motor / airframe temperature in °C. */
   temperatureC?: number;
   /** For CCTV: the camera view variant to render. */
@@ -227,6 +229,12 @@ export interface Mission {
   nextCp: number;
   createdAt: number;
   note?: string;
+  /**
+   * Why the route stopped without the operator asking: the vehicle left AUTO or was disarmed, it
+   * left the operating area, or its battery ran low. Cleared on resume; a stop that follows ends
+   * the mission as failed (with this reason) instead of cancelled.
+   */
+  interruption?: { reason: string; at: number };
 }
 
 export interface Command {

@@ -435,10 +435,10 @@ export function BottomTimeline() {
           {log.map((e) => (
             <li key={e.id} className={`tone-${e.tone ?? 'info'}`}>
               <span className="mono">{fmtTime(e.at, true)}</span>
-              <b>{e.title}</b>
+              <b>{t(e.title)}</b>
               <span className="muted">
                 {e.actor}
-                {e.detail ? ` — ${e.detail}` : ''}
+                {e.detail ? ` — ${t(e.detail)}` : ''}
               </span>
               {e.receivedAt - e.at > 500 && (
                 <span className="muted mono" title={t('Source time vs received time')}>
