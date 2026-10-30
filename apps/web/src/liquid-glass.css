@@ -1,0 +1,431 @@
+/*
+ * PUBLIC SECURITY TWIN / LIQUID GLASS — PEARL & GRAPHITE
+ * CSS implementation inspired by translucent materials, not Apple's native renderer.
+ * Loaded after styles.css, component styles and light.css. No library/dependency changes.
+ * Colour is reserved for safety/status. Never grayscale camera or map content.
+ */
+:root, :root[data-theme='light'] {
+  --lg-bg: #e9e9ec;
+  --lg-surface: rgba(255, 255, 255, .69);
+  --lg-surface-solid: #f8f8fa;
+  --lg-surface-2: rgba(235, 235, 239, .74);
+  --lg-text: #202024;
+  --lg-text-2: #58585f;
+  --lg-text-3: #6b6b73;
+  --lg-line: rgba(35, 35, 42, .10);
+  --lg-line-2: rgba(35, 35, 42, .18);
+  --lg-edge: rgba(255, 255, 255, .92);
+  --lg-accent: #303035;
+  --lg-on-accent: #fff;
+  --lg-shadow: 0 10px 30px rgba(27, 27, 34, .055), 0 2px 6px rgba(27, 27, 34, .025);
+  --lg-inset: inset 0 1px 0 rgba(255, 255, 255, .96), inset 0 -1px 0 rgba(255, 255, 255, .30);
+  --lg-blur: 24px;
+  --lg-green: #24734c;
+  --lg-red: #b83832;
+  --lg-amber: #95621a;
+  --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Noto Sans Thai', system-ui, sans-serif;
+  color-scheme: light;
+  font-size: 16px;
+}
+:root[data-theme='dark'] {
+  --lg-bg: #151517;
+  --lg-surface: rgba(40, 40, 44, .76);
+  --lg-surface-solid: #27272b;
+  --lg-surface-2: rgba(58, 58, 64, .65);
+  --lg-text: #f4f4f5;
+  --lg-text-2: #c5c5cc;
+  --lg-text-3: #a9a9b2;
+  --lg-line: rgba(255, 255, 255, .11);
+  --lg-line-2: rgba(255, 255, 255, .20);
+  --lg-edge: rgba(255, 255, 255, .23);
+  --lg-accent: #ededf0;
+  --lg-on-accent: #252529;
+  --lg-shadow: 0 12px 35px rgba(0, 0, 0, .18), 0 3px 8px rgba(0, 0, 0, .10);
+  --lg-inset: inset 0 1px 0 rgba(255, 255, 255, .15), inset 0 -1px 0 rgba(255, 255, 255, .025);
+  --lg-green: #93d5ad;
+  --lg-red: #ffaaa3;
+  --lg-amber: #e8bf7a;
+  color-scheme: dark;
+}
+/* Root variables cover portals and login as well as the app shell. */
+:root, :root[data-theme='light'], :root[data-theme='dark'] {
+  --bg: var(--lg-bg); --bg-2: var(--lg-surface-solid); --panel: var(--lg-surface);
+  --panel-2: var(--lg-surface-2); --line: var(--lg-line); --line-2: var(--lg-line-2);
+  --text: var(--lg-text); --text-2: var(--lg-text-2); --text-3: var(--lg-text-3);
+  --cyan: var(--lg-accent); --cyan-d: var(--lg-accent); --violet: var(--lg-text-2);
+  --red: var(--lg-red); --green: var(--lg-green); --amber: var(--lg-amber); --radius: 20px;
+}
+:root .app.liquid-ui {
+  --bg: var(--lg-bg); --bg-2: var(--lg-surface-solid); --panel: var(--lg-surface);
+  --panel-2: var(--lg-surface-2); --line: var(--lg-line); --line-2: var(--lg-line-2);
+  --text: var(--lg-text); --text-2: var(--lg-text-2); --text-3: var(--lg-text-3);
+  --cyan: var(--lg-accent); --cyan-d: var(--lg-accent); --violet: var(--lg-text-2);
+  --red: var(--lg-red); --green: var(--lg-green); --amber: var(--lg-amber);
+  --hud-font: var(--font); --hud-glow: none;
+  grid-template-rows: 78px minmax(0, 1fr) 28px;
+  min-height: 680px;
+  color: var(--text);
+  background:
+    radial-gradient(ellipse at 8% 0, rgba(255,255,255,.74), transparent 48%),
+    radial-gradient(ellipse at 88% 100%, rgba(131,131,143,.20), transparent 54%),
+    linear-gradient(145deg, var(--lg-bg), var(--lg-bg));
+  font-family: var(--font);
+}
+:root[data-theme='dark'] .app.liquid-ui {
+  background: radial-gradient(ellipse at 18% 0, rgba(147,147,159,.22), transparent 45%),
+    radial-gradient(ellipse at 100% 95%, rgba(89,89,99,.12), transparent 50%), var(--lg-bg);
+}
+:root .app.liquid-ui *, :root .app.liquid-ui *::before, :root .app.liquid-ui *::after { box-sizing: border-box; }
+:root .app.liquid-ui :focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+:root .app.liquid-ui button { -webkit-tap-highlight-color: transparent; }
+:root .app.liquid-ui button:disabled { opacity: .48; cursor: not-allowed; }
+:root .app.liquid-ui :is(input,textarea,select) { accent-color: var(--lg-accent); }
+:root .app.liquid-ui ::selection { color: var(--lg-on-accent); background: var(--lg-accent); }
+:root .app.liquid-ui .main { grid-template-columns: 144px minmax(0,1fr); gap: 0; min-width: 0; }
+:root .app.liquid-ui .panel, :root .app.liquid-ui .timeline {
+  border: 1px solid var(--lg-edge);
+  border-radius: 22px;
+  background: linear-gradient(145deg, rgba(255,255,255,.07), transparent 60%), var(--lg-surface);
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(105%);
+  backdrop-filter: blur(var(--lg-blur)) saturate(105%);
+  box-shadow: var(--lg-inset), var(--lg-shadow);
+}
+:root .app.liquid-ui .panel::before, :root .app.liquid-ui .timeline::before,
+:root .app.liquid-ui .topbar::after, :root .app.liquid-ui .panel-head h2::before,
+:root .app.liquid-ui .tl-head h2::before { content: none; }
+:root .app.liquid-ui .panel-head { padding: 18px 18px 13px; gap: 10px; }
+:root .app.liquid-ui .panel-head h2, :root .app.liquid-ui .tl-head h2 {
+  display: flex; align-items: center; gap: 8px; color: var(--text); font-family: var(--font);
+  font-size: .91rem; font-weight: 650; letter-spacing: 0; text-transform: none; text-shadow: none;
+}
+:root .app.liquid-ui .lg-eyebrow { display: block; color: var(--text-3); font-size: .59rem; font-weight: 650; letter-spacing: .15em; margin-bottom: 6px; }
+/* Shell */
+:root .app.liquid-ui .topbar {
+  margin: 8px 14px 4px; padding: 0 20px; gap: 16px; border: 1px solid var(--lg-edge);
+  border-radius: 21px; background: var(--lg-surface); box-shadow: var(--lg-inset), var(--lg-shadow);
+  backdrop-filter: blur(var(--lg-blur)); -webkit-backdrop-filter: blur(var(--lg-blur)); z-index: 30;
+}
+:root .app.liquid-ui .product { color: var(--text); text-shadow: none; font-family: var(--font); letter-spacing: .14em; font-weight: 650; font-size: .82rem; }
+:root .app.liquid-ui .brand { gap: 13px; }
+:root .app.liquid-ui .divider { height: 28px; background: var(--line-2); }
+:root .app.liquid-ui .top-mid { gap: 9px; }
+:root .app.liquid-ui .top-right { gap: 9px; }
+:root .app.liquid-ui .clock { color: var(--text-2); font-family: var(--font); letter-spacing: 0; font-size: .76rem; }
+:root .app.liquid-ui .mode { font-family: var(--font); font-size: .66rem; letter-spacing: .04em; border-radius: 12px; padding: 8px 11px; box-shadow: none; }
+:root .app.liquid-ui .mode-live { color: var(--green); background: color-mix(in srgb, var(--green) 8%, transparent); border: 1px solid color-mix(in srgb, var(--green) 22%, transparent); }
+:root .app.liquid-ui .mode-sim { color: var(--text); background: var(--lg-surface-2); border: 1px solid var(--line); }
+:root .app.liquid-ui .mode-replay { color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent); }
+:root .app.liquid-ui .site-select { min-width: 0; border-radius: 12px; background: var(--lg-surface-2); border-color: var(--line); }
+:root .app.liquid-ui .appearance-toggle, :root .app.liquid-ui .sound-toggle, :root .app.liquid-ui .lg-glass-toggle {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; min-width: 36px;
+  border: 1px solid var(--line); border-radius: 12px; color: var(--text-2); background: var(--lg-surface); padding: 7px 9px; font-size: .71rem; box-shadow: var(--lg-inset);
+}
+:root .app.liquid-ui .lg-glass-toggle[aria-pressed='true'] { color: var(--text); }
+:root .app.liquid-ui .user-btn { gap: 8px; }
+:root .app.liquid-ui .avatar { background: linear-gradient(145deg,#5b5b63,#313136); color: #fff; border: 1px solid rgba(255,255,255,.45); box-shadow: inset 0 1px 3px rgba(255,255,255,.2); width: 34px; height: 34px; }
+:root .app.liquid-ui .user-txt b { font-size: .78rem; }
+:root .app.liquid-ui .user-txt small { font-size: .66rem; }
+:root .app.liquid-ui .pop { background: var(--lg-surface-solid); border: 1px solid var(--lg-line-2); border-radius: 16px; box-shadow: var(--lg-shadow); color: var(--text); }
+:root .app.liquid-ui .lic-chip { border-radius: 10px; }
+:root .app.liquid-ui .sidenav {
+  display: flex; flex-direction: column;
+  margin: 12px 0 14px 14px; padding: 12px 8px; gap: 7px; width: auto; overflow-y: auto; min-height: 0;
+  border: 1px solid rgba(255,255,255,.35); border-radius: 24px;
+  background: linear-gradient(150deg,rgba(76,76,84,.92),rgba(32,32,37,.94));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.32), 0 10px 30px rgba(0,0,0,.09);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+}
+:root .app.liquid-ui .sidenav button {
+  display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px;
+  padding: 13px 10px; border: 1px solid transparent; border-radius: 16px;
+  background: transparent; color: #d8d8df; min-height: 54px; width: 100%;
+  font: 500 .76rem var(--font); letter-spacing: 0; text-shadow: none; line-height: 1.4;
+}
+:root .app.liquid-ui .sidenav button .ico { display: flex; flex: none; }
+:root .app.liquid-ui .sidenav button .ico svg { width: 21px; height: 21px; stroke-width: 1.7; }
+:root .app.liquid-ui .sidenav button::before, :root .app.liquid-ui .sidenav button::after { content: none; }
+:root .app.liquid-ui .sidenav button.on { color: #fff; border: 1px solid rgba(255,255,255,.44); background: linear-gradient(135deg,rgba(255,255,255,.22),rgba(255,255,255,.07)); box-shadow: inset 0 1px 1px rgba(255,255,255,.25),0 4px 12px rgba(0,0,0,.10); }
+:root .app.liquid-ui .sidenav button:hover:not(.on) { background: rgba(255,255,255,.07); color: #fff; }
+:root .app.liquid-ui .sidenav button:focus-visible { outline-color: #fff; outline-offset: -3px; }
+:root .app.liquid-ui .nav-short { display: none; }
+:root .app.liquid-ui .nav-long { display: inline; }
+:root .app.liquid-ui .sidenav button:last-child { margin-top: auto; }
+:root .app.liquid-ui .footer { background: transparent; border: 0; color: var(--text-3); font-size: .66rem; padding: 0 22px; }
+/* Controls: all non-semantic cyan becomes graphite / silver. */
+:root .app.liquid-ui .seg { border: 1px solid var(--line); border-radius: 12px; padding: 3px; background: var(--lg-surface-2); gap: 3px; }
+:root .app.liquid-ui .seg button { border: 0; border-radius: 9px; background: transparent; color: var(--text-2); box-shadow: none; min-height: 30px; font-weight: 550; }
+:root .app.liquid-ui .seg button.on { background: var(--lg-surface-solid); color: var(--text); box-shadow: 0 1px 5px rgba(0,0,0,.12), var(--lg-inset); }
+:root .app.liquid-ui :is(.btn-primary,.btn-secondary,.btn-ghost) { min-height: 38px; border-radius: 12px; text-shadow: none; box-shadow: none; font-weight: 600; letter-spacing: 0; }
+:root .app.liquid-ui .btn-primary { color: var(--lg-on-accent); background: var(--lg-accent); border: 1px solid var(--lg-accent); box-shadow: inset 0 1px 0 rgba(255,255,255,.15),0 3px 7px rgba(0,0,0,.06); }
+:root .app.liquid-ui .btn-primary:hover:not(:disabled) { filter: brightness(1.12); }
+:root .app.liquid-ui .btn-secondary { color: var(--text); border: 1px solid var(--line-2); background: var(--lg-surface-2); }
+:root .app.liquid-ui .btn-ghost { color: var(--text-2); border-color: var(--line); background: transparent; }
+:root .app.liquid-ui .btn-danger { border-radius: 12px; color: var(--red); background: color-mix(in srgb,var(--red) 9%, transparent); border-color: color-mix(in srgb,var(--red) 30%,transparent); }
+:root .app.liquid-ui .badge { border-radius: 7px; font-size: .61rem; padding: 4px 6px; font-weight: 650; display: inline-flex; gap: 4px; align-items: center; line-height: 1.3; }
+:root .app.liquid-ui :is(.badge-cyan,.badge-violet,.badge-grey,.badge-violet.solid) { background: var(--lg-surface-2); color: var(--text-2); border: 1px solid var(--line); }
+:root .app.liquid-ui :is(.badge-red,.badge-red.solid) { color: var(--red); background: color-mix(in srgb,var(--red) 11%, transparent); border: 1px solid color-mix(in srgb,var(--red) 21%, transparent); }
+:root .app.liquid-ui :is(.badge-green,.badge-green.solid) { color: var(--green); background: color-mix(in srgb,var(--green) 10%, transparent); border: 1px solid color-mix(in srgb,var(--green) 19%, transparent); }
+:root .app.liquid-ui :is(.badge-amber,.badge-amber.solid) { color: var(--amber); background: color-mix(in srgb,var(--amber) 10%, transparent); border: 1px solid color-mix(in srgb,var(--amber) 22%, transparent); }
+/* Workspace */
+:root .app.liquid-ui .cc { grid-template-columns: 240px minmax(0,1fr) 328px; gap: 16px; padding: 12px 18px 14px 16px; min-width: 0; }
+:root .app.liquid-ui .cc-rail { display: flex; flex-direction: column; min-width: 0; }
+:root .app.liquid-ui .lg-roster-head { align-items: center; }
+:root .app.liquid-ui .lg-count { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 11px; background: var(--lg-surface-2); border: 1px solid var(--line); font-weight: 600; font-size: .84rem; }
+:root .app.liquid-ui .lg-fleet-counts { display: grid; grid-template-columns: repeat(3,1fr); margin: 0 14px 14px; padding: 10px 0; border-radius: 14px; border: 1px solid var(--line); background: var(--lg-surface-2); }
+:root .app.liquid-ui .lg-fleet-counts > div { display: flex; flex-direction: column; align-items: center; gap: 4px; border-right: 1px solid var(--line); }
+:root .app.liquid-ui .lg-fleet-counts > div:last-child { border: 0; }
+:root .app.liquid-ui .lg-fleet-counts b { font-size: 1.22rem; font-weight: 650; line-height: 1.2; }
+:root .app.liquid-ui .lg-fleet-counts small { font-size: .65rem; color: var(--text-2); }
+:root .app.liquid-ui .lg-search { display: flex; align-items: center; gap: 7px; margin: 0 14px 12px; padding: 0 10px; min-height: 38px; border: 1px solid var(--line); border-radius: 12px; background: var(--lg-surface-2); color: var(--text-2); }
+:root .app.liquid-ui .lg-search svg { flex: none; }
+:root .app.liquid-ui .lg-search input { min-width: 0; width: 100%; background: none; border: 0; border-radius: 8px; padding: 8px 0; font-size: .72rem; }
+:root .app.liquid-ui .lg-search:focus-within { outline: 2px solid var(--text); outline-offset: 2px; }
+:root .app.liquid-ui .lg-search input:focus-visible { outline: none; }
+:root .app.liquid-ui .cc-filter { margin: 0 14px 14px; flex: none; }
+:root .app.liquid-ui .cc-filter button { font-size: .64rem; padding: 5px; gap: 4px; min-width: 0; }
+:root .app.liquid-ui .cc-units { padding: 1px 12px 14px; gap: 10px; overflow-x: hidden; flex: 1; }
+:root .app.liquid-ui .lg-unit { display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 16px; padding: 12px; background: var(--lg-surface); color: var(--text); flex: none; transition: background .16s,border-color .16s; }
+:root .app.liquid-ui .lg-unit.is-selected { background: linear-gradient(135deg,rgba(128,128,140,.12),rgba(128,128,140,.035)),var(--lg-surface); border-color: color-mix(in srgb,var(--text) 38%, transparent); box-shadow: var(--lg-inset),0 4px 10px rgba(0,0,0,.035); }
+:root .app.liquid-ui .lg-unit:hover { border-color: var(--text-3); }
+:root .app.liquid-ui .lg-unit-top { display: flex; gap: 8px; align-items: center; }
+:root .app.liquid-ui .lg-unit-top > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+:root .app.liquid-ui .lg-unit-top b { font-size: .94rem; }
+:root .app.liquid-ui .lg-unit-top small { font-size: .57rem; color: var(--text-3); letter-spacing: .02em; overflow-wrap: anywhere; }
+:root .app.liquid-ui .lg-unit .lg-portrait { width: 47px; height: 46px; border-radius: 11px; }
+:root .app.liquid-ui .lg-unit-status { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+:root .app.liquid-ui .lg-unit-model { display: block; font-size: .65rem; color: var(--text-2); line-height: 1.55; margin: 10px 0; overflow-wrap: anywhere; }
+:root .app.liquid-ui .lg-unit-numbers { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 7px; padding-top: 10px; border-top: 1px solid var(--line); }
+:root .app.liquid-ui .lg-unit-numbers span { display: inline-flex; gap: 4px; align-items: center; font-size: .61rem; color: var(--text-2); }
+:root .app.liquid-ui .lg-roster-foot { display: flex; align-items: flex-start; gap: 9px; margin: auto 16px 0; padding: 17px 0; border-top: 1px solid var(--line); color: var(--text-3); font-size: .66rem; line-height: 1.6; }
+:root .app.liquid-ui .lg-roster-foot svg { flex: none; margin-top: 2px; }
+:root .app.liquid-ui .lg-roster-foot small { display: block; margin-top: 6px; font-size: .52rem; letter-spacing: .13em; }
+:root .app.liquid-ui .cc-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow: auto; padding: 0 1px 1px; }
+:root .app.liquid-ui .lg-device-header { display: flex; flex-direction: row; align-items: center; min-height: 90px; height: auto; flex: none; gap: 15px; padding: 13px 18px; }
+:root .app.liquid-ui .lg-portrait { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 64px; height: 62px; border-radius: 17px; color: var(--text-2); background: radial-gradient(ellipse at 50% 75%, rgba(99,99,111,.22),transparent 70%),var(--lg-surface-2); }
+:root .app.liquid-ui .lg-portrait img { width: 100%; height: 100%; object-fit: contain; }
+:root .app.liquid-ui .lg-device-title { min-width: 0; flex: 1; }
+:root .app.liquid-ui .lg-device-title .lg-eyebrow { margin-bottom: 3px; font-size: .53rem; }
+:root .app.liquid-ui .lg-device-title h1 { margin: 0; font-weight: 650; font-size: 1.6rem; line-height: 1.15; letter-spacing: -.035em; }
+:root .app.liquid-ui .lg-device-title p { margin: 6px 0 0; color: var(--text-3); font-size: .68rem; overflow-wrap: anywhere; }
+:root .app.liquid-ui .lg-device-badges { display: flex; align-items: flex-end; gap: 5px; flex-wrap: wrap; max-width: 44%; justify-content: flex-end; }
+:root .app.liquid-ui .lg-data-notice { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid color-mix(in srgb,var(--amber) 18%,transparent); border-radius: 13px; color: var(--amber); background: color-mix(in srgb,var(--amber) 6%,var(--lg-surface)); font-size: .75rem; line-height: 1.5; flex: none; flex-wrap: wrap; }
+:root .app.liquid-ui .lg-data-notice svg { flex: none; }
+:root .app.liquid-ui .lg-view-switch { display: flex; align-items: center; justify-content: space-between; flex: none; gap: 8px; padding: 0 3px; }
+:root .app.liquid-ui .lg-view-switch > span { display: inline-flex; align-items: center; gap: 7px; color: var(--text-2); font-size: .73rem; font-weight: 550; }
+:root .app.liquid-ui .lg-view-switch .seg button { display: inline-flex; align-items: center; gap: 6px; font-size: .67rem; padding: 5px 10px; }
+:root .app.liquid-ui .lg-visuals { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); grid-template-areas: 'map map' 'metrics metrics' 'video telemetry'; grid-template-rows: minmax(275px,1fr) auto 210px; gap: 12px; min-height: 610px; flex: 1; }
+:root .app.liquid-ui .lg-visuals[data-focus='video'] { grid-template-areas: 'video video' 'metrics metrics' 'map telemetry'; }
+:root .app.liquid-ui .cc-twin { grid-area: map; position: relative; overflow: hidden; min-height: 0; height: auto; border-radius: 19px; background: #27272c; }
+:root .app.liquid-ui .cc-twin .t3-host { position: absolute; inset: 0; }
+:root .app.liquid-ui .lg-map-label { position: absolute; top: 12px; left: 12px; z-index: 5; display: inline-flex; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid rgba(255,255,255,.45); border-radius: 13px; color: #26262b; background: rgba(248,248,250,.86); box-shadow: 0 3px 12px rgba(0,0,0,.1),inset 0 1px 0 #fff; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); pointer-events: none; }
+:root .app.liquid-ui .lg-map-label b { display: block; font-size: .71rem; }
+:root .app.liquid-ui .lg-map-label small { display: block; margin-top: 2px; font-size: .59rem; color: #64646b; }
+:root .app.liquid-ui .lg-map-label > span { margin-left: 12px; padding: 5px; border-radius: 6px; background: rgba(40,40,48,.08); font-size: .61rem; }
+:root .app.liquid-ui .lg-map-tools { position: absolute; right: 12px; bottom: 40px; z-index: 6; display: flex; flex-direction: column; gap: 5px; }
+:root .app.liquid-ui .lg-map-tools button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; color: #303035; background: rgba(250,250,252,.91); border: 1px solid rgba(255,255,255,.8); box-shadow: 0 3px 9px rgba(0,0,0,.12); border-radius: 10px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+:root .app.liquid-ui .lg-map-tools button:hover:not(:disabled) { background: #fff; }
+:root .app.liquid-ui .lg-map-caption { position: absolute; bottom: 11px; left: 12px; z-index: 5; color: #fff; background: rgba(28,28,32,.77); padding: 5px 9px; border: 1px solid rgba(255,255,255,.22); border-radius: 8px; font-size: .59rem; pointer-events: none; }
+:root .app.liquid-ui .lg-metrics { grid-area: metrics; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 9px; }
+:root .app.liquid-ui .lg-metric { padding: 12px 13px 10px; height: auto; border-radius: 16px; min-width: 0; }
+:root .app.liquid-ui .lg-metric > div { display: flex; align-items: center; gap: 7px; color: var(--text-2); font-size: .68rem; }
+:root .app.liquid-ui .lg-metric b { display: block; font-size: 1.54rem; font-weight: 620; margin-top: 7px; line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -.035em; }
+:root .app.liquid-ui .lg-metric b small { margin-left: 6px; font-weight: 450; font-size: .62rem; color: var(--text-3); letter-spacing: 0; }
+:root .app.liquid-ui .lg-metric p { margin: 7px 0 0; font-size: .54rem; line-height: 1.4; color: var(--text-3); }
+:root .app.liquid-ui .lg-camera-pane { grid-area: video; display: flex; flex-direction: column; padding: 9px; min-height: 0; height: auto; min-width: 0; border-radius: 19px; }
+:root .app.liquid-ui .lg-pane-title { display: flex; align-items: center; gap: 7px; min-height: 28px; margin: 0 3px 7px; flex: none; }
+:root .app.liquid-ui .lg-pane-title b { font-size: .74rem; font-weight: 600; }
+:root .app.liquid-ui .lg-pane-title small { margin-left: auto; font-size: .63rem; color: var(--text-3); }
+:root .app.liquid-ui .cc-video { width: 100%; min-height: 0; aspect-ratio: auto; flex: 1; border-radius: 12px; border: 0; background: #151517; overflow: hidden; }
+:root .app.liquid-ui :is(.cc-video,.feed,.fc-feed) { --text: #f4f4f6; --text-2: #d1d1d8; --text-3: #a5a5ae; --cyan: #e4e4e9; --amber: #f2c477; --red: #ff9c92; --green: #97d9b0; color: var(--text); }
+:root .app.liquid-ui .cc-video .feed { border: 0; border-radius: 0; }
+:root .app.liquid-ui .lg-visuals[data-focus='map'] .instruments { display: none; }
+:root .app.liquid-ui .lg-visuals[data-focus='map'] .feed-osd { bottom: 8px; }
+:root .app.liquid-ui .instruments .ins-tick { stroke: #dddde3; }
+:root .app.liquid-ui .instruments text { fill: #f5f5f7; }
+:root .app.liquid-ui .instruments .ins-box { fill: rgba(20,20,24,.78); }
+:root .app.liquid-ui .cc-tlm { display: block; grid-area: telemetry; padding: 12px; min-height: 0; height: auto; overflow-y: auto; overflow-x: hidden; border-radius: 19px; }
+:root .app.liquid-ui .cc-tlm .tlm { padding: 0; border: 0; border-radius: 0; background: transparent; min-height: 0; }
+:root .app.liquid-ui .cc-tlm .tlm-title { display: none; }
+:root .app.liquid-ui .cc-tlm .tlm-head { gap: 3px; }
+:root .app.liquid-ui .tlm-spark { border-radius: 10px; padding: 6px 7px; background: var(--lg-surface-2); }
+:root .app.liquid-ui .tlm-spark svg { height: 19px; }
+:root .app.liquid-ui .tlm-stats { gap: 7px; }
+:root .app.liquid-ui .tlm-stats dd { white-space: normal; overflow-wrap: anywhere; font-size: .73rem; }
+:root .app.liquid-ui .tlm-stats dt { font-size: .58rem; }
+:root .app.liquid-ui .tlm-value { font-size: .9rem; }
+:root .app.liquid-ui .lg-tlm-note { font-size: .57rem; color: var(--text-3); margin: 8px 0 0; line-height: 1.5; }
+/* Operational panels. Their original command logic and lifecycle are unchanged. */
+:root .app.liquid-ui .cc-side { min-width: 0; gap: 13px; overflow-x: hidden; padding: 0 1px 2px; }
+:root .app.liquid-ui .cc .cc-box { border-radius: 21px; height: auto; }
+:root .app.liquid-ui .cc-box-body { padding: 0 17px 17px; font-size: .875rem; overflow-wrap: anywhere; }
+:root .app.liquid-ui .cc-box-body p { line-height: 1.6; }
+:root .app.liquid-ui .lg-mission-box .cc-next { padding: 17px; border-radius: 14px; background: linear-gradient(140deg,#53535b,#2a2a30); color: #fff; --text: #fff; --text-2: #dedee5; --text-3: #c0c0ca; gap: 16px; border: 1px solid rgba(255,255,255,.2); box-shadow: inset 0 1px 0 rgba(255,255,255,.16); }
+:root .app.liquid-ui .lg-mission-box .cc-next p { margin: 0; font-size: .79rem; }
+:root .app.liquid-ui .lg-mission-box .cc-next .btn-secondary { background: linear-gradient(#f7f7fa,#dddde4); color: #26262c; border: 1px solid #fff; font-size: .79rem; box-shadow: 0 3px 8px rgba(0,0,0,.13); }
+:root .app.liquid-ui .drive-state { background: var(--lg-surface-2); border: 1px solid var(--line); border-radius: 11px; font-size: .76rem; }
+:root .app.liquid-ui .drive-pad { background: radial-gradient(circle at 32% 20%,rgba(255,255,255,.17),transparent 68%),var(--lg-surface-2); border-color: var(--line-2); box-shadow: var(--lg-inset); }
+:root .app.liquid-ui .drive-knob { background: linear-gradient(135deg,#a7a7af,#66666f); border-color: rgba(255,255,255,.55); box-shadow: inset 0 1px 2px rgba(255,255,255,.35),0 5px 11px rgba(0,0,0,.18); }
+:root .app.liquid-ui .drive :is(input,textarea), :root .app.liquid-ui .cc-box :is(input,textarea,select) { width: 100%; min-width: 0; border: 1px solid var(--line-2); background: var(--lg-surface-2); border-radius: 10px; padding: 9px 10px; color: var(--text); }
+:root .app.liquid-ui .drive input[type='checkbox'] { width: auto; }
+:root .app.liquid-ui .banner.info { background: var(--lg-surface-2); border-color: var(--line-2); }
+:root .app.liquid-ui .banner.warn { background: color-mix(in srgb,var(--amber) 8%,var(--lg-surface)); border-color: color-mix(in srgb,var(--amber) 30%,transparent); color: var(--amber); border-radius: 12px; }
+:root .app.liquid-ui .lg-disclosure > summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 17px; cursor: pointer; list-style: none; font-size: .82rem; font-weight: 600; border-radius: 20px; }
+:root .app.liquid-ui .lg-disclosure > summary::-webkit-details-marker { display: none; }
+:root .app.liquid-ui .lg-disclosure[open] > summary svg { transform: rotate(90deg); }
+:root .app.liquid-ui .cc-strip { margin-bottom: 12px; flex-wrap: wrap; gap: 8px; padding: 12px; border-radius: 12px; box-shadow: none; background: var(--lg-surface-2); }
+:root .app.liquid-ui .cc-strip-id { max-width: 180px; }
+:root .app.liquid-ui .cc-strip-id b { font-size: .85rem; }
+:root .app.liquid-ui .cc-strip-m { font-size: .71rem; }
+:root .app.liquid-ui .cc-strip-num b { font-size: 1rem; }
+:root .app.liquid-ui .cc-log { padding: 0 15px 15px; }
+:root .app.liquid-ui .cc-log li { grid-template-columns: 47px 14px minmax(0,1fr); padding: 9px 0; font-size: .7rem; }
+:root .app.liquid-ui .cc-log li > .badge { grid-column: 3; justify-self: start; }
+:root .app.liquid-ui .cc-log-t { font-size: .62rem; }
+:root .app.liquid-ui .cc-log-x { white-space: normal; overflow-wrap: anywhere; }
+/* Other existing pages receive the same neutral material without moving business controls. */
+:root .app.liquid-ui :is(.kpi,.map-tools,.zoom,.compass,.map-search) { color: var(--text); background: var(--lg-surface); border-color: var(--line-2); box-shadow: var(--lg-inset),var(--lg-shadow); border-radius: 13px; }
+:root .app.liquid-ui .kpi { border-left: 1px solid var(--line); }
+:root .app.liquid-ui .kpi b { text-shadow: none; }
+:root .app.liquid-ui :is(.t3-bld,.t3-dev,.t3-zone) { color: var(--text); background: var(--lg-surface-solid); border-color: var(--line-2); box-shadow: 0 3px 9px rgba(0,0,0,.15); border-radius: 8px; }
+:root .app.liquid-ui .t3-dev.sel { border-color: var(--text); box-shadow: 0 0 0 1px var(--text),0 3px 9px rgba(0,0,0,.15); }
+:root .app.liquid-ui .t3-bld b { letter-spacing: 0; }
+:root .app.liquid-ui :is(.fleet-card,.inc-card) { background: var(--lg-surface); border-color: var(--line); border-radius: 14px; }
+:root .app.liquid-ui .fleet-card.sel { border-color: var(--text-3); }
+:root .app.liquid-ui .fc-thumb, :root .app.liquid-ui .fc-ico { background: var(--lg-surface-2); color: var(--text); }
+:root .app.liquid-ui .fc-state span:first-child { color: var(--text); }
+:root .app.liquid-ui .hud-filters button.on { background: var(--lg-surface-2); color: var(--text); border-color: var(--text-3); }
+:root .app.liquid-ui .hud-count { color: var(--text-2); }
+:root .app.liquid-ui .replay-bar { background: var(--lg-surface-solid); border-color: var(--line-2); color: var(--text); }
+:root .app.liquid-ui :is(.cc-units,.cc-side,.cc-main,.cc-tlm,.sidenav) { scrollbar-width: thin; scrollbar-color: var(--lg-line-2) transparent; }
+/* Preserve keyboard access to all commands on compact screens. */
+@media (max-width: 1599px) {
+  :root .app.liquid-ui .main { grid-template-columns: 102px minmax(0,1fr); }
+  :root .app.liquid-ui .sidenav { margin-left: 12px; padding: 10px 6px; }
+  :root .app.liquid-ui .sidenav button { flex-direction: column; justify-content: center; text-align: center; gap: 7px; padding: 12px 5px; font-size: .63rem; min-height: 66px; }
+  :root .app.liquid-ui .cc { grid-template-columns: 212px minmax(0,1fr) 292px; gap: 12px; padding: 12px; }
+  :root .app.liquid-ui .product { font-size: .73rem; letter-spacing: .09em; }
+  :root .app.liquid-ui .topbar { padding: 0 15px; gap: 10px; }
+  :root .app.liquid-ui .top-right { gap: 7px; }
+  :root .app.liquid-ui .clock { font-size: .68rem; }
+  :root .app.liquid-ui .lg-unit { padding: 10px; }
+  :root .app.liquid-ui .lg-unit-numbers { gap: 7px 5px; }
+  :root .app.liquid-ui .lg-metric { padding: 11px 10px; }
+  :root .app.liquid-ui .lg-metric b { font-size: 1.35rem; }
+}
+@media (max-width: 1279px) {
+  :root .app.liquid-ui .product { max-width: 175px; white-space: normal; line-height: 1.5; font-size: .67rem; }
+  :root .app.liquid-ui .clock { display: none; }
+  :root .app.liquid-ui .cc { grid-template-columns: 190px minmax(0,1fr); height: 100%; overflow-y: auto; align-content: start; }
+  :root .app.liquid-ui .cc-rail { grid-row: 1 / 3; min-height: 640px; height: auto; }
+  :root .app.liquid-ui .cc-main { min-height: 0; overflow: visible; }
+  :root .app.liquid-ui .cc-side { grid-column: 2; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); overflow: visible; align-items: start; }
+  :root .app.liquid-ui .cc-side .drive { grid-column: 1 / -1; }
+  :root .app.liquid-ui .lg-visuals { min-height: 650px; grid-template-rows: 310px auto 220px; }
+  :root .app.liquid-ui .cc-units { flex-direction: column; overflow-x: hidden; }
+}
+@media (max-width: 900px) {
+  :root .app.liquid-ui { grid-template-rows: auto minmax(0,1fr) 25px; }
+  :root .app.liquid-ui .topbar { min-height: 70px; flex-wrap: wrap; padding: 10px 14px; margin: 8px 10px 4px; gap: 10px; }
+  :root .app.liquid-ui .brand { flex: 1; }
+  :root .app.liquid-ui .top-mid { order: 3; width: 100%; justify-content: space-between; }
+  :root .app.liquid-ui .product { max-width: none; font-size: .72rem; }
+  :root .app.liquid-ui .main { grid-template-columns: 76px minmax(0,1fr); }
+  :root .app.liquid-ui .sidenav { margin-left: 9px; padding: 8px 4px; border-radius: 18px; }
+  :root .app.liquid-ui .sidenav button { font-size: .59rem; padding: 10px 3px; min-height: 62px; }
+  :root .app.liquid-ui .cc { grid-template-columns: minmax(0,1fr); padding: 10px; gap: 12px; }
+  :root .app.liquid-ui .cc-rail { grid-row: auto; min-height: 0; height: auto; }
+  :root .app.liquid-ui .lg-roster-head { padding: 14px 16px 12px; }
+  :root .app.liquid-ui .lg-fleet-counts { display: none; }
+  :root .app.liquid-ui .cc-units { flex-direction: row; max-height: 220px; overflow-x: auto; padding: 1px 13px 14px; }
+  :root .app.liquid-ui .lg-unit { width: 215px; flex: 0 0 215px; }
+  :root .app.liquid-ui .lg-unit-model { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  :root .app.liquid-ui .lg-roster-foot { display: none; }
+  :root .app.liquid-ui .cc-filter { margin-bottom: 10px; }
+  :root .app.liquid-ui .cc-side { grid-column: auto; }
+  :root .app.liquid-ui .lg-device-header { gap: 10px; padding: 13px; }
+  :root .app.liquid-ui .lg-device-badges { max-width: 40%; }
+  :root .app.liquid-ui .lg-visuals { grid-template-rows: 330px auto 220px; min-height: 0; }
+}
+@media (max-width: 600px) {
+  :root .app.liquid-ui .main { grid-template-columns: minmax(0,1fr); grid-template-rows: 62px minmax(0,1fr); }
+  :root .app.liquid-ui .sidenav { margin: 5px 10px; display: flex; flex-direction: row; gap: 3px; padding: 4px; border-radius: 16px; overflow-x: auto; overflow-y: hidden; }
+  :root .app.liquid-ui .sidenav button { flex: 0 0 58px; width: 58px; min-height: 42px; flex-direction: column; padding: 5px 3px; gap: 3px; border-radius: 12px; font-size: .5rem; }
+  :root .app.liquid-ui .sidenav button .ico svg { width: 16px; height: 16px; }
+  :root .app.liquid-ui .sidenav button:last-child { margin-top: 0; }
+  :root .app.liquid-ui .topbar { padding: 10px 12px; gap: 9px; }
+  :root .app.liquid-ui .brand { gap: 8px; }
+  :root .app.liquid-ui .product { font-size: .61rem; letter-spacing: .08em; max-width: 190px; }
+  :root .app.liquid-ui .brand .divider { display: none; }
+  :root .app.liquid-ui .top-right { flex-wrap: wrap; width: 100%; justify-content: flex-end; gap: 7px; }
+  :root .app.liquid-ui .user { margin-left: auto; order: -1; margin-right: auto; }
+  :root .app.liquid-ui .user-txt { display: block; }
+  :root .app.liquid-ui .lg-glass-toggle span { display: none; }
+  :root .app.liquid-ui .cc { padding: 9px 10px; }
+  :root .app.liquid-ui .lg-device-header { flex-wrap: wrap; }
+  :root .app.liquid-ui .lg-device-title h1 { font-size: 1.5rem; }
+  :root .app.liquid-ui .lg-device-badges { max-width: none; width: 100%; justify-content: flex-start; padding-top: 4px; }
+  :root .app.liquid-ui .lg-view-switch { flex-wrap: wrap; padding: 2px 0; gap: 8px; }
+  :root .app.liquid-ui .lg-view-switch > span { font-size: .67rem; }
+  :root .app.liquid-ui .lg-view-switch .seg button { padding: 4px 7px; }
+  :root .app.liquid-ui .lg-visuals { grid-template-columns: minmax(0,1fr); grid-template-areas: 'map' 'metrics' 'video' 'telemetry'; grid-template-rows: 300px auto 230px auto; gap: 11px; }
+  :root .app.liquid-ui .lg-visuals[data-focus='video'] { grid-template-areas: 'video' 'metrics' 'map' 'telemetry'; }
+  :root .app.liquid-ui .lg-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  :root .app.liquid-ui .lg-metric { min-height: 100px; }
+  :root .app.liquid-ui .cc-side { display: flex; flex-direction: column; }
+  :root .app.liquid-ui .cc-side > * { width: 100%; }
+  :root .app.liquid-ui .cc-tlm { overflow: visible; }
+  :root .app.liquid-ui .tlm-sparks { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  :root .app.liquid-ui .footer { padding: 0 12px; font-size: .53rem; }
+}
+/* Readability/performance preferences and feature fallback. */
+:root[data-glass='solid'] .app.liquid-ui :is(.panel,.timeline,.topbar,.pop,.kpi,.map-tools,.zoom,.compass) {
+  background: var(--lg-surface-solid); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+:root[data-glass='solid'] .app.liquid-ui :is(.lg-map-label,.lg-map-tools button) { background: #f8f8fa; backdrop-filter: none; -webkit-backdrop-filter: none; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root .app.liquid-ui :is(.panel,.timeline,.topbar,.kpi,.map-tools,.zoom,.compass) { background: var(--lg-surface-solid); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root .app.liquid-ui :is(.panel,.timeline,.topbar,.pop,.kpi,.map-tools,.zoom,.compass) { background: var(--lg-surface-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  :root .app.liquid-ui :is(.lg-map-label,.lg-map-tools button) { background: #f8f8fa; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root .app.liquid-ui *, :root .app.liquid-ui *::before, :root .app.liquid-ui *::after { animation: none !important; scroll-behavior: auto !important; transition: none !important; }
+}
+@media (prefers-contrast: more) {
+  :root .app.liquid-ui :is(.panel,.timeline,.topbar,.lg-unit,.lg-metric) { background: var(--lg-surface-solid); border-color: var(--text-3); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  :root .app.liquid-ui { --text-3: var(--lg-text-2); }
+}
+@media (forced-colors: active) {
+  :root .app.liquid-ui :is(.panel,.topbar,.sidenav,.lg-unit,.lg-metric,.seg button,.btn-primary,.btn-secondary) { background: Canvas; color: CanvasText; border: 1px solid CanvasText; box-shadow: none; }
+  :root .app.liquid-ui :is(.sidenav button.on,.lg-unit.is-selected,.seg button.on) { border: 2px solid Highlight; }
+}
+/* A display rule must never override the HTML hidden attribute. */
+:root .app.liquid-ui [hidden] { display: none !important; }
+/* Explicit shell placement supersedes the legacy bottom-navigation breakpoint. */
+:root .app.liquid-ui .main { grid-template-rows: minmax(0,1fr); }
+:root .app.liquid-ui .main > .sidenav { grid-column: 1; grid-row: 1; }
+:root .app.liquid-ui .main > :not(.sidenav) { grid-column: 2; grid-row: 1; }
+@media (max-width:600px) {
+  :root .app.liquid-ui .main { grid-template-rows: 62px minmax(0,1fr); }
+  :root .app.liquid-ui .main > .sidenav { grid-column: 1; grid-row: 1; }
+  :root .app.liquid-ui .main > :not(.sidenav) { grid-column: 1; grid-row: 2; }
+}
+:root .app.liquid-ui.wall .main { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(0,1fr); }
+:root .app.liquid-ui.wall .main > :not(.sidenav) { grid-column: 1; grid-row: 1; }
+/* Compact layouts use intrinsic-height rows rather than shrinking the desktop
+   panels into a viewport-height track. The workspace remains the scroll owner. */
+@media (max-width:1279px) {
+  :root .app.liquid-ui .cc { grid-auto-rows: max-content; }
+  :root .app.liquid-ui .cc-main { height: auto; }
+  :root .app.liquid-ui .lg-visuals { flex: none; }
+}
+@media (max-width:900px) {
+  :root .app.liquid-ui .cc-rail { min-height: max-content; }
+  :root .app.liquid-ui .cc-main { min-height: max-content; }
+  :root .app.liquid-ui .lg-visuals { min-height: 660px; }
+}
+@media (max-width:600px) {
+  :root .app.liquid-ui .lg-visuals { min-height: 1000px; }
+  :root .app.liquid-ui .product { display: block; }
+}
