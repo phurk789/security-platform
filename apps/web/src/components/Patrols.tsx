@@ -53,6 +53,9 @@ export function PatrolsCard() {
   const deviceId = vehicles.some((v) => v.id === form.deviceId) ? form.deviceId : (vehicles[0]?.id ?? '');
   const operatorId = operators.some((u) => u.id === form.operatorId) ? form.operatorId : (operators[0]?.id ?? '');
   const dev = s.devices[deviceId];
+  // The preset loops are drawn on the demo plant: a real vehicle patrols a route drawn on its own map.
+  const presets = dev?.integration === 'simulated';
+  const routeId = presets ? form.routeId : 'draw';
   const draft = useRouteDraft();
   const drawn = finishedDraft(draft, 'patrol', deviceId);
   const canDraw = mode === 'remote' && !!dev && !dev.indoor;
@@ -70,13 +73,13 @@ export function PatrolsCard() {
     if (!dev) return undefined;
     // Indoor vehicles patrol their floor plan; outdoor presets would cross walls.
     if (dev.indoor) return floorPlan(dev.indoor.buildingId, dev.indoor.level)?.patrolRoute;
-    if (form.routeId === 'draw') return drawn?.points;
+    if (routeId === 'draw') return drawn?.points;
     const preset = (ROUTES.find((r) => r.id === form.routeId) ?? ROUTES[0]).pts;
     const home = dev.stats?.dock ?? dev.pos;
     const back = planRoute(preset[preset.length - 1], home, { fences: s.geofences, kind: dev.kind as 'ugv' | 'uav' });
     const out: Point[] = [...preset, ...(back.ok ? back.checkpoints : [])];
     return out;
-  }, [dev, form.routeId, s.geofences, drawn]);
+  }, [dev, routeId, form.routeId, s.geofences, drawn]);
   const times = form.times
     .split(/[,\s]+/)
     .map((x) => x.trim())
@@ -188,24 +191,25 @@ export function PatrolsCard() {
             </select>
           ) : (
             <select
-              value={form.routeId}
+              value={routeId}
               onChange={(e) => {
                 setForm({ ...form, routeId: e.target.value });
                 if (e.target.value === 'draw' && !drawn) drawOnMap();
               }}
               aria-label={t('Route')}
             >
-              {ROUTES.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {t(r.label)}
-                </option>
-              ))}
+              {presets &&
+                ROUTES.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {t(r.label)}
+                  </option>
+                ))}
               {canDraw && (
                 <option value="draw">{drawn ? t('Drawn on the map · {k} checkpoints', { k: drawn.points.length }) : t('Draw checkpoints on the map…')}</option>
               )}
             </select>
           )}
-          {form.routeId === 'draw' && canDraw && (
+          {routeId === 'draw' && canDraw && (
             <button type="button" className="btn-secondary small" onClick={drawOnMap}>
               <MapPinned size={14} /> {drawn ? t('Change on the map') : t('Draw on the map')}
             </button>
@@ -228,7 +232,7 @@ export function PatrolsCard() {
             {t('Start automatically when the vehicle is ready (the operator keeps control and can pause or stop)')}
           </label>
           <p className="fine">
-            {form.routeId === 'draw' && !dev?.indoor
+            {routeId === 'draw' && !dev?.indoor
               ? loop?.length
                 ? t('Drawn route: {n} checkpoints, driven as drawn. Standing approval is recorded under your name; the route is checked against keep-out zones on every run.', {
                     n: loop.length,

@@ -15,6 +15,9 @@ import {
   can,
   canMove,
   constraintChecksAt,
+  routeAreaCheck,
+  MISSION_BATTERY_HOLD_PCT,
+  MISSION_BATTERY_WARN_PCT,
   fmtDate,
   fmtTime,
   freshnessAt,
@@ -236,6 +239,8 @@ export class Platform {
   private insideFences = new Map<string, Set<string>>();
   /** Devices last seen outside every operating area of their site. */
   private outsideArea = new Set<string>();
+  /** Missions whose low-battery warning was given (once per run). */
+  private batteryWarned = new Set<string>();
   /** Last telemetry position per vehicle, for odometer and runtime. */
   private lastFix = new Map<string, { pos: Point; at: number }>();
   private lastStatsSave = new Map<string, number>();
@@ -1237,6 +1242,20 @@ export class Platform {
     return pts;
   }
 
+  /**
+   * A route must stay inside the site's operating area, legs included. A real vehicle needs one
+   * drawn; simulated vehicles on a site without one keep the demo boundary. Indoor routes have their own checks.
+   */
+  private routeInArea(orgId: string, d: Device & { siteId: string }, pts: Point[]) {
+    if ((d.kind !== 'ugv' && d.kind !== 'uav') || d.indoor) return pts;
+    const fences = this.geofencesOf(orgId, d.siteId);
+    const c = routeAreaCheck(d, pts, fences);
+    if (c.ok) return pts;
+    const hasArea = operatingAreas(fences, d.kind).length > 0;
+    if (!hasArea && d.integration !== 'simulated') fail(409, 'conflict', `No operating area is drawn for this site. Draw one on the map before sending ${d.id} on a route.`);
+    return fail(409, 'conflict', `Checkpoints ${routeOutsideSite(pts, fences, d.kind).join(', ')} are outside the ${hasArea ? 'operating area' : 'site'}.`);
+  }
+
   private validRoute(pts: Point[]) {
     if (!Array.isArray(pts) || pts.length < 1 || pts.length > 50) fail(400, 'invalid', 'Route needs 1–50 checkpoints.');
     for (const p of pts)
@@ -1257,7 +1276,7 @@ export class Platform {
       incidentId: inc.id,
       deviceId: d.id,
       operatorId: input.operatorId,
-      checkpoints: this.clearRoute(a.orgId, d, this.validRoute(input.checkpoints)),
+      checkpoints: this.routeInArea(a.orgId, d, this.clearRoute(a.orgId, d, this.validRoute(input.checkpoints))),
       planVersion: 1,
       status: 'draft',
       nextCp: 0,
@@ -1277,7 +1296,8 @@ export class Platform {
     this.require(a, 'mission.prepare', id);
     const { m, siteId } = this.getMission(a, id);
     if (!['draft', 'pending_approval', 'approved', 'assigned', 'rejected'].includes(m.status)) fail(409, 'conflict', 'Route cannot be changed while the mission is running.');
-    m.checkpoints = this.clearRoute(a.orgId, this.getDevice(a, m.deviceId), this.validRoute(checkpoints));
+    const dev = this.getDevice(a, m.deviceId);
+    m.checkpoints = this.routeInArea(a.orgId, dev, this.clearRoute(a.orgId, dev, this.validRoute(checkpoints)));
     m.planVersion += 1;
     tx(this.db, () => {
       if (m.status === 'approved' || m.status === 'assigned') {
@@ -1475,10 +1495,19 @@ export class Platform {
     const valid: Record<CommandType, MissionStatus[]> = { start: ['assigned'], pause: ['executing'], resume: ['paused'], stop: ['executing', 'paused'] };
     if (!valid[type].includes(m.status)) deny('conflict', `Cannot ${type} while mission is ${m.status.replace('_', ' ')}.`);
     if (type === 'start' && m.approvedVersion !== m.planVersion) deny('conflict', 'Plan changed since approval. Re-approval required.');
+    // Zones may have changed since approval: the route is checked again against today's map.
+    if (type === 'start')
+      try {
+        this.routeInArea(a.orgId, d, this.clearRoute(a.orgId, d, m.checkpoints));
+      } catch (e) {
+        if (e instanceof ApiError) deny('conflict', `${e.message} The zones changed since approval: edit the route.`);
+        throw e;
+      }
     const fresh = freshnessAt(now, d);
     if ((type === 'start' || type === 'resume') && fresh !== 'live') deny('stale_telemetry', `Telemetry is ${fresh}. New ${type} commands are held until data is fresh.`);
     const pending = this.listCommands(a, missionId).find((x) => !isTerminalCommand(x.status));
-    if (pending && type !== 'stop') deny('conflict', `Waiting for ${pending.type} (${pending.id}) to finish.`);
+    // Stop always goes through, and so does the platform's own safety hold.
+    if (pending && type !== 'stop' && !(type === 'pause' && a.kind === 'system')) deny('conflict', `Waiting for ${pending.type} (${pending.id}) to finish.`);
 
     this.setCmd(c, 'authorized');
     const sent = this.gateways.send(d.orgId, d.id, {
@@ -1545,12 +1574,21 @@ export class Platform {
         if (!canMove(MISSION_FLOW, m.status, 'executing')) return;
         m.status = 'executing';
         m.note = undefined;
+        m.interruption = undefined;
         this.event(null, orgId, siteId, m.incidentId, `${c.deviceId} resumed`, sys);
         break;
       case 'stop':
-        if (!canMove(MISSION_FLOW, m.status, 'cancelled')) return;
-        m.status = 'cancelled';
-        this.event(null, orgId, siteId, m.incidentId, `${c.deviceId} stopped`, { ...sys, tone: 'warn', detail: 'Stop confirmed by vehicle telemetry (speed 0). Mission ended.' });
+        // A route that broke off (vehicle, zone, battery) and was then stopped did not do its job: failed, with the reason.
+        if (m.interruption) {
+          if (!canMove(MISSION_FLOW, m.status, 'failed')) return;
+          m.status = 'failed';
+          m.note = `Ended after: ${m.interruption.reason}`;
+          this.event(null, orgId, siteId, m.incidentId, `${c.deviceId} stopped — mission failed`, { ...sys, tone: 'warn', detail: m.note });
+        } else {
+          if (!canMove(MISSION_FLOW, m.status, 'cancelled')) return;
+          m.status = 'cancelled';
+          this.event(null, orgId, siteId, m.incidentId, `${c.deviceId} stopped`, { ...sys, tone: 'warn', detail: 'Stop confirmed by vehicle telemetry (speed 0). Mission ended.' });
+        }
         if (m.patrolId) this.finishPatrolRun(orgId, siteId, m, this.now(), 'stopped');
         break;
     }
@@ -1774,6 +1812,7 @@ export class Platform {
     if (t.heading !== undefined) d.heading = t.heading;
     if (t.signal !== undefined) d.signal = t.signal;
     if (t.satellites !== undefined) d.satellites = t.satellites;
+    if (typeof t.routeSpeed === 'number' && t.routeSpeed > 0 && t.routeSpeed < 50) d.routeSpeed = Math.round(t.routeSpeed * 100) / 100;
     if (d.indoor) d.floorPatrol = t.floorPatrol === true || undefined;
     if (t.temperatureC !== undefined) d.temperatureC = t.temperatureC;
     if (d.indoor && Number.isFinite(t.level)) d.indoor = { ...d.indoor, level: Math.round(t.level as number) };
@@ -1799,6 +1838,7 @@ export class Platform {
       this.trackStats(d, now);
       this.trackFences(d, now);
     }
+    if (t.battery !== undefined && (d.kind === 'ugv' || d.kind === 'uav')) this.checkRouteBattery(d, t.battery);
     this.devices.set(d.id, d);
     this.db.prepare('UPDATE devices SET data = ? WHERE id = ?').run(JSON.stringify(this.publicDevice(d)), d.id);
     // Position history: only samples that have a position (a replay must not show a guessed one).
@@ -2090,9 +2130,12 @@ export class Platform {
               Object.assign(m, this.missionById(m.id)!.m);
             }
           }
-          if (m && m.status === 'executing') {
+          // Paused counts too: the vehicle may hold at the last checkpoint a moment before saying it arrived.
+          if (m && (m.status === 'executing' || m.status === 'paused')) {
             m.status = 'completed';
             m.nextCp = m.checkpoints.length;
+            m.note = undefined;
+            m.interruption = undefined;
             this.saveMission(orgId, d.siteId, m);
             this.event(null, orgId, d.siteId, m.incidentId, `${d.id} reached final checkpoint`, {
               actor: d.id,
@@ -2117,6 +2160,32 @@ export class Platform {
               at: e.at,
               detail: 'No queued commands were replayed. Mission paused until the operator resumes.',
             });
+          }
+          break;
+        case 'route_interrupted':
+          // The vehicle left AUTO or was disarmed without the platform asking (remote switch, vehicle failsafe).
+          if (m && (m.status === 'executing' || m.status === 'paused')) {
+            const reason = String(e.detail ?? `${d.id} left AUTO without the platform asking.`).slice(0, 300);
+            m.interruption = { reason, at: e.at };
+            m.note = reason;
+            if (m.status === 'executing') m.status = 'paused';
+            this.saveMission(orgId, d.siteId, m);
+            this.event(null, orgId, d.siteId, m.incidentId, `${d.id} route interrupted`, {
+              actor: d.id,
+              tone: 'alert',
+              at: e.at,
+              detail: `${reason} Mission paused: resume when it is safe, or stop it.`,
+            });
+            this.publish({ orgId, siteId: d.siteId, event: { type: 'notice', tone: 'error', text: `${d.id}: route interrupted. ${reason}` } });
+          }
+          break;
+        case 'route_resumed':
+          if (m && m.status === 'paused') {
+            m.status = 'executing';
+            m.note = undefined;
+            m.interruption = undefined;
+            this.saveMission(orgId, d.siteId, m);
+            this.event(null, orgId, d.siteId, m.incidentId, `${d.id} resumed on the remote`, { actor: d.id, tone: 'ok', at: e.at, detail: e.detail });
           }
           break;
         case 'fault':
@@ -2353,7 +2422,7 @@ export class Platform {
             ? 'Edge gateway not connected. Command was not delivered.'
             : 'No acknowledgement from the device. Result unknown — check with the field operator.',
         );
-      } else if ((c.status === 'acknowledged' || c.status === 'executing') && ((d && freshnessAt(now, d) !== 'live' && age >= COMMAND_ACK_TIMEOUT_MS + 1000) || age > 60_000)) {
+      } else if ((c.status === 'acknowledged' || c.status === 'executing') && ((d && freshnessAt(now, d) !== 'live' && age >= COMMAND_ACK_TIMEOUT_MS + 1000) || age > (c.type === 'start' ? 120_000 : 60_000))) {
         changed = this.setCmd(c, 'unknown', 'Device stopped reporting before confirming. Outcome unknown.');
       }
       if (changed) {
@@ -2919,6 +2988,7 @@ export class Platform {
           incidentId: m?.incidentId,
           data: { deviceId: d.id, fenceId: f.id, pos: d.pos },
         });
+      if (breach && m) this.autoHold(d, m, `${text}.`);
     }
     for (const id of was) {
       if (nowIn.has(id)) continue;
@@ -2948,6 +3018,41 @@ export class Platform {
     if (breach) {
       this.bus.emit('geofence', { orgId: d.orgId, deviceId: d.id, fence: areas[0], breach });
       this.notify(d.orgId, { event: 'geofence.breach', title: text, text: 'Left the operating area', severity: 'high', incidentId: m.incidentId, data: { deviceId: d.id, fenceId: areas[0].id, pos: d.pos } });
+      this.autoHold(d, m, `${d.id} left the operating area.`);
+    }
+  }
+
+  /** During a route: warn once when the battery runs low, and hold the vehicle at the hold level. */
+  private checkRouteBattery(d: Device & { orgId: string; siteId: string }, pct: number) {
+    const m = this.activeMission(d.id);
+    if (!m || m.status !== 'executing') return;
+    const p = Math.round(pct);
+    if (pct <= MISSION_BATTERY_HOLD_PCT) return this.autoHold(d, m, `Battery ${p}% on ${d.id} (hold level ${MISSION_BATTERY_HOLD_PCT}%). Bring it back on the remote or change the battery.`);
+    if (pct > MISSION_BATTERY_WARN_PCT || this.batteryWarned.has(m.id)) return;
+    this.batteryWarned.add(m.id);
+    const text = `${d.id} battery low (${p}%)`;
+    this.event(null, d.orgId, d.siteId, m.incidentId, text, { actor: d.id, tone: 'warn', detail: `It will be held automatically at ${MISSION_BATTERY_HOLD_PCT}%.` });
+    this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: 'warn', text: `${text}. It will be held automatically at ${MISSION_BATTERY_HOLD_PCT}%.` } });
+  }
+
+  /**
+   * Hold a vehicle on a running route without waiting for the operator: it left the operating area,
+   * entered a keep-out zone, or its battery reached the hold level. The operator then resumes, or
+   * stops the mission (which then ends as failed, with this reason).
+   */
+  private autoHold(d: Device & { orgId: string; siteId: string }, m: Mission, reason: string) {
+    if (m.status !== 'executing' || m.interruption) return; // once per interruption
+    m.interruption = { reason, at: this.now() };
+    m.note = reason;
+    this.saveMission(d.orgId, d.siteId, m);
+    try {
+      // The pause is sent in the name of the person holding control (the platform acts for them).
+      this.issueCommand({ ...this.systemActor(d.orgId, 'system', 'Safety hold'), userId: d.controlOwner }, m.id, 'pause', `${m.id}:auto-hold:${this.now()}`);
+      this.event(null, d.orgId, d.siteId, m.incidentId, `${d.id} held automatically`, { actor: 'Platform', tone: 'alert', detail: `${reason} Resume when it is safe, or stop the mission.` });
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      this.event(null, d.orgId, d.siteId, m.incidentId, `Automatic hold of ${d.id} not sent`, { actor: 'Platform', tone: 'alert', detail: `${reason} — hold not sent: ${why} Stop it on the remote.` });
+      this.publish({ orgId: d.orgId, siteId: d.siteId, event: { type: 'notice', tone: 'error', text: `${d.id}: automatic hold not sent (${why}). Stop it on the remote.` } });
     }
   }
 

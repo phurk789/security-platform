@@ -27,7 +27,7 @@ import { ageMs, can, currentUser, fmtTime, freshness, isReady, userName } from '
 import { isTerminal, missionForIncident } from '../domain/reducer';
 import { constraintChecks } from '../domain/policy';
 import { finishedDraft, routeDraft, useRouteDraft } from '../domain/routeDraft';
-import { DEFAULT_ROUTE, planFor, rankUnits, routeLength } from '@13store/shared';
+import { DEFAULT_ROUTE, planFor, rankUnits, routeLength, routeSpeedOf } from '@13store/shared';
 import type { AppState, CommandType, Device, Incident, Mission, Point, Role } from '@13store/shared';
 import { LatLon } from './LatLon';
 import { useStore } from '../store';
@@ -231,13 +231,18 @@ function IncidentPanel({ inc }: { inc: Incident }) {
 
 function RoleHint({ s, inc, m, meId, role }: { s: AppState; inc: Incident; m?: Mission; meId: string; role: Role }) {
   const t = useT();
+  const { session } = useStore();
+  // The role switch exists only in the demo (no server, or the server's demo environment).
+  const demo = !session || session.meta.env === 'demo';
   let text: string | null = null;
   if (s.replay.active) text = 'You are viewing replay. Device control is off.';
   else if (role === 'auditor') text = 'Read-only role. Actions are disabled.';
   else if (m?.status === 'pending_approval' && m.operatorId === meId) text = 'You are the operator of this mission, so another supervisor approves it (two-person rule).';
-  else if (m?.status === 'pending_approval' && !can(role, 'mission.approve')) text = 'Waiting for supervisor approval. (Demo: switch role to Supervisor.)';
+  else if (m?.status === 'pending_approval' && !can(role, 'mission.approve'))
+    text = demo ? 'Waiting for supervisor approval. (Demo: switch role to Supervisor.)' : 'Waiting for supervisor approval.';
   else if ((m?.status === 'approved' || m?.status === 'assigned') && m.approvedBy === meId) text = 'You approved this mission, so another person operates it (two-person rule).';
-  else if (m?.status === 'approved' && m.operatorId !== meId) text = 'Approved. Waiting for the operator to accept. (Demo: switch role to Operator.)';
+  else if (m?.status === 'approved' && m.operatorId !== meId)
+    text = demo ? 'Approved. Waiting for the operator to accept. (Demo: switch role to Operator.)' : 'Approved. Waiting for the operator to accept.';
   else if (m?.status === 'assigned' && s.devices[m.deviceId]?.controlOwner !== meId) text = 'Operator holds control. Only they can start the mission.';
   else if (inc.status === 'confirmed' && !m) text = 'Approval required before dispatch.';
   if (!text) return null;
@@ -350,6 +355,7 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
         {m && (
           <p className="banner info">
             {t('Previous mission {id}:', { id: m.id })} <MissionBadge status={m.status} />
+            {m.status === 'failed' && m.note && <span className="route-why"> {t(m.note)}</span>}
           </p>
         )}
         <PrepareMission inc={inc} />
@@ -370,6 +376,7 @@ function Stage({ inc, m }: { inc: Incident; m?: Mission }) {
             {t('Mission {id}:', { id: m.id })} <MissionBadge status={m.status} />
           </p>
         )}
+        {m?.status === 'failed' && m.note && <p className="banner warn">{t(m.note)}</p>}
         <Outcome inc={inc} />
       </section>
     );
@@ -588,9 +595,11 @@ function PrepareMission({ inc }: { inc: Incident }) {
   const t = useT();
   const me = currentUser(s);
   const [open, setOpen] = useState(false);
-  const [deviceId, setDeviceId] = useState('UGV-01');
+  // The first ready vehicle; the preset demo routes only fit the simulated ones.
+  const [deviceId, setDeviceId] = useState(() => Object.values(s.devices).find((d) => (d.kind === 'ugv' || d.kind === 'uav') && isReady(s, d))?.id ?? '');
   const [route, setRoute] = useState('direct');
   const picked = s.devices[deviceId];
+  const demoRoutes = picked?.integration === 'simulated';
   const indoorPlan = picked?.indoor ? floorPlan(picked.indoor.buildingId, picked.indoor.level) : undefined;
   // Checkpoints clicked on the real map (only the real map can be drawn on; indoor vehicles keep the floor plan).
   const draft = useRouteDraft();
@@ -598,16 +607,18 @@ function PrepareMission({ inc }: { inc: Incident }) {
   const drawn = finishedDraft(draft, 'mission-new', deviceId);
   const drawingHere = draft?.state === 'drawing' && draft.purpose === 'mission-new' && draft.deviceId === deviceId;
   const startDrawing = () => routeDraft.start({ purpose: 'mission-new', deviceId, points: drawn?.points ?? [] });
-  // Route planned around buildings and keep-out zones from where the vehicle is now to the alert.
+  // Route planned around the demo plant's buildings and keep-out zones from where the vehicle is now to
+  // the alert. A real vehicle's route is drawn on the map (the planner knows only the demo plant).
   const autoPlan = useMemo(
-    () => (picked && (picked.kind === 'ugv' || picked.kind === 'uav') ? planFor(picked, inc.pos, { fences: s.geofences }) : undefined),
+    () => (picked && (demoRoutes || picked.indoor) && (picked.kind === 'ugv' || picked.kind === 'uav') ? planFor(picked, inc.pos, { fences: s.geofences }) : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deviceId, inc.id, Math.round(picked?.pos.x ?? 0), Math.round(picked?.pos.y ?? 0), s.geofences],
   );
   useEffect(() => {
     // Indoor vehicle: straight to the alert when it is on its floor, else the floor patrol; outdoor routes would cross walls.
     if (indoorPlan) setRoute(autoPlan?.ok ? 'auto' : 'indoor');
-    else if (!indoorPlan && (route === 'indoor' || route === 'auto')) setRoute(autoPlan?.ok ? 'auto' : 'direct');
+    else if (!demoRoutes) setRoute('draw');
+    else if (!indoorPlan && (route === 'indoor' || route === 'auto' || route === 'draw')) setRoute(autoPlan?.ok ? 'auto' : 'direct');
     else if (!indoorPlan && autoPlan?.ok && route === 'direct') setRoute('auto');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
@@ -667,6 +678,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
               </option>
             )}
             {!indoorPlan &&
+              demoRoutes &&
               ROUTES.map((r) => (
                 <option key={r.id} value={r.id}>
                   {t(r.label)}
@@ -765,6 +777,9 @@ function Planner({ m }: { m: Mission }) {
   const canPrep = can(me.role, 'mission.prepare') && !s.replay.active;
   const canApprove = can(me.role, 'mission.approve') && !s.replay.active;
   const rid = routeId(m.checkpoints);
+  const dev = s.devices[m.deviceId] as Device | undefined;
+  const lengthM = routeLength(m.checkpoints, dev?.noFix ? undefined : dev?.pos);
+  const speed = dev ? routeSpeedOf(dev) : 1;
   const reapproval = m.status === 'pending_approval' && m.approvedVersion !== undefined && m.approvedVersion !== m.planVersion;
 
   return (
@@ -810,21 +825,33 @@ function Planner({ m }: { m: Mission }) {
           <span>
             <RouteIcon size={14} /> {t('Route')} {m.approvedVersion === m.planVersion ? t('(approved — solid on map)') : t('(draft — dashed on map)')}
           </span>
-          <select
-            value={rid}
-            disabled={!canPrep}
-            onChange={(e) => {
-              const r = ROUTES.find((x) => x.id === e.target.value);
-              if (r) dispatch({ type: 'editRoute', missionId: m.id, checkpoints: r.pts });
-            }}
-          >
-            {ROUTES.map((r) => (
-              <option key={r.id} value={r.id}>
-                {t(r.label)}
-              </option>
-            ))}
-            {rid === 'custom' && <option value="custom">{t('Custom route')}</option>}
-          </select>
+          {dev?.integration === 'simulated' ? (
+            <select
+              value={rid}
+              disabled={!canPrep}
+              onChange={(e) => {
+                const r = ROUTES.find((x) => x.id === e.target.value);
+                if (r) dispatch({ type: 'editRoute', missionId: m.id, checkpoints: r.pts });
+              }}
+            >
+              {ROUTES.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {t(r.label)}
+                </option>
+              ))}
+              {rid === 'custom' && <option value="custom">{t('Custom route')}</option>}
+            </select>
+          ) : (
+            // A real vehicle: the drawn route, its length and the time at the autopilot's route speed.
+            <span className="route-sum">
+              {t('{k} checkpoints · {m} m · about {eta} at {v} m/s', {
+                k: m.checkpoints.length,
+                m: Math.round(lengthM),
+                eta: fmtEta(lengthM / speed),
+                v: speed,
+              })}
+            </span>
+          )}
         </label>
         {mode === 'remote' && canPrep && editable && (
           <div className="row gap-s">
@@ -848,7 +875,7 @@ function Planner({ m }: { m: Mission }) {
             <li key={c.label} className={c.ok ? 'ok' : c.hard ? 'fail' : 'warn'}>
               {c.ok ? <Check size={15} /> : c.hard ? <X size={15} /> : <CircleAlert size={15} />}
               <span>{t(c.label)}</span>
-              <small>{c.detail}</small>
+              <small>{t(c.detail)}</small>
             </li>
           ))}
         </ul>
@@ -975,7 +1002,8 @@ export function LiveMission({ m }: { m: Mission }) {
         {f !== 'live' && (
           <p className="banner warn">{t('Last data {ago}. New start/resume commands are held. Vehicle state is uncertain — check with the field operator.', { ago: ago(age) })}</p>
         )}
-        {m.note && <p className="banner info">{m.note}</p>}
+        {/* Why the route stopped on its own (remote switch, failsafe, zone, battery): stands out until resumed. */}
+        {m.note && <p className={`banner ${m.interruption ? 'warn' : 'info'}`}>{t(m.note)}</p>}
       </section>
 
       <section className="step">

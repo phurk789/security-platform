@@ -4,7 +4,7 @@
 // flow), camera control, unit activity log.
 import { useMemo, useState } from 'react';
 import { Activity, ArrowRight, Crosshair, Drone, Gauge, ListChecks, MapPinned, Navigation, Truck } from 'lucide-react';
-import { PAYLOAD_CATALOG, UGV_SPEED, VEHICLE_CATALOG, dist, runtimeLeftMin, type Device, type Mission } from '@13store/shared';
+import { PAYLOAD_CATALOG, VEHICLE_CATALOG, dist, routeSpeedOf, runtimeLeftMin, type Device, type Mission } from '@13store/shared';
 import { can, currentUser, fmtTime, freshness, userName } from '../domain/policy';
 import { isTerminal } from '../domain/reducer';
 import { useT, type T } from '../i18n';
@@ -171,7 +171,8 @@ function MissionStrip({ d, m }: { d: Device; m?: Mission }) {
   const Icon = d.kind === 'uav' ? Drone : Truck;
   const left = m ? remaining(d, m) : 0;
   const moving = m?.status === 'executing';
-  const eta = moving ? left / Math.max(d.speed > 0.5 ? d.speed : UGV_SPEED * 0.6, 0.5) : null;
+  // Live speed while moving, else the speed the vehicle drives routes at (its autopilot setting).
+  const eta = moving ? left / Math.max(d.speed > 0.5 ? d.speed : routeSpeedOf(d), 0.3) : null;
   return (
     <div className="panel cc-strip">
       <span className={`fc-ico k-${d.kind}`}>

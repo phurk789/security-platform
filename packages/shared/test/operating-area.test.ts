@@ -50,10 +50,17 @@ describe('operating area', () => {
   });
 
   it('drives the hard approval check', () => {
-    const d = { id: 'UGV-01', kind: 'ugv', pos: { x: 5, y: -5 }, lastSeen: 1000, battery: 90, status: 'idle', commands: ['start'] } as unknown as Device;
+    const sim = { id: 'UGV-01', kind: 'ugv', integration: 'simulated', pos: { x: 5, y: -5 }, lastSeen: 1000, battery: 90, status: 'idle', commands: ['start'] } as unknown as Device;
     const m = { id: 'MSN-1', deviceId: 'UGV-01', checkpoints: [{ x: 10, y: -10 }, { x: 10, y: -30 }] } as unknown as Mission;
-    const label = 'Route inside demo area';
-    expect(constraintChecksAt(1000, d, m, () => '', []).find((c) => c.label === label)?.ok).toBe(false);
-    expect(constraintChecksAt(1000, d, m, () => '', [yard]).find((c) => c.label === label)).toMatchObject({ ok: true, hard: true });
+    // A simulated vehicle without an area: the demo boundary, which the yard lies outside.
+    expect(constraintChecksAt(1000, sim, m, () => '', []).find((c) => c.label === 'Route inside the site boundary')).toMatchObject({ ok: false, hard: true });
+    expect(constraintChecksAt(1000, sim, m, () => '', [yard]).find((c) => c.label === 'Route inside the operating area')).toMatchObject({ ok: true, hard: true });
+    // A real vehicle needs an operating area drawn, wherever its route is.
+    const real = { ...sim, integration: 'testing' } as Device;
+    expect(constraintChecksAt(1000, real, m, () => '', []).find((c) => c.label === 'Route inside the operating area')).toMatchObject({
+      ok: false,
+      detail: 'No operating area drawn for this site',
+    });
+    expect(constraintChecksAt(1000, real, m, () => '', [yard]).find((c) => c.label === 'Route inside the operating area')?.ok).toBe(true);
   });
 });

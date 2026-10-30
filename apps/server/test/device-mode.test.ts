@@ -206,6 +206,14 @@ beforeAll(async () => {
   [sup, op, disp] = await Promise.all(['sup', 'op', 'disp'].map((u) => Client.login(srv.url, `l1-${u}`, 'longpassword1')));
   gwKey = (await admin.post('/admin/keys', { label: 'Edge L1', kind: 'gateway' })).body.secret;
   expect((await admin.post('/devices', { id: DEV, kind: 'ugv', model: 'SIYI rover' })).status).toBe(200);
+  // A real vehicle drives routes only inside a drawn operating area.
+  const yard = [
+    { x: 150, y: 150 },
+    { x: 300, y: 150 },
+    { x: 300, y: 280 },
+    { x: 150, y: 280 },
+  ];
+  expect((await admin.post('/geofences', { name: 'Test yard', kind: 'operating_area', appliesTo: ['ugv', 'uav'], poly: yard })).status).toBe(200);
 }, 30_000);
 afterAll(async () => {
   await gw?.close();
