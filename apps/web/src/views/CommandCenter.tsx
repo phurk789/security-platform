@@ -2,8 +2,8 @@
 // Left: searchable unit roster. Centre: map-first workspace with camera-focus switching
 // and live/last-known telemetry. Right: original mission, driving, readiness and camera
 // controls. Command authorization and lifecycle remain in the original components.
-import { useMemo, useRef, useState } from 'react';
-import { Activity, ArrowRight, Battery, Camera, ChevronRight, Crosshair, Drone, Gauge, History, ListChecks, MapPinned, Minus, Navigation, Plus, Radio, Search, ShieldCheck, Signal, Truck } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Activity, ArrowRight, Battery, Camera, ChevronRight, Crosshair, Drone, Gauge, History, ListChecks, MapPinned, Navigation, PanelLeftClose, PanelLeftOpen, Radio, Search, ShieldCheck, Signal, Truck } from 'lucide-react';
 import { PAYLOAD_CATALOG, VEHICLE_CATALOG, dist, routeSpeedOf, runtimeLeftMin, type Device, type Mission } from '@13store/shared';
 import { can, currentUser, fmtTime, freshness, userName } from '../domain/policy';
 import { isTerminal } from '../domain/reducer';
@@ -18,12 +18,14 @@ import { LiveMission } from '../components/IncidentPanel';
 import { TelemetryPanel } from '../components/TelemetryPanel';
 import { UgvHardwareReadiness } from '../components/UgvHardwareReadiness';
 import { showsReadiness } from '../domain/readiness';
-import { Twin3D, type Twin3DApi } from '../components/Twin3D';
+import { MainMap } from '../components/MainMap';
 import { displayNumber, matchesUnit } from '../domain/liquidPresentation';
-import { webglAvailable } from '../twin/world';
+
 import './command-center.css';
 
 const OPEN_MISSION = ['draft', 'pending_approval', 'approved', 'assigned', 'executing', 'paused'];
+/** Folded or open unit list, per browser. */
+const RAIL_KEY = 'ps.cc.rail';
 
 /** Liquid Glass workspace. Business actions below continue to use the original components.
  * Map and camera stay mounted while CSS grid changes their visual priority.
@@ -35,7 +37,23 @@ export function CommandCenter() {
   const [filter, setFilter] = useState<'all' | 'ugv' | 'uav'>('all');
   const [query, setQuery] = useState('');
   const [focus, setFocus] = useState<'map' | 'video'>('map');
-  const twin = useRef<Twin3DApi>(null);
+  // The unit list folds into a slim rail of unit icons, giving the workspace the room (kept per browser).
+  const [railOpen, setRailOpen] = useState(() => {
+    try {
+      return localStorage.getItem(RAIL_KEY) !== 'folded';
+    } catch {
+      return true;
+    }
+  });
+  const toggleRail = () =>
+    setRailOpen((open) => {
+      try {
+        localStorage.setItem(RAIL_KEY, open ? 'folded' : 'open');
+      } catch {
+        /* this page only */
+      }
+      return !open;
+    });
   const units = Object.values(s.devices)
     .filter((d) => d.kind === 'ugv' || d.kind === 'uav')
     .sort((a, b) => (a.kind === b.kind ? a.id.localeCompare(b.id) : a.kind === 'ugv' ? -1 : 1));
@@ -46,18 +64,40 @@ export function CommandCenter() {
   const liveCount = units.filter((u) => freshness(s, u) === 'live').length;
   const offlineCount = units.filter((u) => freshness(s, u) === 'offline').length;
   const count = (kind: 'ugv' | 'uav') => units.filter((u) => u.kind === kind).length;
-  const hasWebgl = webglAvailable();
   const canViewMedia = can(currentUser(s).role, 'media.view');
   // Render-time safety: a role change cannot leave an inaccessible video as the primary pane.
   const visibleFocus = canViewMedia ? focus : 'map';
 
   return (
-    <div className="cc cc-liquid">
-      <aside className="panel cc-rail" aria-label={t('Units')}>
+    <div className={`cc cc-liquid${railOpen ? '' : ' rail-folded'}`}>
+      <aside className={`panel cc-rail${railOpen ? '' : ' is-folded'}`} aria-label={t('Units')}>
         <div className="panel-head lg-roster-head">
-          <div><span className="lg-eyebrow">OPERATIONS</span><h2>{t('Units')}</h2></div>
-          <span className="lg-count">{units.length}</span>
+          {railOpen && (
+            <div>
+              <span className="lg-eyebrow">OPERATIONS</span>
+              <h2>{t('Units')}</h2>
+            </div>
+          )}
+          <button
+            type="button"
+            className="lg-rail-toggle"
+            onClick={toggleRail}
+            aria-expanded={railOpen}
+            aria-label={railOpen ? t('Fold the unit list') : t('Open the unit list')}
+            title={railOpen ? t('Fold the unit list') : t('Open the unit list')}
+          >
+            {railOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+          </button>
         </div>
+        {!railOpen && (
+          <div className="lg-rail-mini" role="group" aria-label={t('Units')}>
+            {units.map((unit) => (
+              <MiniUnit key={unit.id} d={unit} selected={unit.id === selId} />
+            ))}
+          </div>
+        )}
+        {railOpen && (
+          <>
         <div className="lg-fleet-counts" aria-label={t('Fleet status')}>
           <div><b>{units.length}</b><small>{t('All')}</small></div>
           <div><b>{liveCount}</b><small>{t('Online')}</small></div>
@@ -78,6 +118,8 @@ export function CommandCenter() {
           {!shown.length && <p className="empty">{t('No vehicles match the filter.')}</p>}
         </div>
         <div className="lg-roster-foot"><ShieldCheck size={18} /><span>{t('Control permissions are checked by the server.')}<small>PUBLIC SECURITY TWIN</small></span></div>
+          </>
+        )}
       </aside>
 
       {d ? (
@@ -106,15 +148,17 @@ export function CommandCenter() {
               </div>
             </div>
             <div className="lg-visuals" data-focus={visibleFocus}>
-              <div className="panel cc-twin lg-map-pane">
-                <div className="lg-map-label"><MapPinned size={16} /><div><b>{t('Digital twin')}</b><small>{t('Following {id}', { id: d.id })}</small></div><span>3D</span></div>
-                {hasWebgl ? <Twin3D ref={twin} follow={d.id} /> : <p className="empty">{t('3D view needs WebGL.')}</p>}
-                <div className="lg-map-tools" role="group" aria-label={t('Map controls')}>
-                  <button type="button" disabled={!hasWebgl} onClick={() => twin.current?.focusSelection()} title={t('Centre on unit')} aria-label={t('Centre on unit')}><Crosshair size={18} /></button>
-                  <button type="button" disabled={!hasWebgl} onClick={() => twin.current?.zoom(0.8)} title={t('Zoom in')} aria-label={t('Zoom in')}><Plus size={18} /></button>
-                  <button type="button" disabled={!hasWebgl} onClick={() => twin.current?.zoom(1.25)} title={t('Zoom out')} aria-label={t('Zoom out')}><Minus size={18} /></button>
+              {/* The system map (satellite map with zones, units and routes; the drawn site map offline).
+                  The 3D digital twin comes back here later. Selecting a unit brings it into view. */}
+              <div className="panel cc-twin lg-map-pane lg-site-map">
+                <div className="lg-map-label">
+                  <MapPinned size={16} />
+                  <div>
+                    <b>{t('Site map')}</b>
+                    <small>{t('{id} selected', { id: d.id })}</small>
+                  </div>
                 </div>
-                <div className="lg-map-caption">{t('3D scene · not a live camera image')}</div>
+                <MainMap />
               </div>
               <div className="lg-metrics"><LiquidMetrics d={d} /></div>
               <section className="panel lg-camera-pane" aria-label={t('Onboard camera')}>
@@ -180,6 +224,30 @@ function LiquidUnitCard({ d, selected }: { d: Device; selected: boolean }) {
       <div className="lg-unit-status">{s.replay.active ? <span className="badge badge-grey">REPLAY</span> : <FreshBadge f={f} />}<ModeBadge d={d} /></div>
       <span className="lg-unit-model">{d.model}</span>
       <div className="lg-unit-numbers"><span><Battery size={14} />{displayNumber(usable ? d.battery : undefined, 0, 0, 100)} %</span><span><Gauge size={14} />{displayNumber(usable ? d.speed : undefined, 1, 0)} m/s</span><span><Signal size={14} />{displayNumber(usable ? d.signal : undefined, 0, 0, 100)} %</span></div>
+    </button>
+  );
+}
+
+/** A unit in the folded list: its picture, a dot for live / stale / offline, and its id. */
+function MiniUnit({ d, selected }: { d: Device; selected: boolean }) {
+  const { s, dispatch } = useStore();
+  const t = useT();
+  const f = s.replay.active ? 'replay' : freshness(s, d);
+  const battery = f === 'live' && d.battery !== undefined ? ` · ${Math.round(d.battery)}%` : '';
+  return (
+    <button
+      type="button"
+      className={`lg-mini${selected ? ' is-selected' : ''}`}
+      aria-pressed={selected}
+      aria-label={t('Select unit {id}', { id: d.id })}
+      title={`${d.id} · ${f.toUpperCase()}${battery}`}
+      onClick={() => dispatch({ type: 'selectDevice', id: d.id })}
+    >
+      <span className="lg-mini-pic">
+        <DevicePortrait d={d} />
+        <i className={`lg-mini-dot f-${f}`} aria-hidden="true" />
+      </span>
+      <small>{d.id}</small>
     </button>
   );
 }
