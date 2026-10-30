@@ -37,7 +37,7 @@ export function useWide(min = 1200) {
 }
 
 // ---------------------------------------------------------------------------
-// Appearance: dark (control room, default) or light (white theme, daytime twin)
+// Appearance: saved dark (control room) or light (default pearl theme, daytime twin)
 // ---------------------------------------------------------------------------
 
 export type Appearance = 'dark' | 'light';
@@ -45,9 +45,10 @@ const AKEY = 'ps-appearance';
 const aListeners = new Set<() => void>();
 function readAppearance(): Appearance {
   try {
-    return localStorage.getItem(AKEY) === 'light' ? 'light' : 'dark';
+    // Preserve a saved dark preference; use the approved pearl theme on first visit.
+    return localStorage.getItem(AKEY) === 'dark' ? 'dark' : 'light';
   } catch {
-    return 'dark';
+    return 'light';
   }
 }
 let appearance: Appearance = readAppearance();

@@ -19,7 +19,7 @@ export function App() {
   const theme = useTheme();
   const wall = useWall();
   return (
-    <div className={`app theme-${theme}${s.presentation ? ' presentation' : ''}${s.replay.active ? ' is-replay' : ''}${wall ? ' wall' : ''}`}>
+    <div className={`app liquid-ui theme-${theme}${s.presentation ? ' presentation' : ''}${s.replay.active ? ' is-replay' : ''}${wall ? ' wall' : ''}`}>
       <TopBar />
       <div className="main">
         <SideNav />

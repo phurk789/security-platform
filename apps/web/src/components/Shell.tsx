@@ -42,6 +42,7 @@ import { CameraFeed } from './CameraFeed';
 import { SceneSnapshot } from './SceneSnapshot';
 import { webglAvailable } from '../twin/world';
 import { AppearanceToggle } from './Hud';
+import { GlassToggle } from './LiquidAppearance';
 import { SoundToggle } from './SoundEffects';
 import { setWall } from './Wall';
 import { SlaBadge } from './Sla';
@@ -99,6 +100,7 @@ export function TopBar() {
         <span className="clock">
           <Calendar size={16} /> {fmtDate(s.now)} &nbsp; {fmtTime(s.now)}
         </span>
+        <GlassToggle />
         <AppearanceToggle />
         <SoundToggle />
         <LangToggle />
@@ -205,7 +207,7 @@ export function SideNav() {
   return (
     <nav className="sidenav" aria-label={t('Main')}>
       {NAV.filter((n) => allowed.includes(n.id)).map(({ id, label, short, Icon }) => (
-        <button key={id} className={s.view === id ? 'on' : ''} onClick={() => dispatch({ type: 'setView', view: id })} aria-current={s.view === id}>
+        <button key={id} className={s.view === id ? 'on' : ''} onClick={() => dispatch({ type: 'setView', view: id })} aria-current={s.view === id ? 'page' : undefined} title={t(label)}>
           <span className="ico">
             <Icon size={22} />
             {id === 'incidents' && unverified && <span className="pip" aria-label={t('Unverified alerts')} />}
