@@ -26,6 +26,7 @@ import {
   type CameraAction,
   type GeoAnchor,
   type Point,
+  type RoutePoint,
   type SrvCommand,
   type SrvDrive,
   type StreamInfo,
@@ -195,6 +196,7 @@ const MSG = {
 const REPLIES = new Set([MSG.COMMAND_ACK, MSG.MISSION_REQUEST, MSG.MISSION_REQUEST_INT, MSG.MISSION_ACK, MSG.MISSION_COUNT, MSG.MISSION_ITEM_INT]);
 const CMD = {
   NAV_WAYPOINT: 16,
+  DO_CHANGE_SPEED: 178,
   DO_SET_RELAY: 181,
   DO_SET_MODE: 176,
   DO_PAUSE_CONTINUE: 193,
@@ -204,6 +206,8 @@ const CMD = {
   SET_MESSAGE_INTERVAL: 511,
 };
 const FRAME_GLOBAL_RELATIVE_ALT_INT = 6;
+/** MAV_FRAME_MISSION: for items without a position (speed changes). */
+const FRAME_MISSION = 2;
 const MAV_MODE_FLAG_SAFETY_ARMED = 128;
 const MAV_MODE_FLAG_CUSTOM_MODE_ENABLED = 1;
 const LINK_STALE_MS = 3000;
@@ -302,6 +306,8 @@ export class MavlinkVehicleAdapter implements Adapter {
   private accuracyM = 5;
   private signal?: number;
   private missionOffset = 0;
+  /** Mission item number of each route point (speed changes sit between them). */
+  private navSeqs: number[] = [];
   private missionLength = 0;
   private nextCp = 0;
   private activeStart: { cmd: SrvCommand; commandId: string; since: number } | null = null;
@@ -795,10 +801,10 @@ export class MavlinkVehicleAdapter implements Adapter {
         break;
       }
       case MSG.MISSION_CURRENT:
-        this.nextCp = Math.max(0, Math.min(this.missionLength, (data.seq as number) - this.missionOffset));
+        this.nextCp = this.routeIndexAt(data.seq as number);
         break;
       case MSG.MISSION_ITEM_REACHED: {
-        const idx = (data.seq as number) - this.missionOffset;
+        const idx = this.navSeqs.indexOf(data.seq as number);
         if (idx >= 0 && idx < this.missionLength) {
           this.ctx.event({ kind: 'checkpoint', checkpoint: idx });
           this.nextCp = idx + 1;
@@ -812,7 +818,7 @@ export class MavlinkVehicleAdapter implements Adapter {
         if (!c) break;
         const want = c.sent.length;
         if ((data.count as number) !== want)
-          this.endCheck(false, `The vehicle holds ${(data.count as number) - this.missionOffset} waypoints instead of ${want - this.missionOffset}. Route not started.`);
+          this.endCheck(false, `The vehicle holds ${data.count as number} mission items instead of ${want}. Route not started.`);
         else this.requestItem(c.next);
         break;
       }
@@ -823,7 +829,7 @@ export class MavlinkVehicleAdapter implements Adapter {
         // Item 0 is ArduPilot's home, which the vehicle rewrites itself: compare the route only.
         const same = (data.command as number) === (s.command as number) && Math.abs((data.x as number) - s.x) <= 1 && Math.abs((data.y as number) - s.y) <= 1;
         if (!same) {
-          this.endCheck(false, `Waypoint ${c.next - this.missionOffset + 1} on the vehicle differs from the route sent. Route not started.`);
+          this.endCheck(false, `Waypoint ${this.routeIndexAt(c.next) + 1} on the vehicle differs from the route sent. Route not started.`);
           break;
         }
         c.next++;
@@ -976,6 +982,8 @@ export class MavlinkVehicleAdapter implements Adapter {
         signal: this.signal,
         satellites: this.cfg.indoor ? undefined : this.satellites,
         routeSpeed: this.routeSpeed,
+        armed: this.armed,
+        mode: this.mode === -1 ? undefined : MODES[this.cfg.profile].name(this.mode),
         level: this.cfg.indoor?.level,
         // 4-in-1 module state as last confirmed by the flight controller (no gimbal on this device)
         gimbal: this.cfg.payload ? { yaw: 0, pitch: 0, spotlight: this.payloadState.spotlight, beacon: this.payloadState.beacon } : undefined,
@@ -1019,34 +1027,58 @@ export class MavlinkVehicleAdapter implements Adapter {
 
   // ---- commands ---------------------------------------------------------------------------
 
-  private buildMission(route: Point[]) {
+  /**
+   * Mission items for a route: a waypoint per route point (with its wait as the hold time), and a
+   * speed change before the leg to a point whose speed differs from the one before. ArduPilot's
+   * item 0 is home. `navSeqs` keeps the item number of each route point.
+   */
+  private buildMission(route: RoutePoint[]) {
     const ardu = this.cfg.profile.startsWith('ardupilot');
     const alt = this.cfg.kind === 'uav' ? (this.cfg.missionAltM ?? 30) : 0;
-    const pts = ardu ? [this.pos ?? route[0], ...route] : route; // ArduPilot: item 0 is home
-    this.missionOffset = ardu ? 1 : 0;
-    return pts.map((p, seq) => {
-      const g = siteToGeo(this.cfg.geo, p);
+    const items: MissionItems = [];
+    const add = (command: number, frame: number, params: [number, number, number, number], p?: Point) => {
       const it = new common.MissionItemInt();
       it.targetSystem = this.sys;
       it.targetComponent = this.comp;
-      it.seq = seq;
-      it.frame = FRAME_GLOBAL_RELATIVE_ALT_INT as never;
-      it.command = CMD.NAV_WAYPOINT as never;
-      it.current = seq === 0 ? 1 : 0;
+      it.seq = items.length;
+      it.frame = frame as never;
+      it.command = command as never;
+      it.current = items.length === 0 ? 1 : 0;
       it.autocontinue = 1;
-      it.param1 = 0; // hold time
-      it.param2 = this.cfg.kind === 'uav' ? 2 : 1; // acceptance radius (m)
-      it.param3 = 0;
-      it.param4 = NaN; // keep current yaw
-      it.x = Math.round(g.lat * 1e7);
-      it.y = Math.round(g.lon * 1e7);
-      it.z = alt;
+      [it.param1, it.param2, it.param3, it.param4] = params;
+      const g = p ? siteToGeo(this.cfg.geo, p) : undefined;
+      it.x = g ? Math.round(g.lat * 1e7) : 0;
+      it.y = g ? Math.round(g.lon * 1e7) : 0;
+      it.z = p ? alt : 0;
       it.missionType = 0 as never;
-      return it;
-    });
+      items.push(it);
+    };
+    // Waypoint: hold time (s), acceptance radius (m), pass-through, keep the current yaw.
+    const waypoint = (p: Point, holdS = 0) => add(CMD.NAV_WAYPOINT, FRAME_GLOBAL_RELATIVE_ALT_INT, [holdS, this.cfg.kind === 'uav' ? 2 : 1, 0, NaN], p);
+    if (ardu) waypoint(this.pos ?? route[0]);
+    this.missionOffset = items.length;
+    this.navSeqs = [];
+    // With speeds set per point, the route starts from the vehicle's own route speed again.
+    const custom = route.some((p) => p.speed !== undefined);
+    let speed = custom ? undefined : this.routeSpeed;
+    for (const p of route) {
+      const want = p.speed ?? this.routeSpeed ?? speed;
+      // DO_CHANGE_SPEED: ground speed (type 1), m/s, throttle unchanged (-1).
+      if (want !== undefined && want !== speed) add(CMD.DO_CHANGE_SPEED, FRAME_MISSION, [1, want, -1, 0]);
+      speed = want;
+      this.navSeqs.push(items.length);
+      waypoint(p, p.holdS ?? 0);
+    }
+    return items;
   }
 
-  private uploadMission(route: Point[]): Promise<{ ok: boolean; detail?: string; items: MissionItems }> {
+  /** The route point a mission item belongs to (a speed change belongs to the leg after it). */
+  private routeIndexAt(seq: number) {
+    const i = this.navSeqs.findIndex((s) => s >= seq);
+    return i === -1 ? this.missionLength : Math.min(i, this.missionLength);
+  }
+
+  private uploadMission(route: RoutePoint[]): Promise<{ ok: boolean; detail?: string; items: MissionItems }> {
     return new Promise((resolve) => {
       const items = this.buildMission(route);
       const timer = setTimeout(

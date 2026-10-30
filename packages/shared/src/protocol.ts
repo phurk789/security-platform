@@ -22,6 +22,7 @@ import type {
   DeviceStats,
 } from './types';
 import type { GeoAnchor } from './geo';
+import type { RoutePoint } from './route';
 import type { SiteGeometry } from './site';
 import type { GimbalState, GwCameraResult, SrvCamera, StreamInfo } from './camera';
 import type { Geofence } from './routing';
@@ -115,6 +116,9 @@ export interface GwTelemetry {
   /** Radio link quality 0–100 as measured by the device. */
   signal?: number;
   satellites?: number;
+  /** Armed, and the autopilot mode by name (AUTO, HOLD, MANUAL…). */
+  armed?: boolean;
+  mode?: string;
   /** Speed the vehicle drives routes at (m/s), read from the autopilot (ArduPilot WP_SPEED). */
   routeSpeed?: number;
   temperatureC?: number;
@@ -298,8 +302,8 @@ export interface SrvCommand {
   deviceId: string;
   type: CommandType;
   expiresAt: number;
-  /** For start: the approved route. */
-  route?: Point[];
+  /** For start: the approved route, with what to do at each checkpoint. */
+  route?: RoutePoint[];
   missionId: string;
 }
 
@@ -465,7 +469,7 @@ export interface Patrol {
   name: string;
   deviceId: string;
   operatorId: string;
-  route: Point[];
+  route: RoutePoint[];
   /** 0 = Sunday … 6 = Saturday, in the organisation's time zone. */
   days: number[];
   /** HH:MM local times. */

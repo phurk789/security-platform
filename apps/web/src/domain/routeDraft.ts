@@ -4,7 +4,7 @@
 // checkpoints). The draft lives outside React state so a form on another page (patrols, zones)
 // can start a drawing on the overview map and pick the result up when it comes back.
 import { useSyncExternalStore } from 'react';
-import { geoToSite, polygonArea, polygonPerimeter, polygonSelfIntersects, routeLength, siteToGeo, type GeoAnchor, routeOutsideSite, routeViolations, type FencedKind, type Geofence, type GeofenceKind, type Point, type View } from '@13store/shared';
+import { geoToSite, polygonArea, polygonPerimeter, polygonSelfIntersects, routeLength, siteToGeo, type GeoAnchor, routeOutsideSite, routeViolations, type FencedKind, type Geofence, type GeofenceKind, type Point, type RoutePoint, type View } from '@13store/shared';
 
 /** The server accepts 1–50 checkpoints per route. */
 export const MAX_CHECKPOINTS = 50;
@@ -38,11 +38,14 @@ export interface RouteDraft {
   deviceId: string;
   /** The mission whose route is being changed (mission-edit). */
   missionId?: string;
-  points: Point[];
+  /** Route checkpoints keep their settings (name, speed, wait, capture); zone corners are plain points. */
+  points: RoutePoint[];
   /** The points when the drawing started; Cancel puts these back. */
-  initial: Point[];
+  initial: RoutePoint[];
   /** Earlier point lists, newest last, for Undo. */
-  past: Point[][];
+  past: RoutePoint[][];
+  /** The checkpoint whose settings are open in the panel (routes). */
+  selected?: number;
   /** drawing: the map takes clicks. done: finished, the caller collects the points. */
   state: 'drawing' | 'done';
   /** Page to go back to when the drawing ends (the patrol and zone forms are not on the map page). */
@@ -53,6 +56,8 @@ export interface RouteDraft {
 
 // `|| 0` turns -0 into 0.
 const round = (p: Point): Point => ({ x: Math.round(p.x * 10) / 10 || 0, y: Math.round(p.y * 10) / 10 || 0 });
+/** The same point at a rounded position, settings kept. */
+const roundKeep = <P extends Point>(p: P): P => ({ ...p, ...round(p) });
 
 export const maxPoints = (purpose: DraftPurpose) => (isZonePurpose(purpose) ? MAX_ZONE_POINTS : MAX_CHECKPOINTS);
 
@@ -63,9 +68,35 @@ export function addPoint(points: Point[], p: Point, max = MAX_CHECKPOINTS): Poin
   return points.length >= max ? points : [...points, round(p)];
 }
 
-export function movePoint(points: Point[], i: number, p: Point): Point[] {
-  return i < 0 || i >= points.length ? points : points.map((q, n) => (n === i ? round(p) : q));
+/** Move a point; a checkpoint keeps its name, speed, wait and capture. */
+export function movePoint<P extends Point>(points: P[], i: number, p: Point): P[] {
+  return i < 0 || i >= points.length ? points : points.map((q, n) => (n === i ? { ...q, ...round(p) } : q));
 }
+
+/** Change a checkpoint's settings (undefined clears one). */
+export function setPointSettings(points: RoutePoint[], i: number, patch: Partial<Omit<RoutePoint, 'x' | 'y'>>): RoutePoint[] {
+  if (i < 0 || i >= points.length) return points;
+  return points.map((q, n) => {
+    if (n !== i) return q;
+    const next: RoutePoint = { ...q, ...patch };
+    for (const k of Object.keys(next) as (keyof RoutePoint)[]) if (next[k] === undefined || next[k] === '' || next[k] === false) delete next[k];
+    return next;
+  });
+}
+
+/** The same route driven the other way round. */
+export const reverseRoute = (points: RoutePoint[]) => [...points].reverse();
+
+/** Add the first checkpoint again at the end, so the route comes back to where it began. */
+export function closeLoop(points: RoutePoint[], max = MAX_CHECKPOINTS): RoutePoint[] {
+  if (points.length < 2 || points.length >= max) return points;
+  const [a, z] = [points[0], points[points.length - 1]];
+  if (a.x === z.x && a.y === z.y) return points;
+  return [...points, { x: a.x, y: a.y, ...(a.name ? { name: a.name } : {}) }];
+}
+
+/** Whether the route already ends where it began. */
+export const isLoop = (points: Point[]) => points.length > 2 && points[0].x === points[points.length - 1].x && points[0].y === points[points.length - 1].y;
 
 export function insertPoint(points: Point[], i: number, p: Point, max = MAX_ZONE_POINTS): Point[] {
   if (points.length >= max || i < 0 || i > points.length) return points;
@@ -136,20 +167,27 @@ const emit = () => listeners.forEach((f) => f());
 export const routeDraft = {
   get: (): RouteDraft | null => current,
   start(d: Omit<RouteDraft, 'state' | 'initial' | 'past'>) {
-    const points = d.points.map(round);
-    current = { ...d, points, initial: points, past: [], state: 'drawing' };
+    const points = d.points.map(roundKeep);
+    current = { ...d, points, initial: points, past: [], state: 'drawing', selected: undefined };
     emit();
   },
-  setPoints(points: Point[]) {
+  setPoints(points: RoutePoint[]) {
     if (!current || points === current.points) return;
-    current = { ...current, points, past: [...current.past, current.points].slice(-HISTORY) };
+    const selected = current.selected !== undefined && current.selected < points.length ? current.selected : undefined;
+    current = { ...current, points, selected, past: [...current.past, current.points].slice(-HISTORY) };
+    emit();
+  },
+  /** Open a checkpoint's settings in the panel (undefined closes them). */
+  select(i: number | undefined) {
+    if (!current || current.selected === i) return;
+    current = { ...current, selected: i };
     emit();
   },
   /** Back one change (an added, moved or removed point). */
   undo() {
     if (!current || !current.past.length) return;
     const past = current.past.slice(0, -1);
-    current = { ...current, points: current.past[current.past.length - 1], past };
+    current = { ...current, points: current.past[current.past.length - 1], past, selected: undefined };
     emit();
   },
   setMeta(meta: unknown) {

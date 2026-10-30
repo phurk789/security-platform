@@ -67,7 +67,15 @@ const RULES: Rule[] = [
   [/^Automatic hold of (\S+) not sent$/, (m) => `ส่งคำสั่งหยุดรออัตโนมัติให้ ${m[1]} ไม่สำเร็จ`],
   [/^(\S+) stopped — mission failed$/, (m) => `${m[1]} หยุดแล้ว — ภารกิจล้มเหลว`],
   [/^(\S+) left the operating area\.$/, (m) => `${m[1]} ออกนอกพื้นที่ปฏิบัติงาน`],
-  [/^(\S+) passed checkpoint (\d+)$/, (m) => `${m[1]} ผ่านจุดตรวจ ${m[2]}`],
+  [/^(\S+) passed checkpoint (\d+)(?: \((.+)\))?$/, (m) => `${m[1]} ผ่านจุดตรวจ ${m[2]}${m[3] ? ` (${m[3]})` : ''}`],
+  [/^View at checkpoint (\d+(?: \(.+\))?) kept as evidence$/, (m) => `เก็บภาพที่จุดตรวจ ${m[1]} เป็นหลักฐานแล้ว`],
+  [/^View at checkpoint (\d+(?: \(.+\))?) not kept$/, (m) => `ไม่ได้เก็บภาพที่จุดตรวจ ${m[1]}`],
+  [/^(\S+) has no recordings on the site media server\.$/, (m) => `${m[1]} ไม่มีการบันทึกวิดีโอบน media server ของไซต์`],
+  [/^Checkpoint (\d+): the name must be text\.$/, (m) => `จุดตรวจ ${m[1]}: ชื่อต้องเป็นข้อความ`],
+  [/^Checkpoint (\d+): speed must be ([\d.]+)–([\d.]+) m\/s\.$/, (m) => `จุดตรวจ ${m[1]}: ความเร็วต้องอยู่ระหว่าง ${m[2]}–${m[3]} ม./วิ`],
+  [/^Checkpoint (\d+): the wait must be 0–(\d+) s\.$/, (m) => `จุดตรวจ ${m[1]}: เวลาหยุดรอต้องอยู่ระหว่าง 0–${m[2]} วินาที`],
+  [/^A route named "(.+)" is already saved on this site\.$/, (m) => `มีเส้นทางชื่อ "${m[1]}" บันทึกไว้ในไซต์นี้แล้ว`],
+  [/^±([\d.]+) m(?: · (\d+) sats)?$/, (m) => `±${m[1]} ม.${m[2] ? ` · ${m[2]} ดวง` : ''}`],
   [/^(\S+) reached final checkpoint$/, (m) => `${m[1]} ถึงจุดตรวจสุดท้ายแล้ว`],
   [
     /^Battery (\d+)% on (\S+) \(hold level (\d+)%\)\. Bring it back on the remote or change the battery\.$/,
@@ -94,7 +102,7 @@ const RULES: Rule[] = [
   ],
   [/^Still moving at ([\d.]+) m\/s (\d+) s after HOLD was asked\. Stop it on the remote\.$/, (m) => `รถยังวิ่งอยู่ ${m[1]} ม./วิ ${m[2]} วินาทีหลังสั่ง HOLD ให้หยุดรถที่รีโมต`],
   [/^Waypoint (\d+) on the vehicle differs from the route sent\. Route not started\.$/, (m) => `จุดที่ ${m[1]} บนรถไม่ตรงกับเส้นทางที่ส่ง จึงไม่เริ่มวิ่ง`],
-  [/^The vehicle holds (-?\d+) waypoints instead of (\d+)\. Route not started\.$/, (m) => `รถมีเส้นทาง ${m[1]} จุด แทนที่จะเป็น ${m[2]} จุด จึงไม่เริ่มวิ่ง`],
+  [/^The vehicle holds (\d+) mission items instead of (\d+)\. Route not started\.$/, (m) => `บนรถมีรายการภารกิจ ${m[1]} รายการ แทนที่จะเป็น ${m[2]} รายการ จึงไม่เริ่มวิ่ง`],
 ];
 
 /** Thai for a message with names or numbers in it, or undefined when no rule matches. */

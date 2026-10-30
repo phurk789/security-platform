@@ -346,10 +346,16 @@ export default function RealMap() {
       const el = document.createElement('div');
       el.className = zone ? 'route-pt zone-pt' : 'route-pt';
       if (color) el.style.setProperty('--pt-color', color);
-      if (!zone) el.textContent = String(i + 1);
       const closes = meta?.mode === 'draw' && i === 0 && draft.points.length >= 3;
       el.title = closes ? tt('Click to close the outline') : tt('Drag to move · right-click to remove');
       if (closes) el.classList.add('closes');
+      if (!zone) {
+        // A checkpoint: its number, ringed when open in the panel, dotted when something happens there.
+        el.textContent = String(i + 1);
+        if (draft.selected === i) el.classList.add('sel');
+        if (p.holdS || p.capture) el.classList.add('acts');
+        el.title = `${p.name ? `${i + 1} · ${p.name} — ` : ''}${tt('Click to set up · drag to move · right-click to remove')}`;
+      }
       el.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -372,31 +378,45 @@ export default function RealMap() {
           const m = zoneMeta();
           if (m) routeDraft.setMeta({ ...m, mode: 'edit' });
         });
+      // Clicking a checkpoint opens its settings in the panel.
+      if (!zone)
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (dragged) return;
+          const d = routeDraft.get();
+          routeDraft.select(d?.selected === i ? undefined : i);
+        });
       markers.current.push(mk);
     });
-    if (meta?.mode === 'edit' && draft.points.length >= 2 && draft.points.length < MAX_ZONE_POINTS) {
+    // Midpoint handles: a reshaped zone's edges (closed), a route's legs (open, with their length).
+    const zoneEdges = meta?.mode === 'edit' && draft.points.length >= 2 && draft.points.length < MAX_ZONE_POINTS;
+    const routeLegs = !zone && draft.points.length >= 2 && draft.points.length < maxPoints(draft.purpose);
+    if (zoneEdges || routeLegs) {
       const n = draft.points.length;
-      for (let i = 0; i < (n === 2 ? 1 : n); i++) {
+      const edges = zoneEdges ? (n === 2 ? 1 : n) : n - 1;
+      for (let i = 0; i < edges; i++) {
         const a = draft.points[i];
         const b = draft.points[(i + 1) % n];
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         const el = document.createElement('div');
-        el.className = 'route-mid';
+        el.className = routeLegs ? 'route-mid route-leg' : 'route-mid';
         if (color) el.style.setProperty('--pt-color', color);
-        el.title = tt('Click or drag to add a corner');
+        if (routeLegs) el.dataset.len = `${Math.round(Math.hypot(b.x - a.x, b.y - a.y))} m`;
+        el.title = tt(routeLegs ? 'Click or drag to add a checkpoint' : 'Click or drag to add a corner');
         const mk = new maplibregl.Marker({ element: el, draggable: true }).setLngLat(lngLat(g, mid) as [number, number]).addTo(map);
         let dragged = false;
+        const max = maxPoints(draft.purpose);
         mk.on('dragstart', () => (dragged = true));
         mk.on('dragend', () => {
           const ll = mk.getLngLat();
           const d = routeDraft.get();
-          if (d) routeDraft.setPoints(insertPoint(d.points, i + 1, geoToSite(g, { lat: ll.lat, lon: ll.lng })));
+          if (d) routeDraft.setPoints(insertPoint(d.points, i + 1, geoToSite(g, { lat: ll.lat, lon: ll.lng }), max));
         });
         el.addEventListener('click', (ev) => {
           ev.stopPropagation();
           if (dragged) return;
           const d = routeDraft.get();
-          if (d) routeDraft.setPoints(insertPoint(d.points, i + 1, mid));
+          if (d) routeDraft.setPoints(insertPoint(d.points, i + 1, mid, max));
         });
         markers.current.push(mk);
       }

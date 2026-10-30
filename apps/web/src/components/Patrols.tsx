@@ -5,6 +5,7 @@ import { CalendarClock, MapPinned, Play, Plus, Trash2 } from 'lucide-react';
 import { ROUTES, floorPlan, fmtDate, fmtTime, planRoute, type Point } from '@13store/shared';
 import { can, currentUser, userName } from '../domain/policy';
 import { finishedDraft, routeDraft, useRouteDraft } from '../domain/routeDraft';
+import { useSavedRoutes } from '../domain/savedRoutes';
 import { useStore } from '../store';
 import { useT } from '../i18n';
 
@@ -55,7 +56,10 @@ export function PatrolsCard() {
   const dev = s.devices[deviceId];
   // The preset loops are drawn on the demo plant: a real vehicle patrols a route drawn on its own map.
   const presets = dev?.integration === 'simulated';
-  const routeId = presets ? form.routeId : 'draw';
+  // The site's saved routes ("lib:<id>"): a real vehicle takes those or a drawn route.
+  const library = useSavedRoutes(session?.api, s.site?.id);
+  const saved = form.routeId.startsWith('lib:') ? library.find((r) => `lib:${r.id}` === form.routeId) : undefined;
+  const routeId = presets || saved ? form.routeId : 'draw';
   const draft = useRouteDraft();
   const drawn = finishedDraft(draft, 'patrol', deviceId);
   const canDraw = mode === 'remote' && !!dev && !dev.indoor;
@@ -74,12 +78,13 @@ export function PatrolsCard() {
     // Indoor vehicles patrol their floor plan; outdoor presets would cross walls.
     if (dev.indoor) return floorPlan(dev.indoor.buildingId, dev.indoor.level)?.patrolRoute;
     if (routeId === 'draw') return drawn?.points;
+    if (saved) return saved.points;
     const preset = (ROUTES.find((r) => r.id === form.routeId) ?? ROUTES[0]).pts;
     const home = dev.stats?.dock ?? dev.pos;
     const back = planRoute(preset[preset.length - 1], home, { fences: s.geofences, kind: dev.kind as 'ugv' | 'uav' });
     const out: Point[] = [...preset, ...(back.ok ? back.checkpoints : [])];
     return out;
-  }, [dev, routeId, form.routeId, s.geofences, drawn]);
+  }, [dev, routeId, form.routeId, s.geofences, drawn, saved]);
   const times = form.times
     .split(/[,\s]+/)
     .map((x) => x.trim())
@@ -207,6 +212,11 @@ export function PatrolsCard() {
               {canDraw && (
                 <option value="draw">{drawn ? t('Drawn on the map · {k} checkpoints', { k: drawn.points.length }) : t('Draw checkpoints on the map…')}</option>
               )}
+              {library.map((r) => (
+                <option key={r.id} value={`lib:${r.id}`}>
+                  {t('Saved: {name} · {k} checkpoints', { name: r.name, k: r.points.length })}
+                </option>
+              ))}
             </select>
           )}
           {routeId === 'draw' && canDraw && (
@@ -238,7 +248,12 @@ export function PatrolsCard() {
                     n: loop.length,
                   })
                 : t('No checkpoints drawn yet.')
-              : loop
+              : saved
+                ? t('Saved route “{name}”: {n} checkpoints, driven as saved. Standing approval is recorded under your name; the route is checked against keep-out zones on every run.', {
+                    name: saved.name,
+                    n: saved.points.length,
+                  })
+                : loop
                 ? t('Loop: {n} checkpoints, back to the dock. Standing approval is recorded under your name; the route is checked against keep-out zones on every run.', {
                     n: loop.length,
                   })
