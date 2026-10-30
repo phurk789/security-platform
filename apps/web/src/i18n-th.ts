@@ -1505,4 +1505,9 @@ export const TH: Record<string, string> = {
   'Checkpoints must be {x, y} numbers.': 'จุดตรวจต้องเป็นตัวเลข {x, y}',
   'A route name of up to 60 characters is required.': 'ต้องใส่ชื่อเส้นทาง ไม่เกิน 60 ตัวอักษร',
   'Saved route not found.': 'ไม่พบเส้นทางที่บันทึกไว้',
+  // Command Centre: folding unit list, system map.
+  'Fold the unit list': 'ย่อรายการยาน',
+  'Open the unit list': 'ขยายรายการยาน',
+  'Site map': 'แผนที่ไซต์',
+  '{id} selected': 'เลือก {id} อยู่',
 };

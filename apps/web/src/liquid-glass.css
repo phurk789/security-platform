@@ -429,3 +429,35 @@
   :root .app.liquid-ui .lg-visuals { min-height: 1000px; }
   :root .app.liquid-ui .product { display: block; }
 }
+
+/* Folded unit list: a slim rail of unit icons, so the workspace gets the room. */
+:root .app.liquid-ui .cc { transition: grid-template-columns .22s ease; }
+:root .app.liquid-ui .cc.rail-folded { grid-template-columns: 76px minmax(0,1fr) 328px; }
+:root .app.liquid-ui .lg-rail-toggle { flex: none; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 11px; background: var(--lg-surface-2); color: var(--text-2); }
+:root .app.liquid-ui .lg-rail-toggle:hover { color: var(--text); border-color: var(--text-3); }
+:root .app.liquid-ui .cc-rail.is-folded .lg-roster-head { justify-content: center; padding: 12px 0 10px; }
+:root .app.liquid-ui .lg-rail-mini { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 8px; padding: 4px 6px 12px; overflow-x: hidden; overflow-y: auto; }
+:root .app.liquid-ui .lg-mini { display: flex; flex: none; flex-direction: column; align-items: center; gap: 4px; width: 62px; padding: 6px 2px; border: 1px solid transparent; border-radius: 14px; background: none; color: var(--text-2); }
+:root .app.liquid-ui .lg-mini:hover { border-color: var(--line); background: var(--lg-surface-2); }
+:root .app.liquid-ui .lg-mini.is-selected { border-color: color-mix(in srgb,var(--text) 38%, transparent); background: var(--lg-surface); color: var(--text); }
+:root .app.liquid-ui .lg-mini-pic { position: relative; display: block; }
+:root .app.liquid-ui .lg-mini .lg-portrait { width: 40px; height: 40px; border-radius: 11px; }
+:root .app.liquid-ui .lg-mini small { font-size: .56rem; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
+:root .app.liquid-ui .lg-mini-dot { position: absolute; right: -3px; bottom: -3px; width: 11px; height: 11px; border: 2px solid var(--lg-surface-solid); border-radius: 50%; background: var(--text-3); }
+:root .app.liquid-ui .lg-mini-dot.f-live { background: var(--green); }
+:root .app.liquid-ui .lg-mini-dot.f-stale { background: var(--amber); }
+:root .app.liquid-ui .lg-mini-dot.f-replay { background: var(--text-2); }
+@media (max-width: 1599px) {
+  :root .app.liquid-ui .cc.rail-folded { grid-template-columns: 76px minmax(0,1fr) 292px; }
+}
+@media (max-width: 1279px) {
+  :root .app.liquid-ui .cc.rail-folded { grid-template-columns: 76px minmax(0,1fr); }
+}
+@media (max-width: 900px) {
+  :root .app.liquid-ui .cc.rail-folded { grid-template-columns: minmax(0,1fr); }
+  :root .app.liquid-ui .cc-rail.is-folded .lg-roster-head { justify-content: flex-start; padding: 10px 12px 6px; }
+  :root .app.liquid-ui .lg-rail-mini { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 4px 10px 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root .app.liquid-ui .cc { transition: none; }
+}
