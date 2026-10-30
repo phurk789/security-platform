@@ -43,17 +43,6 @@
 .cc-video .feed { position: absolute; inset: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
 .cc-video .feed-osd { bottom: 46px; }
 .cc-novideo { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; text-align: center; color: var(--text-2); }
-.instruments { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
-.instruments .ins-tick { stroke: #a6f4ff; stroke-width: 1.4; vector-effect: non-scaling-stroke; opacity: 0.9; }
-.instruments .ins-caret { fill: none; stroke: var(--cyan); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.instruments .ins-box { fill: rgba(2, 10, 20, 0.78); stroke: var(--cyan); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
-.instruments text { font-family: var(--hud-font, var(--font)); fill: #e2fbff; paint-order: stroke; stroke: rgba(0, 0, 0, 0.75); stroke-width: 3px; stroke-linejoin: round; }
-.instruments .ins-lbl { font-size: 11px; font-weight: 600; }
-.instruments .ins-val { font-size: 13px; font-weight: 700; }
-.instruments .ins-mode { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; fill: var(--cyan); }
-.instruments .ins-sm { font-size: 11px; font-weight: 600; }
-.instruments.stale .ins-tick, .instruments.stale .ins-box, .instruments.stale .ins-caret { stroke: var(--amber); }
-.instruments.stale .ins-mode { fill: var(--amber); }
 
 .cc-lower { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; min-height: 0; }
 .cc .cc-twin { position: relative; overflow: hidden; min-height: 200px; height: auto; }

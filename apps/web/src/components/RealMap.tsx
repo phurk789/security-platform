@@ -86,7 +86,8 @@ function hudPadding(el: HTMLElement) {
   return { left: px('--view-l'), right: px('--view-r'), bottom: px('--view-b'), top: 0 };
 }
 
-export default function RealMap() {
+/** `follow`: keep this device centred while it moves (the cockpit's inset map). */
+export default function RealMap({ follow }: { follow?: string } = {}) {
   const { s, dispatch, session } = useStore();
   const t = useT();
   const el = useRef<HTMLDivElement>(null);
@@ -441,6 +442,17 @@ export default function RealMap() {
     const ll = lngLat(cur.geo, p) as [number, number];
     if (!map.getBounds().contains(ll)) map.easeTo({ center: ll, duration: 600 });
   }, [ready, focus]);
+
+  // Following a device: re-centre on it whenever it has moved a metre or more.
+  const followed = follow ? s.devices[follow] : undefined;
+  const followKey = followed ? `${follow}:${Math.round(followed.pos.x)}:${Math.round(followed.pos.y)}` : '';
+  useEffect(() => {
+    const map = sm.current?.map;
+    if (!ready || !map || !follow) return;
+    const cur = latest.current.s;
+    const p = devicePositions(overlayInput(cur, false, false)).get(follow);
+    if (p) map.easeTo({ center: lngLat(cur.geo, p) as [number, number], duration: 500 });
+  }, [ready, follow, followKey]);
 
   const fitSite = () => {
     const map = sm.current?.map;
