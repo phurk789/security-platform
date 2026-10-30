@@ -8,13 +8,14 @@ import { TwinMap } from './TwinMap';
 
 const RealMap = __STANDALONE__ ? null : lazy(() => import('./RealMap'));
 
-export function MainMap() {
+/** `follow`: keep this device centred (real map only; the drawn site map shows the whole site). */
+export function MainMap({ follow }: { follow?: string } = {}) {
   const { mode } = useStore();
   const t = useT();
   if (!RealMap || mode !== 'remote') return <TwinMap />;
   return (
     <Suspense fallback={<div className="map map-real map-loading">{t('Loading map…')}</div>}>
-      <RealMap />
+      <RealMap follow={follow} />
     </Suspense>
   );
 }
