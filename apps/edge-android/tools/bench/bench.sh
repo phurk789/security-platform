@@ -105,8 +105,19 @@ EOF
   echo "emulator: Android $("$ADB" shell getprop ro.build.version.release | tr -d '\r') ready; server: $(curl -fsS $API/health)"
 }
 
+# uiautomator waits for the screen to be idle; the app's "online for" clock ticks every second, so a dump can fail
+# with "could not get idle state". Try a few times.
+dump() {
+  for _ in 1 2 3 4 5 6; do
+    "$ADB" shell uiautomator dump /sdcard/ui.xml 2>&1 | grep -q 'dumped to' && return 0
+    sleep 1
+  done
+  echo "uiautomator dump failed" >&2
+  return 1
+}
+
 tap() { # resource id in the app
-  "$ADB" shell uiautomator dump /sdcard/ui.xml >/dev/null
+  dump
   "$ADB" shell input tap $("$ADB" shell cat /sdcard/ui.xml | python3 -c "
 import re,sys
 m=re.search(r'resource-id=\"com.store13.edge:id/$1\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"', sys.stdin.read())
@@ -145,7 +156,7 @@ test_() {
 }
 
 tap_text() { # tap the first element whose text is exactly $1 (case ignored); fails if none
-  "$ADB" shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+  dump 2>/dev/null
   local xy
   xy="$("$ADB" shell cat /sdcard/ui.xml | python3 -c "
 import html,re,sys
@@ -169,7 +180,10 @@ update_() {
   local before; before="$(vcode)"
   "$ADB" root >/dev/null 2>&1; sleep 2; "$ADB" wait-for-device # to read the app's log at the end
   "$ADB" shell am start -n com.store13.edge/.MainActivity >/dev/null; sleep 3
-  if "$ADB" shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && "$ADB" shell cat /sdcard/ui.xml | grep -q 'id/settingsButton'; then
+  dump
+  if "$ADB" shell cat /sdcard/ui.xml | grep -q 'id/checkUpdateButton'; then
+    : # settings already open (the gear toggles them: do not close them)
+  elif "$ADB" shell cat /sdcard/ui.xml | grep -q 'id/settingsButton'; then
     tap settingsButton; sleep 2 # 0.3.0 and later: settings open from the gear in the top bar
   else
     for _ in 1 2 3; do "$ADB" shell input swipe 1200 1500 1200 300 200; done # 0.2.0: settings at the bottom
