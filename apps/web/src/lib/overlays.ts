@@ -43,6 +43,8 @@ export interface OverlayInput {
   trailMs?: number;
   /** Zones not drawn: hidden on this console, or being reshaped in the editor. */
   hiddenGeofenceIds?: ReadonlySet<string>;
+  /** A route only being looked at (a saved route, a patrol loop): drawn dashed with its checkpoints. */
+  preview?: { x: number; y: number }[] | null;
 }
 
 export const KIND_COLOR: Record<string, string> = { ugv: '#38bdf8', uav: '#c084fc', cctv: '#cbd5e1' };
@@ -165,6 +167,10 @@ export function buildOverlayData(i: OverlayInput): OverlayData {
       if (pts.length >= 2) lines.push(feature({ type: 'LineString', coordinates: pts.map((p) => lngLat(a, p)) }, { missionId: m.id, draft, selected }));
       m.checkpoints.forEach((p, n) => cps.push(feature({ type: 'Point', coordinates: lngLat(a, p) }, { missionId: m.id, n: n + 1, state: n < m.nextCp ? 'done' : n === m.nextCp ? 'next' : 'todo', selected })));
     }
+    if (i.preview && i.preview.length) {
+      if (i.preview.length >= 2) lines.push(feature({ type: 'LineString', coordinates: i.preview.map((p) => lngLat(a, p)) }, { missionId: 'preview', draft: 1, selected: 1 }));
+      i.preview.forEach((p, n) => cps.push(feature({ type: 'Point', coordinates: lngLat(a, p) }, { missionId: 'preview', n: n + 1, state: 'todo', selected: 1 })));
+    }
     out.routes = fc(lines);
     out.checkpoints = fc(cps);
   }
@@ -245,7 +251,8 @@ const OPERATIONAL_LAYERS: [LayerGroup, LayerSpecification][] = [
       type: 'line',
       source: SRC.routes,
       filter: ['==', ['get', 'draft'], 1],
-      paint: { 'line-color': '#fbbf24', 'line-width': ['case', ['==', ['get', 'selected'], 1], 4, 2.5], 'line-dasharray': [2, 1.5] },
+      // A route only being looked at (mission planning) is white, so it is not taken for a mission's draft.
+      paint: { 'line-color': ['case', ['==', ['get', 'missionId'], 'preview'], '#f8fafc', '#fbbf24'], 'line-width': ['case', ['==', ['get', 'selected'], 1], 4, 2.5], 'line-dasharray': [2, 1.5] },
     },
   ],
   [

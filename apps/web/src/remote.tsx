@@ -398,7 +398,7 @@ export function RemoteProvider({
           void call(P(`/incidents/${msg.incidentId}/evidence`, { text: msg.text, idempotencyKey: `note-${crypto.randomUUID?.() ?? Date.now()}` }), retry);
           return;
         case 'createMission':
-          void call(P('/missions', { incidentId: msg.incidentId, deviceId: msg.deviceId, operatorId: msg.operatorId, checkpoints: msg.checkpoints }), retry);
+          void call(P('/missions', { incidentId: msg.incidentId, task: msg.task, deviceId: msg.deviceId, operatorId: msg.operatorId, checkpoints: msg.checkpoints }), retry);
           return;
         case 'editRoute':
           void call(() => api.patch(`/missions/${msg.missionId}/route`, { checkpoints: msg.checkpoints }), retry);

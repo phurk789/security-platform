@@ -7,7 +7,8 @@ import { RightPanel } from './components/IncidentPanel';
 import { BottomTimeline, Footer, IncidentQueue, Kpis, SideNav, Toasts, TopBar } from './components/Shell';
 import { MainMap } from './components/MainMap';
 import { FleetPanel, useTheme, useWide } from './components/Hud';
-import { DevicesPage, EvidencePage, IncidentsPage, MissionsPage, ReportsPage } from './views/Pages';
+import { DevicesPage, EvidencePage, IncidentsPage, ReportsPage } from './views/Pages';
+import { MissionPlanning } from './views/MissionPlanning';
 import { AdminPage } from './views/Admin';
 import { CommandCenter } from './views/CommandCenter';
 import { BoothScript } from './components/BoothScript';
@@ -26,7 +27,7 @@ export function App() {
         {s.view === 'overview' && <Overview />}
         {s.view === 'command' && <CommandCenter />}
         {s.view === 'incidents' && <IncidentsPage />}
-        {s.view === 'missions' && <MissionsPage />}
+        {s.view === 'missions' && <MissionPlanning />}
         {s.view === 'devices' && <DevicesPage />}
         {s.view === 'evidence' && <EvidencePage />}
         {s.view === 'reports' && <ReportsPage />}

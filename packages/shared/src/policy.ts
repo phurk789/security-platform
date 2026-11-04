@@ -21,6 +21,13 @@ export const REAL_ROUTE_SPEED = 1;
 /** During a route: warn at this battery level, and hold the vehicle at the second. */
 export const MISSION_BATTERY_WARN_PCT = 20;
 export const MISSION_BATTERY_HOLD_PCT = 15;
+/**
+ * Incident type of a routine task: a mission planned without an alert (e.g. "Check the north
+ * fence"). The platform raises the incident record itself, like a patrol run, so the mission keeps
+ * the same approvals, timeline and audit trail.
+ */
+export const ROUTINE_TASK_TYPE = 'Routine task';
+export const TASK_NAME_MAX = 60;
 
 /** Speed to plan arrival times with: the autopilot's route speed, else the demo or a cautious default. */
 export function routeSpeedOf(d: Pick<Device, 'routeSpeed' | 'integration' | 'indoor'>) {

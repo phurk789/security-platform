@@ -22,6 +22,8 @@ import {
   type RoutePoint,
   type SavedRoute,
   MISSION_BATTERY_HOLD_PCT,
+  ROUTINE_TASK_TYPE,
+  TASK_NAME_MAX,
   MISSION_BATTERY_WARN_PCT,
   fmtDate,
   fmtTime,
@@ -1267,28 +1269,65 @@ export class Platform {
     return typeof r === 'string' ? fail(400, 'invalid', r) : r;
   }
 
-  createMission(a: Actor, input: { incidentId: string; deviceId: string; operatorId: string; checkpoints: Point[] }) {
-    this.require(a, 'mission.prepare', input.incidentId);
-    const inc = this.getIncident(a, input.incidentId);
-    if (inc.status !== 'confirmed') fail(409, 'conflict', 'Verify the incident before preparing a mission.');
+  /** The name of a routine task: 1–60 characters of text. */
+  private taskName(v: unknown): string {
+    const name = typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
+    if (!name || name.length > TASK_NAME_MAX) fail(400, 'invalid', `Choose an incident, or name the routine task (up to ${TASK_NAME_MAX} characters).`);
+    return name;
+  }
+
+  /**
+   * A mission draft for a confirmed incident, or for a routine task (`task`: its name) planned
+   * without an alert. For a task the platform raises the incident record itself, as a patrol run
+   * does, so approvals, timeline and audit stay the same.
+   */
+  createMission(a: Actor, input: { incidentId?: string; task?: unknown; deviceId: string; operatorId: string; checkpoints: Point[] }) {
+    const task = input.incidentId ? undefined : this.taskName(input.task);
+    this.require(a, 'mission.prepare', input.incidentId ?? input.deviceId);
+    const found = input.incidentId ? this.getIncident(a, input.incidentId) : undefined;
+    if (found && found.status !== 'confirmed') fail(409, 'conflict', 'Verify the incident before preparing a mission.');
     const d = this.getDevice(a, input.deviceId);
     if (!isReadyAt(this.now(), d, this.allMissions(a.orgId))) fail(409, 'conflict', `${d.id} is not ready.`);
-    const op = this.db.prepare('SELECT role FROM users WHERE id = ? AND org_id = ? AND active = 1').get(input.operatorId, a.orgId) as { role: Role } | undefined;
+    const op = this.db.prepare('SELECT role, name FROM users WHERE id = ? AND org_id = ? AND active = 1').get(input.operatorId, a.orgId) as { role: Role; name: string } | undefined;
     if (!op || !can(op.role, 'mission.accept')) fail(400, 'invalid', 'Choose an active operator.');
+    const checkpoints = this.routeInArea(a.orgId, d, this.clearRoute(a.orgId, d, this.validRoute(input.checkpoints)));
+    const siteId = found?.siteId ?? d.siteId;
+    const raised: Incident | undefined =
+      task === undefined
+        ? undefined
+        : {
+            id: `${this.prefix(a.orgId)}INC-${String(nextNumber(this.db, a.orgId, 'incident', 1)).padStart(3, '0')}`,
+            title: `Task: ${task}`,
+            type: ROUTINE_TASK_TYPE,
+            severity: 'low',
+            status: 'confirmed',
+            zone: d.zone,
+            place: task,
+            pos: checkpoints[checkpoints.length - 1] ?? d.pos,
+            source: a.name,
+            createdAt: this.now(),
+            owner: op!.name,
+            thumb: 'path',
+          };
+    const inc = (found ?? raised)!;
     const m: Mission = {
       id: `${this.prefix(a.orgId)}MSN-${String(nextNumber(this.db, a.orgId, 'mission')).padStart(4, '0')}`,
       incidentId: inc.id,
       deviceId: d.id,
       operatorId: input.operatorId,
-      checkpoints: this.routeInArea(a.orgId, d, this.clearRoute(a.orgId, d, this.validRoute(input.checkpoints))),
+      checkpoints,
       planVersion: 1,
       status: 'draft',
       nextCp: 0,
       createdAt: this.now(),
     };
     tx(this.db, () => {
-      this.saveMission(a.orgId, inc.siteId, m);
-      this.event(a, a.orgId, inc.siteId, inc.id, `Mission ${m.id} drafted`, {
+      if (raised) {
+        this.saveIncident(a.orgId, siteId, raised);
+        this.event(a, a.orgId, siteId, raised.id, 'Routine task created', { tone: 'info', detail: `${task} · ${d.id} · operator ${op!.name}.` });
+      }
+      this.saveMission(a.orgId, siteId, m);
+      this.event(a, a.orgId, siteId, inc.id, `Mission ${m.id} drafted`, {
         detail: `${d.id}, ${m.checkpoints.length} checkpoints, operator ${this.userName(a.orgId, m.operatorId)}.`,
       });
       this.audit(a, 'mission.create', m.id);

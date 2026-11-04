@@ -12,8 +12,17 @@ export const MAX_CHECKPOINTS = 50;
 export const MIN_ZONE_POINTS = 3;
 export const MAX_ZONE_POINTS = 30;
 
-/** zone: an outline for the Admin form; geofence: a zone drawn or reshaped and saved on the map. */
-export type DraftPurpose = 'mission-new' | 'mission-edit' | 'patrol' | 'zone' | 'geofence';
+/**
+ * zone: an outline for the Admin form; geofence: a zone drawn or reshaped and saved on the map;
+ * library: a route for the site's route library (no vehicle; meta is LibraryMeta).
+ */
+export type DraftPurpose = 'mission-new' | 'mission-edit' | 'patrol' | 'zone' | 'geofence' | 'library';
+
+/** A saved route being drawn or changed: its id when it exists already, and its name. */
+export interface LibraryMeta {
+  id?: string;
+  name: string;
+}
 
 /** The zone editor on the map: what the zone is, and whether clicks still add corners. */
 export interface ZoneMeta {

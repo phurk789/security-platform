@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDownUp, Camera, Check, Eraser, FolderOpen, Hourglass, MapPinned, Repeat, Save, Trash2, Undo2, X } from 'lucide-react';
 import { ROUTE_LIMITS, routeSpeedOf, routeTimeS, type RoutePoint } from '@13store/shared';
-import { MIN_ZONE_POINTS, checkDraft, closeLoop, isLoop, maxPoints, removePoint, reverseRoute, routeDraft, setPointSettings, useRouteDraft } from '../domain/routeDraft';
+import { MIN_ZONE_POINTS, checkDraft, closeLoop, isLoop, maxPoints, removePoint, reverseRoute, routeDraft, setPointSettings, useRouteDraft, type LibraryMeta } from '../domain/routeDraft';
 import { savedRoutes, useSavedRoutes } from '../domain/savedRoutes';
 import { useStore } from '../store';
 import { useT } from '../i18n';
@@ -54,9 +54,14 @@ export function RouteDraftPanel() {
   const from = dev && !dev.noFix ? dev.pos : undefined;
   const c = checkDraft(d.points, from, s.geofences, dev?.kind === 'uav' ? 'uav' : 'ugv', d.purpose);
   const speed = dev ? routeSpeedOf(dev) : 1;
+  const library = d.purpose === 'library' ? (d.meta as LibraryMeta | undefined) : undefined;
   const title = zone
     ? t('Zone outline')
-    : d.purpose === 'mission-edit'
+    : library
+      ? library.id
+        ? t('Saved route “{name}”', { name: library.name })
+        : t('New saved route “{name}”', { name: library.name })
+      : d.purpose === 'mission-edit'
       ? t('Edit the route of {id}', { id: d.missionId ?? '' })
       : d.purpose === 'patrol'
         ? t('Patrol route for {id}', { id: d.deviceId })
@@ -105,10 +110,10 @@ export function RouteDraftPanel() {
       {c.fences.length > 0 && <p className="route-draft-bad">{t('The route crosses keep-out zone {names}.', { names: c.fences.map((f) => f.name).join(', ') })}</p>}
       {zone && d.points.length < MIN_ZONE_POINTS && <p className="route-draft-warn">{t('A zone needs at least {n} corners.', { n: MIN_ZONE_POINTS })}</p>}
       {c.full && <p className="route-draft-warn">{t('{n} points is the most this can have.', { n: maxPoints(d.purpose) })}</p>}
-      {!zone && !from && <p className="route-draft-warn">{t('{id} has no position yet, so the distance starts at the first checkpoint.', { id: d.deviceId })}</p>}
+      {!zone && !library && !from && <p className="route-draft-warn">{t('{id} has no position yet, so the distance starts at the first checkpoint.', { id: d.deviceId })}</p>}
       {!zone && d.points.length > 0 && <Checkpoints points={d.points} selected={d.selected} speed={speed} />}
       {!zone && d.selected !== undefined && d.points[d.selected] && <PointEditor i={d.selected} p={d.points[d.selected]} speed={speed} />}
-      {!zone && <RouteTools points={d.points} max={maxPoints(d.purpose)} />}
+      {!zone && <RouteTools points={d.points} max={maxPoints(d.purpose)} canSave={!library} />}
       <div className="route-draft-actions">
         <button className="btn-ghost small" disabled={!d.past.length} onClick={() => routeDraft.undo()} title={t('Undo (Backspace)')}>
           <Undo2 size={14} /> {t('Undo')}
@@ -121,7 +126,7 @@ export function RouteDraftPanel() {
           <X size={14} /> {t('Cancel')}
         </button>
         <button className="btn-primary small" disabled={!c.ok} onClick={done}>
-          <Check size={14} /> {zone ? t('Use this outline') : t('Use this route')}
+          <Check size={14} /> {zone ? t('Use this outline') : library ? t('Save route') : t('Use this route')}
         </button>
       </div>
     </div>
@@ -214,7 +219,8 @@ function PointEditor({ i, p, speed }: { i: number; p: RoutePoint; speed: number 
 }
 
 /** Reverse, close the loop, and the site's route library (load one, keep this one). */
-function RouteTools({ points, max }: { points: RoutePoint[]; max: number }) {
+/** `canSave`: offer to keep the route in the library (a saved route being drawn is saved when it is used). */
+function RouteTools({ points, max, canSave = true }: { points: RoutePoint[]; max: number; canSave?: boolean }) {
   const { s, session } = useStore();
   const t = useT();
   const library = useSavedRoutes(session?.api, s.site?.id);
@@ -247,7 +253,7 @@ function RouteTools({ points, max }: { points: RoutePoint[]; max: number }) {
         >
           <Repeat size={14} /> {t('Close the loop')}
         </button>
-        {session && (
+        {session && canSave && (
           <>
             <span className="grow" />
             {library.length > 0 && (

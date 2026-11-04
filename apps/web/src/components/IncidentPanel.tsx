@@ -483,7 +483,7 @@ function ReadyDevices({ onPick, picked, inc }: { onPick?: (id: string) => void; 
   );
 }
 
-function fmtEta(sec: number) {
+export function fmtEta(sec: number) {
   if (!Number.isFinite(sec)) return '—';
   const m = Math.floor(sec / 60);
   const r = Math.round(sec % 60);
@@ -591,16 +591,34 @@ function DeviceCard({
   );
 }
 
-function PrepareMission({ inc }: { inc: Incident }) {
+/**
+ * Device, route and operator for a new mission draft: for an incident, or (no `inc`) for a routine
+ * task named `task`, whose incident record the platform raises. `startOpen` shows the form at once;
+ * `onClose` runs on cancel and after the draft is saved.
+ */
+export function PrepareMission({
+  inc,
+  task,
+  startOpen = false,
+  initialRoute,
+  onClose,
+}: {
+  inc?: Incident;
+  task?: string;
+  startOpen?: boolean;
+  /** Route choice to start with, e.g. a saved route ("lib:<id>"). */
+  initialRoute?: string;
+  onClose?: (saved: boolean) => void;
+}) {
   const { s, dispatch, mode, session } = useStore();
   // The site's saved routes ("lib:<id>" in the route choice).
   const library = useSavedRoutes(session?.api, s.site?.id);
   const t = useT();
   const me = currentUser(s);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   // The first ready vehicle; the preset demo routes only fit the simulated ones.
   const [deviceId, setDeviceId] = useState(() => Object.values(s.devices).find((d) => (d.kind === 'ugv' || d.kind === 'uav') && isReady(s, d))?.id ?? '');
-  const [route, setRoute] = useState('direct');
+  const [route, setRoute] = useState(initialRoute ?? 'direct');
   const picked = s.devices[deviceId];
   const demoRoutes = picked?.integration === 'simulated';
   const saved = route.startsWith('lib:') ? library.find((r) => `lib:${r.id}` === route) : undefined;
@@ -614,11 +632,13 @@ function PrepareMission({ inc }: { inc: Incident }) {
   // Route planned around the demo plant's buildings and keep-out zones from where the vehicle is now to
   // the alert. A real vehicle's route is drawn on the map (the planner knows only the demo plant).
   const autoPlan = useMemo(
-    () => (picked && (demoRoutes || picked.indoor) && (picked.kind === 'ugv' || picked.kind === 'uav') ? planFor(picked, inc.pos, { fences: s.geofences }) : undefined),
+    () => (inc && picked && (demoRoutes || picked.indoor) && (picked.kind === 'ugv' || picked.kind === 'uav') ? planFor(picked, inc.pos, { fences: s.geofences }) : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deviceId, inc.id, Math.round(picked?.pos.x ?? 0), Math.round(picked?.pos.y ?? 0), s.geofences],
+    [deviceId, inc?.id, Math.round(picked?.pos.x ?? 0), Math.round(picked?.pos.y ?? 0), s.geofences],
   );
   useEffect(() => {
+    // A saved route fits any outdoor vehicle of the site: keep it when the vehicle changes.
+    if (!indoorPlan && route.startsWith('lib:')) return;
     // Indoor vehicle: straight to the alert when it is on its floor, else the floor patrol; outdoor routes would cross walls.
     if (indoorPlan) setRoute(autoPlan?.ok ? 'auto' : 'indoor');
     else if (!demoRoutes) setRoute('draw');
@@ -726,7 +746,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
             )}
           </div>
         )}
-        {indoorPlan && !autoPlan?.ok && (
+        {inc && indoorPlan && !autoPlan?.ok && (
           <p className="banner warn" style={{ margin: '4px 0 0' }}>
             {t('{id} works inside {b} only (level {n}, LiDAR SLAM) and cannot reach this alert. The floor patrol checks the building; send an outdoor vehicle to the alert.', {
               id: picked!.id,
@@ -753,17 +773,19 @@ function PrepareMission({ inc }: { inc: Incident }) {
             onClick={() => {
               if (routeDraft.get()?.purpose === 'mission-new') routeDraft.clear();
               setOpen(false);
+              onClose?.(false);
             }}
           >
             {t('Cancel')}
           </button>
           <button
             className="btn-primary grow"
-            disabled={!allowed || !deviceId || (route === 'draw' && !drawn) || (route.startsWith('lib:') && !saved)}
+            disabled={!allowed || !deviceId || (!inc && !task?.trim()) || (route === 'draw' && !drawn) || (route.startsWith('lib:') && !saved)}
             onClick={() => {
               dispatch({
                 type: 'createMission',
-                incidentId: inc.id,
+                incidentId: inc?.id,
+                task: inc ? undefined : task?.trim(),
                 deviceId,
                 operatorId: op,
                 checkpoints:
@@ -778,6 +800,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
                         : (ROUTES.find((r) => r.id === route) ?? ROUTES[0]).pts,
               });
               if (drawn) routeDraft.clear();
+              onClose?.(true);
             }}
           >
             {t('Save draft & run checks')}
@@ -788,7 +811,7 @@ function PrepareMission({ inc }: { inc: Incident }) {
   );
 }
 
-function Planner({ m }: { m: Mission }) {
+export function Planner({ m }: { m: Mission }) {
   const { s, dispatch, mode } = useStore();
   const t = useT();
   const me = currentUser(s);

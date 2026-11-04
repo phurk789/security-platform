@@ -28,13 +28,17 @@ const returningForm = () => {
   return d?.purpose === 'patrol' && d.state === 'done' ? (d.meta as PatrolForm | undefined) : undefined;
 };
 
-export function PatrolsCard() {
-  const { s, session, dispatch, mode } = useStore();
+/**
+ * `selected` / `onSelect`: the patrol shown on the planning page's map. `startWithRoute`: open the
+ * form with this route choice (e.g. a saved route, "lib:<id>").
+ */
+export function PatrolsCard({ selected, onSelect, startWithRoute }: { selected?: string | null; onSelect?: (id: string) => void; startWithRoute?: string | null } = {}) {
+  const { s, session, mode } = useStore();
   const t = useT();
   const me = currentUser(s);
   const manage = can(me.role, 'patrol.manage') && !s.replay.active && !!session;
   // Coming back from drawing on the map: reopen the form as it was.
-  const [open, setOpen] = useState(() => !!returningForm());
+  const [open, setOpen] = useState(() => !!returningForm() || !!startWithRoute);
   const vehicles = Object.values(s.devices).filter((d) => (d.kind === 'ugv' || d.kind === 'uav') && d.commands.includes('start'));
   // Whoever sets up the patrol approves its runs, so someone else operates it (two-person rule).
   const operators = s.users.filter((u) => can(u.role, 'mission.accept') && u.id !== me.id);
@@ -44,7 +48,7 @@ export function PatrolsCard() {
         name: '',
         deviceId: vehicles[0]?.id ?? '',
         operatorId: operators[0]?.id ?? '',
-        routeId: 'sweep',
+        routeId: startWithRoute ?? 'sweep',
         days: [1, 2, 3, 4, 5],
         times: '22:00, 02:00',
         autoStart: false,
@@ -64,8 +68,8 @@ export function PatrolsCard() {
   const drawn = finishedDraft(draft, 'patrol', deviceId);
   const canDraw = mode === 'remote' && !!dev && !dev.indoor;
   const drawOnMap = () => {
+    // Drawn on the planning page's own map.
     routeDraft.start({ purpose: 'patrol', deviceId, points: drawn?.points ?? [], returnTo: 'missions', meta: { ...form, deviceId, operatorId, routeId: 'draw' } });
-    dispatch({ type: 'setView', view: 'overview' });
   };
   const close = () => {
     if (routeDraft.get()?.purpose === 'patrol') routeDraft.clear();
@@ -121,7 +125,7 @@ export function PatrolsCard() {
       {s.patrols.length === 0 && !open && <p className="fine">{t('No patrol schedules yet. A supervisor can add one: the route is approved once and runs on the timetable.')}</p>}
       <ul className="list patrols">
         {s.patrols.map((p) => (
-          <li key={p.id} className={p.enabled ? '' : 'dim'}>
+          <li key={p.id} className={`${p.enabled ? '' : 'dim'}${selected === p.id ? ' is-selected' : ''}${onSelect ? ' click' : ''}`} onClick={onSelect ? () => onSelect(p.id) : undefined}>
             <span>
               <b>{p.name}</b> <span className="mono muted">{p.id}</span>
               <br />

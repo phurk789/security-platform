@@ -9,6 +9,7 @@ import { Layers as LayersIcon, LocateFixed, SatelliteDish } from 'lucide-react';
 import { GEOFENCE_KIND_LABEL, SITE, fmtLatLon, geoToSite, type AppState, type Layers as LayerState } from '@13store/shared';
 import { MAX_ZONE_POINTS, addPoint, insertPoint, isZonePurpose, maxPoints, movePoint, northUpRect, removePoint, routeDraft, useRouteDraft, type ZoneMeta } from '../domain/routeDraft';
 import { useHiddenZones } from '../domain/zoneVisibility';
+import { useMapFit, useMapPreview } from '../domain/mapFocus';
 import { ZonesPanel } from './ZonesPanel';
 import { RouteDraftPanel } from './RouteDraftPanel';
 import { freshness } from '../domain/policy';
@@ -50,7 +51,7 @@ function useLocalFlag(key: string, def: boolean): [boolean, (v: boolean) => void
   return [v, set];
 }
 
-function overlayInput(s: AppState, showTrails: boolean, showPlan: boolean, hiddenGeofenceIds?: ReadonlySet<string>): OverlayInput {
+function overlayInput(s: AppState, showTrails: boolean, showPlan: boolean, hiddenGeofenceIds?: ReadonlySet<string>, preview?: OverlayInput['preview']): OverlayInput {
   return {
     anchor: s.geo,
     devices: Object.values(s.devices),
@@ -67,6 +68,7 @@ function overlayInput(s: AppState, showTrails: boolean, showPlan: boolean, hidde
     showPlan,
     freshness: (d) => freshness(s, d),
     hiddenGeofenceIds,
+    preview,
   };
 }
 
@@ -102,8 +104,11 @@ export default function RealMap({ follow }: { follow?: string } = {}) {
   // The zone open in the editor is drawn by the editor, not as a normal zone.
   const editingId = draft?.state === 'drawing' && draft.purpose === 'geofence' ? (draft.meta as ZoneMeta).id : undefined;
   const hiddenIds = editingId ? new Set([...hiddenZones, editingId]) : hiddenZones;
-  const latest = useRef({ s, showTrails, showPlan, dispatch, t, session, hiddenIds });
-  latest.current = { s, showTrails, showPlan, dispatch, t, session, hiddenIds };
+  // A route a page asks to show (mission planning: a saved route or a patrol loop), and framing requests.
+  const preview = useMapPreview();
+  const fitReq = useMapFit();
+  const latest = useRef({ s, showTrails, showPlan, dispatch, t, session, hiddenIds, preview });
+  latest.current = { s, showTrails, showPlan, dispatch, t, session, hiddenIds, preview };
 
   // One map per mounted component; everything it added goes with it.
   useEffect(() => {
@@ -295,10 +300,10 @@ export default function RealMap({ follow }: { follow?: string } = {}) {
     timer.current = window.setTimeout(() => {
       timer.current = null;
       const map = sm.current?.map;
-      const { s: cur, showTrails: tr, showPlan: pl, hiddenIds: hid } = latest.current;
-      if (map) updateOverlayData(map, buildOverlayData(overlayInput(cur, tr, pl, hid)));
+      const { s: cur, showTrails: tr, showPlan: pl, hiddenIds: hid, preview: pv } = latest.current;
+      if (map) updateOverlayData(map, buildOverlayData(overlayInput(cur, tr, pl, hid, pv)));
     }, REDRAW_MS);
-  }, [ready, s, showTrails, showPlan, hiddenZones, editingId]);
+  }, [ready, s, showTrails, showPlan, hiddenZones, editingId, preview]);
   useEffect(
     () => () => {
       if (timer.current !== null) clearTimeout(timer.current);
@@ -442,6 +447,12 @@ export default function RealMap({ follow }: { follow?: string } = {}) {
     const ll = lngLat(cur.geo, p) as [number, number];
     if (!map.getBounds().contains(ll)) map.easeTo({ center: ll, duration: 600 });
   }, [ready, focus]);
+
+  // A page asked to frame some points (mission planning: the route it is showing).
+  useEffect(() => {
+    if (ready && fitReq) zoomTo(fitReq.points);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, fitReq?.seq]);
 
   // Following a device: re-centre on it whenever it has moved a metre or more.
   const followed = follow ? s.devices[follow] : undefined;
