@@ -6,11 +6,10 @@ import { SITE, componentSummary } from '@13store/shared';
 import type { Device, AppState, Incident } from '@13store/shared';
 import { useStore } from '../store';
 import { age, ago, roleLabel, useT } from '../i18n';
-import { CommandBadge, FreshBadge, INCIDENT_LABEL, IncidentBadge, IntegrationBadge, MissionBadge } from '../components/Badges';
+import { FreshBadge, INCIDENT_LABEL, IncidentBadge, IntegrationBadge, MissionBadge } from '../components/Badges';
 import { CameraFeed } from '../components/CameraFeed';
 import { TwinMap } from '../components/TwinMap';
 import { RecordingsCard } from '../components/Recordings';
-import { PatrolsCard } from '../components/Patrols';
 import { KpiDashboard } from '../components/KpiDashboard';
 
 function Page({ title, sub, children, actions }: { title: string; sub?: string; children: React.ReactNode; actions?: React.ReactNode }) {
@@ -147,93 +146,6 @@ export function IncidentsPage() {
         </table>
         {list.length === 0 && <p className="empty">{t('No incidents match these filters.')}</p>}
       </div>
-    </Page>
-  );
-}
-
-export function MissionsPage() {
-  const { s, dispatch } = useStore();
-  const t = useT();
-  return (
-    <Page title={t('Missions')} sub={t('Plans, approvals and command results. A sent command is not a completed one.')}>
-      <PatrolsCard />
-      {s.missions.length === 0 && <p className="empty">{t('No missions yet. Verify an incident and prepare a mission from the Overview.')}</p>}
-      {s.missions
-        .slice()
-        .reverse()
-        .map((m) => {
-          const cmds = s.commands.filter((c) => c.missionId === m.id);
-          return (
-            <section key={m.id} className="card">
-              <div className="row between wrap">
-                <h3 className="mono">
-                  {m.id}{' '}
-                  <small className="muted">
-                    · {m.incidentId} · {m.deviceId}
-                  </small>
-                </h3>
-                <MissionBadge status={m.status} />
-              </div>
-              <dl className="meta cols">
-                <div>
-                  <dt>{t('Operator')}</dt>
-                  <dd>{userName(s, m.operatorId)}</dd>
-                </div>
-                <div>
-                  <dt>{t('Plan')}</dt>
-                  <dd>{t('v{v} · {n} checkpoints', { v: m.planVersion, n: m.checkpoints.length })}</dd>
-                </div>
-                <div>
-                  <dt>{t('Approved')}</dt>
-                  <dd>{m.approvedVersion ? t('v{v} by {name}', { v: m.approvedVersion, name: userName(s, m.approvedBy) }) : '—'}</dd>
-                </div>
-                <div>
-                  <dt>{t('Created')}</dt>
-                  <dd>{fmtTime(m.createdAt, true)}</dd>
-                </div>
-              </dl>
-              {cmds.length > 0 && (
-                <table className="compact">
-                  <thead>
-                    <tr>
-                      <th>{t('Command')}</th>
-                      <th>{t('Type')}</th>
-                      <th>{t('Issuer')}</th>
-                      <th>{t('Sent')}</th>
-                      <th>{t('Expires')}</th>
-                      <th>{t('Idempotency key')}</th>
-                      <th>{t('Status')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cmds.map((c) => (
-                      <tr key={c.id}>
-                        <td className="mono">{c.id}</td>
-                        <td>{c.type}</td>
-                        <td>{userName(s, c.issuer)}</td>
-                        <td className="mono">{fmtTime(c.issuedAt, true)}</td>
-                        <td className="mono">{fmtTime(c.expiresAt, true)}</td>
-                        <td className="mono">{c.idempotencyKey}</td>
-                        <td>
-                          <CommandBadge status={c.status} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              <button
-                className="btn-secondary"
-                onClick={() => {
-                  dispatch({ type: 'selectIncident', id: m.incidentId });
-                  dispatch({ type: 'setView', view: 'overview' });
-                }}
-              >
-                {t('Open on map')}
-              </button>
-            </section>
-          );
-        })}
     </Page>
   );
 }

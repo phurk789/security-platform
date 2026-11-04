@@ -41,7 +41,7 @@ import {
 } from './policy';
 import { initialState } from './scenario';
 import type { AppState, Command, CommandStatus, CommandType, Detection, Incident, Layers, Device, Mission, Point, TimelineEvent, VehicleSim, View } from '@13store/shared';
-import { FLOOR_PATROL_RESUME_MS, INDOOR_UGV_SPEED, floorPatrolLoop, floorPlan, pickPlaybook } from '@13store/shared';
+import { FLOOR_PATROL_RESUME_MS, INDOOR_UGV_SPEED, ROUTINE_TASK_TYPE, TASK_NAME_MAX, floorPatrolLoop, floorPlan, pickPlaybook } from '@13store/shared';
 
 export type Msg =
   | { type: 'tick'; dt: number }
@@ -57,7 +57,8 @@ export type Msg =
   | { type: 'confirmIncident'; incidentId: string }
   | { type: 'dismissIncident'; incidentId: string; reason: string }
   | { type: 'mergeIncident'; incidentId: string; intoId: string; reason: string }
-  | { type: 'createMission'; incidentId: string; deviceId: string; operatorId: string; checkpoints: Point[] }
+  /** For an incident, or (no incidentId) for a routine task named `task`: the incident record is raised for it. */
+  | { type: 'createMission'; incidentId?: string; task?: string; deviceId: string; operatorId: string; checkpoints: Point[] }
   | { type: 'editRoute'; missionId: string; checkpoints: Point[] }
   | { type: 'submitMission'; missionId: string }
   | { type: 'approveMission'; missionId: string }
@@ -682,11 +683,36 @@ export function reducer(prev: AppState, msg: Msg): AppState {
 
     // -- missions -----------------------------------------------------------
     case 'createMission': {
-      const inc = incident(s, msg.incidentId);
       const d = s.devices[msg.deviceId];
-      if (!inc || !d || !guard(s, 'mission.prepare', msg.incidentId)) return s;
-      if (inc.status !== 'confirmed') return (reject(s, 'mission.prepare', inc.id, 'Verify the incident before preparing a mission.'), s);
+      const task = msg.incidentId ? undefined : msg.task?.replace(/\s+/g, ' ').trim().slice(0, TASK_NAME_MAX);
+      if (!msg.incidentId && !task) return (reject(s, 'mission.prepare', msg.deviceId, 'Choose an incident, or name the routine task (up to 60 characters).'), s);
+      if (!d || !guard(s, 'mission.prepare', msg.incidentId ?? d.id)) return s;
+      const found = msg.incidentId ? incident(s, msg.incidentId) : undefined;
+      if (msg.incidentId && !found) return s;
+      if (found && found.status !== 'confirmed') return (reject(s, 'mission.prepare', found.id, 'Verify the incident before preparing a mission.'), s);
       if (!isReady(s, d)) return (reject(s, 'mission.prepare', d.id, `${d.id} is not ready.`), s);
+      let inc = found;
+      if (task) {
+        // A routine task: raise its incident record, as the server does.
+        const raised: Incident = {
+          id: nextId(s, 'INC'),
+          title: `Task: ${task}`,
+          type: ROUTINE_TASK_TYPE,
+          severity: 'low',
+          status: 'confirmed',
+          zone: d.zone,
+          place: task,
+          pos: msg.checkpoints[msg.checkpoints.length - 1] ?? d.pos,
+          source: currentUser(s).name,
+          createdAt: s.now,
+          owner: userName(s, msg.operatorId),
+          thumb: 'path',
+        };
+        s.incidents.push(raised);
+        event(s, raised.id, 'Routine task created', { tone: 'info', detail: `${task} · ${d.id} · operator ${userName(s, msg.operatorId)}.` });
+        inc = raised;
+      }
+      if (!inc) return s;
       const m: Mission = {
         id: nextId(s, 'MSN'),
         incidentId: inc.id,
