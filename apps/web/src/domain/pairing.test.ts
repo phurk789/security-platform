@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parsePairingLink, pairingLink } from '@13store/shared';
 import { parseSiteConfig } from '@13store/gateway';
-import { REMOTE_DEFAULTS, formatCode, loopbackOrigin, pairingQr, readDeviceList, remoteDevices, timeLeft, unregistered } from './pairing';
+import { REMOTE_DEFAULTS, TARGET_DEFAULTS, edgeDevices, formatCode, loopbackOrigin, pairingQr, piDevices, piPairCommand, readDeviceList, remoteDevices, timeLeft, unregistered } from './pairing';
 
 const GEO = { originLat: 13.4367374, originLon: 101.0275798, rotationDeg: -28.5 };
 
@@ -23,6 +23,29 @@ describe('Pair an edge remote (Admin card)', () => {
 
   it('leaves video out when no camera address is given', () => {
     expect(remoteDevices({ ...REMOTE_DEFAULTS, cameraRtsp: '  ' })[0]).not.toHaveProperty('stream');
+  });
+
+  it('builds the Raspberry Pi device list: the board on a serial port, no UniGCS relay', () => {
+    const uart = piDevices({ ...REMOTE_DEFAULTS, vehicleId: 'ugv-02' });
+    expect(() => parseSiteConfig({ geo: GEO, devices: uart })).not.toThrow();
+    expect(uart[0]).toMatchObject({
+      deviceId: 'UGV-02',
+      link: { mode: 'serial', path: '/dev/ttyAMA0', baud: 115200 },
+      radio: 'Raspberry Pi on the vehicle (TELEM1)',
+      allowRemoteArm: false,
+      teleop: true,
+      stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', push: true },
+    });
+    expect(uart[0]).not.toHaveProperty('gcsRelay');
+    const usb = edgeDevices('pi', { ...REMOTE_DEFAULTS, piPort: 'usb' });
+    expect(() => parseSiteConfig({ geo: GEO, devices: usb })).not.toThrow();
+    expect(usb[0]).toMatchObject({ link: { mode: 'serial', path: '/dev/ttyACM0' } });
+    expect(edgeDevices('remote', REMOTE_DEFAULTS)).toEqual(remoteDevices(REMOTE_DEFAULTS));
+    expect(TARGET_DEFAULTS.pi.gatewayId).toBe('edge-pi-ugv-01');
+  });
+
+  it('gives the Pi one command to type, with the console address and the code', () => {
+    expect(piPairCommand('http://192.168.20.13:8090', '042917')).toBe('sudo 13store-edge pair http://192.168.20.13:8090 042917');
   });
 
   it('shows the code in two groups and counts down to expiry', () => {

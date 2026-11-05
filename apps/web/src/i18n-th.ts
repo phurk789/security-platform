@@ -427,6 +427,18 @@ export const TH: Record<string, string> = {
   'For the edge app on the SIYI remote. Create a code, then on the remote press Pair and scan the QR or type the server address and the 6 digits. The app receives its gateway key directly: no one sees or types it. A code works once, for {n} minutes.':
     'สำหรับแอป Edge บนรีโมต SIYI: กดสร้างรหัส แล้วที่รีโมตกด "จับคู่" จากนั้นสแกน QR หรือพิมพ์ที่อยู่เซิร์ฟเวอร์กับตัวเลข 6 หลัก แอปจะได้คีย์ Gateway เองโดยตรง ไม่มีใครเห็นหรือต้องพิมพ์คีย์ รหัสใช้ได้ครั้งเดียว ภายใน {n} นาที',
   'QR code for the edge app': 'QR สำหรับแอป Edge',
+  'For a Raspberry Pi on the vehicle (deploy/pi kit). Create a code, then type the command shown on the Pi. The Pi receives its gateway key directly: no one sees or types it. A code works once, for {n} minutes.':
+    'สำหรับ Raspberry Pi บนรถ (ชุดติดตั้ง deploy/pi): กดสร้างรหัส แล้วพิมพ์คำสั่งที่ขึ้นบนหน้านี้ลงใน Pi จากนั้น Pi จะได้คีย์ Gateway เองโดยตรง ไม่มีใครเห็นหรือต้องพิมพ์คีย์ รหัสใช้ได้ครั้งเดียว ภายใน {n} นาที',
+  'On the Pi, type:': 'พิมพ์บน Pi:',
+  'The Pi cannot reach "localhost": open this console by its network address, e.g. http://192.168.20.13:8090, then create the code again.':
+    'Pi ติดต่อ "localhost" ไม่ได้ ให้เปิดหน้าเว็บนี้ด้วยที่อยู่ในเครือข่าย เช่น http://192.168.20.13:8090 แล้วสร้างรหัสใหม่',
+  '{gw} paired. The Pi starts its gateway by itself; the vehicle appears under Devices.': 'จับคู่ {gw} แล้ว Pi เริ่ม Gateway เอง แล้วรถจะขึ้นในหน้าอุปกรณ์',
+  'Gateway runs on': 'Gateway ทำงานที่',
+  'SIYI remote (edge app)': 'รีโมต SIYI (แอป Edge)',
+  'Raspberry Pi on the vehicle': 'Raspberry Pi บนรถ',
+  'Flight controller cable': 'สายต่อบอร์ดควบคุม',
+  'TELEM1 to the Pi pins (/dev/ttyAMA0)': 'TELEM1 เข้าขา Pi (/dev/ttyAMA0)',
+  'USB cable (/dev/ttyACM0)': 'สาย USB (/dev/ttyACM0)',
   'Pairing code': 'รหัสจับคู่',
   'Server address on the remote:': 'ที่อยู่เซิร์ฟเวอร์ที่ใส่ในรีโมต:',
   'Valid for {left}': 'ใช้ได้อีก {left}',

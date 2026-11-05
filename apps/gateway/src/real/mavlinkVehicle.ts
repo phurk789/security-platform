@@ -1,6 +1,7 @@
 // Adapter for a MAVLink vehicle — e.g. a UGV or UAV on a SIYI UniFC 6 Pico (PX4 or ArduPilot),
-// reached through a SIYI UniRC 7 / 7 Pro datalink (UDP, default 192.168.144.20:19856)
-// or directly over the flight controller's Ethernet port.
+// reached through a SIYI UniRC 7 / 7 Pro datalink (UDP, default 192.168.144.20:19856),
+// directly over the flight controller's Ethernet port, or over a serial port from a computer on the
+// vehicle (a Raspberry Pi on TELEM1, deploy/pi). See mavlinkLink.ts.
 //
 // Safety rules (PRD §8):
 //  • The flight controller owns motion and failsafes (FS_* / NAV_* parameters). The platform only
@@ -11,9 +12,9 @@
 //  • Live driving (`teleop`, UGVs) overrides only the steering and throttle sticks, only while the
 //    pilot has armed the vehicle in a manual mode, and stops when stick samples stop coming. The
 //    arm switch and the mode switch stay on the remote.
-import dgram from 'node:dgram';
 import { ComponentTracker } from '../adapters/components';
 import { PassThrough } from 'node:stream';
+import { createLink, describeLink, type LinkConfig, type SerialDeps, type VehicleLink } from './mavlinkLink';
 import { MavLinkPacketParser, MavLinkPacketSplitter, MavLinkProtocolV2, ardupilotmega, common, minimal, type MavLinkPacket } from 'node-mavlink';
 import {
   PAYLOAD_CATALOG,
@@ -48,8 +49,13 @@ export interface MavlinkVehicleConfig {
   kind: 'ugv' | 'uav';
   profile: VehicleProfile;
   model?: string;
-  /** client: send to the datalink's UDP server (UniRC 7 Pro). listen: wait for the vehicle to send to us. */
-  link: { mode: 'client'; host: string; port: number } | { mode: 'listen'; port: number };
+  /**
+   * client: send to the datalink's UDP server (UniRC 7 Pro). listen: wait for the vehicle to send to us.
+   * serial: a port on the computer running the gateway (Raspberry Pi on the vehicle).
+   */
+  link: LinkConfig;
+  /** Tests: a stand-in serial port. */
+  serial?: SerialDeps;
   geo: GeoAnchor;
   /** Mission altitude above home for UAVs (m). */
   missionAltM?: number;
@@ -270,8 +276,7 @@ type MissionItems = InstanceType<typeof common.MissionItemInt>[];
 export class MavlinkVehicleAdapter implements Adapter {
   readonly declaration: AdapterDeclaration;
   private ctx!: AdapterContext;
-  private sock?: dgram.Socket;
-  private peer?: { host: string; port: number };
+  private link?: VehicleLink;
   private proto: MavLinkProtocolV2;
   private txSeq = 0;
   private telSeq = 0;
@@ -426,7 +431,7 @@ export class MavlinkVehicleAdapter implements Adapter {
       components: this.comps.list(),
       units: { position: 'site-m', altitude: 'm-site-datum', speed: 'm/s', battery: 'percent' },
       rateMs: 1000,
-      limitations: `Flight controller via ${cfg.link.mode === 'client' ? `${cfg.link.host}:${cfg.link.port}` : `UDP :${cfg.link.port}`}. ${cfg.allowRemoteArm ? 'Remote arming enabled.' : 'Arm on the remote; the platform will not arm.'}${this.teleop ? ` Console driving overrides steering and throttle only, while armed in a manual mode; it stops ${this.teleop.deadmanMs} ms after stick samples stop.` : ''}${this.relayCfg ? ` UniGCS on the remote may run at the same time through the gateway (${this.relayCfg.host}:${this.relayCfg.port}); its commands do not pass the platform's approvals.` : ''}`,
+      limitations: `Flight controller via ${describeLink(cfg.link)}. ${cfg.allowRemoteArm ? 'Remote arming enabled.' : 'Arm on the remote; the platform will not arm.'}${this.teleop ? ` Console driving overrides steering and throttle only, while armed in a manual mode; it stops ${this.teleop.deadmanMs} ms after stick samples stop.` : ''}${this.relayCfg ? ` UniGCS on the remote may run at the same time through the gateway (${this.relayCfg.host}:${this.relayCfg.port}); its commands do not pass the platform's approvals.` : ''}`,
       linkLossBehavior: uav
         ? 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE / NAV_DLL_ACT): RTL or loiter as configured on the vehicle.'
         : 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE, FS_ACTION=Hold): stop in place as configured on the vehicle.',
@@ -440,25 +445,19 @@ export class MavlinkVehicleAdapter implements Adapter {
     this.ledger = ctx.ledger;
     const stream = this.input.pipe(new MavLinkPacketSplitter()).pipe(new MavLinkPacketParser());
     stream.on('data', (p: MavLinkPacket) => this.onPacket(p));
-    const sock = dgram.createSocket('udp4');
-    this.sock = sock;
-    sock.on('message', (msg, rinfo) => {
-      if (this.cfg.link.mode === 'listen') this.peer = { host: rinfo.address, port: rinfo.port };
-      this.input.write(msg);
-      this.relay?.fromVehicle(msg);
+    const link = createLink(this.cfg.link, ctx.log, this.cfg.deviceId, this.cfg.serial);
+    this.link = link;
+    link.start((bytes) => {
+      this.input.write(bytes);
+      this.relay?.fromVehicle(bytes);
     });
-    sock.on('error', (e) => ctx.log.warn(`${this.cfg.deviceId}: UDP error ${e.message}`));
-    if (this.cfg.link.mode === 'client') {
-      this.peer = { host: this.cfg.link.host, port: this.cfg.link.port };
-      sock.bind(0);
-    } else sock.bind(this.cfg.link.port);
     if (this.relayCfg) {
       this.relay = new GcsRelay({
         deviceId: this.cfg.deviceId,
         ...this.relayCfg,
         log: ctx.log,
         now: () => ctx.now(),
-        toVehicle: (b) => this.peer && this.sock?.send(b, this.peer.port, this.peer.host),
+        toVehicle: (b) => this.link?.send(b),
         driving: () => this.drive.active || this.overriding,
         modeName: (m) => MODES[this.cfg.profile].name(m),
         staleMs: this.cfg.gcsRelayStaleMs,
@@ -486,8 +485,8 @@ export class MavlinkVehicleAdapter implements Adapter {
     this.timers = [];
     this.relay?.stop();
     this.relay = undefined;
-    this.sock?.close();
-    this.sock = undefined;
+    this.link?.stop();
+    this.link = undefined;
   }
 
   /** The local ground station relay (UniGCS on the remote), for the gateway's status. */
@@ -642,9 +641,8 @@ export class MavlinkVehicleAdapter implements Adapter {
   // ---- transport -----------------------------------------------------------------
 
   private send(msg: InstanceType<(typeof REGISTRY)[number]>) {
-    if (!this.sock || !this.peer) return;
-    const buf = this.proto.serialize(msg, this.txSeq++ & 0xff);
-    this.sock.send(buf, this.peer.port, this.peer.host);
+    if (!this.link) return;
+    this.link.send(this.proto.serialize(msg, this.txSeq++ & 0xff));
   }
 
   private sendGcsHeartbeat() {

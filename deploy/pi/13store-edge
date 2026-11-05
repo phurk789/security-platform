@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# The one command for the edge gateway on the vehicle's computer (installed by install.sh).
+#   sudo 13store-edge pair [server] [code]   pair with a one-time code from Admin, then start the gateway
+#   13store-edge status                      server, vehicle and video at a glance
+#   13store-edge ports                       serial ports (where the flight controller is)
+#   13store-edge logs [-f | lines]           the gateway's log
+#   sudo 13store-edge restart | stop | start
+#   sudo 13store-edge siyi-lan [address]     put the Ethernet port on the SIYI air unit's network
+set -uo pipefail
+
+APP=/opt/13store-edge
+CONF=/etc/13store-edge/site.json
+SERVICE=13store-edge
+
+tool() { GATEWAY_CONFIG="$CONF" node "$APP/edge-tool.mjs" "$@"; }
+need_root() {
+  if [ "$(id -u)" != 0 ]; then echo "คำสั่งนี้ต้องใช้ sudo:  sudo 13store-edge $*"; exit 1; fi
+}
+
+# The Pi's Ethernet port on 192.168.144.0/24 (camera .25), never the default route: the internet stays on 4G or
+# Wi-Fi. Refuses when this SSH session itself comes in over that port (the change would cut it off).
+siyi_lan() {
+  local ip="${1:-192.168.144.101}" ifname="${2:-eth0}" last
+  if ! [[ $ip =~ ^192\.168\.144\.([0-9]{1,3})$ ]] || [ "${BASH_REMATCH[1]}" -lt 2 ] || [ "${BASH_REMATCH[1]}" -gt 254 ]; then
+    echo "ใช้ที่อยู่ 192.168.144.x (x = 2–254) เช่น 192.168.144.101"; exit 1
+  fi
+  last="${BASH_REMATCH[1]}"
+  case "$last" in
+    11 | 12 | 20 | 25 | 26 | 50 | 60) echo "192.168.144.$last เป็นที่อยู่ที่ SIYI จองไว้ (.11 .12 .20 .25 .26 .50 .60) เลือกอื่น เช่น .101"; exit 1 ;;
+  esac
+  if ! command -v nmcli >/dev/null; then echo "ต้องมี NetworkManager (Raspberry Pi OS Bookworm ขึ้นไป)"; exit 1; fi
+  if ! ip link show "$ifname" >/dev/null 2>&1; then echo "ไม่พบพอร์ต $ifname"; exit 1; fi
+  if [ -n "${SSH_CONNECTION:-}" ]; then
+    local here
+    here="$(awk '{print $3}' <<<"$SSH_CONNECTION")"
+    if ip -o -4 addr show dev "$ifname" | grep -q " $here/"; then
+      echo "ตอนนี้ SSH เข้ามาทางพอร์ต $ifname: ถ้าเปลี่ยนจะหลุดทันที ให้ SSH ผ่าน Wi-Fi แล้วสั่งใหม่"; exit 1
+    fi
+  fi
+  nmcli connection delete siyi-lan >/dev/null 2>&1 || true
+  nmcli connection add type ethernet ifname "$ifname" con-name siyi-lan autoconnect yes connection.autoconnect-priority 100 \
+    ipv4.method manual ipv4.addresses "$ip/24" ipv4.never-default yes ipv6.method disabled >/dev/null
+  if nmcli connection up siyi-lan >/dev/null 2>&1; then
+    echo "พอร์ต $ifname = $ip (เส้นทางอินเทอร์เน็ตไม่เปลี่ยน)"
+  else
+    echo "ตั้ง $ifname = $ip ไว้แล้ว จะใช้เมื่อเสียบสาย LAN จากกล่อง SIYI"
+    return 0
+  fi
+  if ping -c 2 -W 1 192.168.144.25 >/dev/null 2>&1; then echo "ping กล้อง 192.168.144.25: ได้"; else echo "ping กล้อง 192.168.144.25: ไม่ตอบ (เช็คสาย LAN กับไฟกล่อง SIYI / กล้อง)"; fi
+}
+
+case "${1:-}" in
+  pair)
+    need_root pair
+    shift
+    tool pair "$@" || exit 1
+    chown root:edge "$CONF" && chmod 0640 "$CONF"
+    systemctl enable "$SERVICE" >/dev/null 2>&1
+    systemctl restart "$SERVICE"
+    echo "เริ่ม Gateway แล้ว ดูสถานะใน 8 วินาที..."
+    sleep 8
+    tool status
+    ;;
+  status)
+    tool status
+    code=$?
+    echo "บริการ: $(systemctl is-active "$SERVICE") · ชุดติดตั้ง $(cut -d' ' -f1 "$APP/VERSION" 2>/dev/null || echo '?')"
+    exit "$code"
+    ;;
+  ports) tool ports ;;
+  logs)
+    if [ "${2:-}" = "-f" ]; then exec journalctl -u "$SERVICE" -f; fi
+    exec journalctl -u "$SERVICE" -n "${2:-100}" --no-pager
+    ;;
+  restart | stop | start)
+    need_root "$1"
+    systemctl "$1" "$SERVICE"
+    ;;
+  siyi-lan)
+    need_root siyi-lan
+    siyi_lan "${2:-}" "${3:-}"
+    ;;
+  version) cat "$APP/VERSION" 2>/dev/null || echo '?' ;;
+  *)
+    cat <<'EOF'
+คำสั่งของ Edge Gateway บนรถ:
+  sudo 13store-edge pair [เซิร์ฟเวอร์] [รหัส]   จับคู่ด้วยรหัสจากหน้าแอดมิน แล้วเริ่ม Gateway
+  13store-edge status                        สถานะเซิร์ฟเวอร์ รถ วิดีโอ
+  13store-edge ports                         พอร์ต serial (บอร์ดควบคุมอยู่ที่ไหน)
+  13store-edge logs [-f | จำนวนบรรทัด]          บันทึกของ Gateway
+  sudo 13store-edge restart | stop | start
+  sudo 13store-edge siyi-lan [ที่อยู่]           ตั้งพอร์ต LAN ให้อยู่วงเดียวกับกล่อง SIYI
+  13store-edge version                       รุ่นของชุดติดตั้ง
+EOF
+    [ -z "${1:-}" ] || [ "$1" = help ] || exit 2
+    ;;
+esac

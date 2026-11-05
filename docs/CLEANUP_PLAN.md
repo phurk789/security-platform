@@ -121,6 +121,7 @@
 | **E-4** | ผลตรวจบนหน้าเว็บ: link, GPS, codec กล้อง พร้อมปุ่มแก้ (เช่นเปลี่ยนกล้องเป็น H.264 ผ่าน SDK `0x21`) | ยังไม่เริ่ม | M |
 | **E-5** | gateway เป็น MAVLink router ให้ UniGCS ใช้พร้อมกันได้ทั้งดูและสั่ง + เลขประจำตัว (`gcsSystemId`) ไม่ซ้ำ UniGCS | ทำแล้ว: `gcsRelay` (`apps/gateway/src/real/gcsRelay.ts`) UniGCS ต่อ `127.0.0.1:19857` gateway ใช้ component 191 ระหว่างเว็บขับไม่ส่งคันของ UniGCS ต่อ รอลองกับรถ (`deploy/remote/README_TH.md` §8.3) | M |
 | **E-6** | แอป APK บนรีโมต (เปลือก: จับคู่, เริ่ม/หยุด, บริการเบื้องหลัง) แทน Termux | ทำแล้ว: `apps/edge-android` (Node 18 + ffmpeg LGPL ในตัว) ผ่านทดสอบบน emulator Android 13 รอทดสอบบนรีโมตจริง | L |
+| **E-7** | Raspberry Pi บนรถ (ทาง B): gateway ต่อบอร์ดด้วยสาย serial (TELEM1 → `/dev/ttyAMA0` หรือ USB), จับคู่ด้วยรหัสเดียวกับ E-3, บริการ systemd เริ่มเองตอนเปิดเครื่อง | ทำแล้ว: `link.mode = "serial"` (`apps/gateway/src/real/mavlinkLink.ts`), ชุดติดตั้ง `deploy/pi` (`npm run kit:pi`), การ์ดจับคู่มีตัวเลือก "Raspberry Pi บนรถ" ผ่านทดสอบบน Debian 12 ใน WSL กับสาย serial จำลอง รอทดสอบบน Pi กับรถจริง | M |
 
 ## ลำดับที่แนะนำ
 
