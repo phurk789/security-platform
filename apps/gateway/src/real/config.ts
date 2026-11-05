@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { PAYLOAD_CATALOG, VEHICLE_CATALOG, type CameraMount, type GeoAnchor, type StreamInfo } from '@13store/shared';
 import { defaultAdapters } from '../adapters';
 import type { Adapter } from '../sdk';
+import { linkProblem, type LinkConfig } from './mavlinkLink';
 import { MavlinkVehicleAdapter, UNIRC7_DATALINK, teleopProblem, type TeleopConfig, type VehicleProfile } from './mavlinkVehicle';
 import { SiyiCameraAdapter } from './siyiCamera';
 import { OnvifCameraAdapter, type OnvifCameraConfig } from './onvifCamera';
@@ -17,8 +18,11 @@ export type DeviceConfig =
       kind: 'ugv' | 'uav';
       profile: VehicleProfile;
       model?: string;
-      /** Omit to use the UniRC 7 / 7 Pro datalink (192.168.144.20:19856). */
-      link?: { mode: 'client'; host: string; port: number } | { mode: 'listen'; port: number };
+      /**
+       * Omit to use the UniRC 7 / 7 Pro datalink (192.168.144.20:19856). A Raspberry Pi on the vehicle uses
+       * { mode: 'serial', path: '/dev/ttyAMA0', baud: 115200 } (TELEM1 wired to GPIO 14/15) or a USB port.
+       */
+      link?: LinkConfig;
       missionAltM?: number;
       allowRemoteArm?: boolean;
       /** ArduPilot: geofence on for each route, off after disarm (keep FENCE_ENABLE = 0 on the board). */
@@ -91,6 +95,10 @@ export function parseSiteConfig(json: unknown): SiteConfig {
     if (d.type === 'mavlink' && d.catalogId && !VEHICLE_CATALOG[d.catalogId])
       throw new ConfigError(`${d.deviceId}: unknown catalogId ${d.catalogId} (known: ${Object.keys(VEHICLE_CATALOG).join(', ')})`);
     if (d.type === 'mavlink' && d.payload && !PAYLOAD_CATALOG[d.payload.module]) throw new ConfigError(`${d.deviceId}: unknown payload module ${d.payload.module}`);
+    if (d.type === 'mavlink') {
+      const problem = linkProblem(d.link);
+      if (problem) throw new ConfigError(`${d.deviceId}: ${problem}`);
+    }
     if (d.type === 'mavlink' && !['ardupilot-rover', 'ardupilot-copter', 'px4-rover', 'px4-multicopter'].includes(d.profile))
       throw new ConfigError(`${d.deviceId}: unknown profile ${d.profile}`);
     if (d.type === 'mavlink' && d.missionFence !== undefined && typeof d.missionFence !== 'boolean')

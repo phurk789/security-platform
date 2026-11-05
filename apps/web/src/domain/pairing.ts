@@ -3,6 +3,18 @@
 import qrcode from 'qrcode-generator';
 import { pairingLink } from '@13store/shared';
 
+/** Where the gateway runs: the edge app on the SIYI remote, or a Raspberry Pi on the vehicle (deploy/pi). */
+export type EdgeTarget = 'remote' | 'pi';
+
+/** How a Pi reaches the flight controller: TELEM1 wired to its GPIO UART, or a USB cable. */
+export type PiPort = 'uart' | 'usb';
+
+/** Serial settings per cable. TELEM1 runs at SERIAL1_BAUD = 115 (deploy/pi/README_TH.md); USB ignores the speed. */
+export const PI_PORTS: Record<PiPort, { path: string; baud: number }> = {
+  uart: { path: '/dev/ttyAMA0', baud: 115200 },
+  usb: { path: '/dev/ttyACM0', baud: 115200 },
+};
+
 /** The SIYI UniRC 7 Pro setup: vehicle on the remote's datalink, camera pushed to the platform. */
 export interface RemoteForm {
   label: string;
@@ -12,6 +24,8 @@ export interface RemoteForm {
   model: string;
   /** Empty: no video. */
   cameraRtsp: string;
+  /** Raspberry Pi only. */
+  piPort?: PiPort;
 }
 
 export const REMOTE_DEFAULTS: RemoteForm = {
@@ -20,6 +34,12 @@ export const REMOTE_DEFAULTS: RemoteForm = {
   vehicleId: 'UGV-01',
   model: 'Small electric UGV · ArduPilot Rover',
   cameraRtsp: 'rtsp://192.168.144.25:8554/main.264',
+};
+
+/** Name and gateway id offered for each target (kept until the administrator types their own). */
+export const TARGET_DEFAULTS: Record<EdgeTarget, Pick<RemoteForm, 'label' | 'gatewayId'>> = {
+  remote: { label: REMOTE_DEFAULTS.label, gatewayId: REMOTE_DEFAULTS.gatewayId },
+  pi: { label: 'Raspberry Pi on UGV-01', gatewayId: 'edge-pi-ugv-01' },
 };
 
 /** UniRC 7 / 7 Pro datalink: the remote is a UDP server at this address on its own network. */
@@ -46,6 +66,38 @@ export function remoteDevices(f: RemoteForm): Record<string, unknown>[] {
       ...(camera ? { stream: { rtsp: camera, push: true } } : {}),
     },
   ];
+}
+
+/**
+ * The gateway device list for a Raspberry Pi on the vehicle: the flight controller on a serial port, the camera on the
+ * air unit's LAN pushed to the platform. No UniGCS relay (nothing runs a ground station on the Pi).
+ */
+export function piDevices(f: RemoteForm): Record<string, unknown>[] {
+  const camera = f.cameraRtsp.trim();
+  const port = f.piPort ?? 'uart';
+  return [
+    {
+      type: 'mavlink',
+      deviceId: f.vehicleId.trim().toUpperCase(),
+      kind: 'ugv',
+      profile: 'ardupilot-rover',
+      model: f.model.trim() || REMOTE_DEFAULTS.model,
+      radio: port === 'usb' ? 'Raspberry Pi on the vehicle (USB)' : 'Raspberry Pi on the vehicle (TELEM1)',
+      link: { mode: 'serial', ...PI_PORTS[port] },
+      allowRemoteArm: false,
+      teleop: true,
+      ...(camera ? { stream: { rtsp: camera, push: true } } : {}),
+    },
+  ];
+}
+
+export function edgeDevices(target: EdgeTarget, f: RemoteForm) {
+  return target === 'pi' ? piDevices(f) : remoteDevices(f);
+}
+
+/** What to type on the Pi (over SSH) for a code: the kit's helper asks the server for its settings. */
+export function piPairCommand(serverOrigin: string, code: string) {
+  return `sudo 13store-edge pair ${serverOrigin} ${code}`;
 }
 
 /** The QR carries the console's own address: useless to a remote when the console was opened as localhost. */
