@@ -5,12 +5,22 @@ import { useT } from '../i18n';
 export function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   const t = useT();
   const ref = useRef<HTMLDivElement>(null);
+  // Callers pass a new onClose on every render, and the console re-renders with each telemetry
+  // sample. Keep the latest one in a ref so the effects below run once, when the dialog opens:
+  // re-running them moved the focus back every second, so typing was lost and Enter closed it.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && close.current();
     window.addEventListener('keydown', k);
-    ref.current?.querySelector<HTMLElement>('textarea, select, input, button')?.focus();
     return () => window.removeEventListener('keydown', k);
-  }, [onClose]);
+  }, []);
+  useEffect(() => {
+    // The first field to fill in (a password, a reason), else the first button below the title.
+    const root = ref.current;
+    const field = root?.querySelector<HTMLElement>('textarea, select, input') ?? root?.querySelector<HTMLElement>(':scope > :not(header) button');
+    field?.focus();
+  }, []);
   return (
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog" role="dialog" aria-modal="true" aria-label={title} ref={ref}>
