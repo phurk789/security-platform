@@ -1,0 +1,39 @@
+[Unit]
+Description=13STORE edge gateway (computer on the vehicle)
+Documentation=file:/opt/13store-edge/README_TH.md
+# No wait for the network: the board needs the gateway's heartbeat even while 4G is still coming up,
+# and the gateway keeps retrying the server by itself.
+After=network.target
+# Not paired yet: nothing to run (sudo 13store-edge pair).
+ConditionPathExists=/etc/13store-edge/site.json
+# Keep restarting however often it fails (a vehicle has nobody to press a button).
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=edge
+Group=edge
+SupplementaryGroups=dialout video
+Environment=GATEWAY_CONFIG=/etc/13store-edge/site.json
+Environment=GATEWAY_DATA_DIR=/var/lib/13store-edge
+Environment=GATEWAY_STATUS_FILE=/run/13store-edge/status.json
+ExecStart=/usr/bin/node /opt/13store-edge/edge-gateway.mjs
+Restart=always
+RestartSec=3
+# /var/lib/13store-edge: command ledgers (kept across restarts). /run/13store-edge: the status file.
+StateDirectory=13store-edge
+RuntimeDirectory=13store-edge
+TimeoutStopSec=15
+# The gateway needs the serial port, the network and its two folders; nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
