@@ -47,6 +47,10 @@ import {
   type GwTracks,
   type MediaRead,
   type VisionBox,
+  type AiBoxOffer,
+  type AiJob,
+  type DeviceAi,
+  AI_BOX_MAX_CAPACITY,
   DETECTION_TYPES,
   VISION_MAX_BOXES,
   type GwTelemetry,
@@ -190,6 +194,8 @@ export interface GatewayLink {
   send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera | SrvDrive): boolean;
   /** Gateways connected right now and the devices each holds. */
   connected?(orgId: string): { gatewayId: string; devices: string[] }[];
+  /** Hand an AI box its full list of jobs (replaces the previous one). False when it is not connected. */
+  sendAiJobs?(orgId: string, gatewayId: string, jobs: AiJob[]): boolean;
 }
 
 /** Stick samples closer together than this are dropped (25 per second at most). */
@@ -266,6 +272,10 @@ export class Platform {
   private lastSeq = new Map<string, number>();
   /** When each device's live boxes were last passed on (they are thinned to 10 per second). */
   private lastTracks = new Map<string, number>();
+  /** AI boxes connected now, per organisation: gateway id → what it offers and which connection it is. Memory only. */
+  private aiBoxes = new Map<string, Map<string, AiBoxOffer & { conn: number }>>();
+  /** Which AI box analyses which device's video, with the read pass it was given. Memory only. */
+  private aiJobs = new Map<string, { orgId: string; box: string; read: string; issued: number }>();
   /** Live drive sessions by device id (memory only: a restart ends them). */
   private driving = new Map<string, { userId: string; orgId: string; since: number; seq: number; lastAt: number; ownedBefore: boolean }>();
   /** Geofences per site (loaded on first use; defaults seeded for a new site). */
@@ -333,6 +343,11 @@ export class Platform {
         this.checkSla();
       } catch (e) {
         console.error('[sla]', e instanceof Error ? e.message : e);
+      }
+      try {
+        this.renewAiPasses();
+      } catch (e) {
+        console.error('[ai]', e instanceof Error ? e.message : e);
       }
     }, 10_000);
     this.patrolTimer.unref?.();
@@ -1156,12 +1171,31 @@ export class Platform {
     return `${u.protocol}//read:${this.readToken(orgId, aiId, vehicleId, gatewayId, this.now() + MEDIA_PUBLISH_TTL_MS)}@${u.host}/${pushPath(vehicleId)}`;
   }
 
+  /** An AI box's credential to read the video of a device it has the job for. */
+  private aiReadUrl(orgId: string, deviceId: string, box: string) {
+    const u = new URL(this.cfg.mediaIngestUrl!);
+    const body = Buffer.from(`${deviceId}|${box}|${this.now() + MEDIA_PUBLISH_TTL_MS}`).toString('base64url');
+    return `${u.protocol}//read:r2.${body}.${hmac(this.cfg.mediaSecret, `airead|${orgId}|${body}`)}@${u.host}/${pushPath(deviceId)}`;
+  }
+
+  /** May this AI box pass read this path? Only the device's own stream, while that box is connected and still has the job. */
+  private mayReadAiJob(body: string, sig: string, path: string): boolean {
+    const [deviceId, box, expStr] = Buffer.from(body, 'base64url').toString().split('|');
+    if (!(Number(expStr) > this.now())) return false;
+    const d = this.devices.get(deviceId);
+    if (!d || !safeEqual(sig, hmac(this.cfg.mediaSecret, `airead|${d.orgId}|${body}`))) return false;
+    if (path !== pushPath(d.id)) return false;
+    const job = this.aiJobs.get(d.id);
+    return !!job && job.orgId === d.orgId && job.box === box && !!this.aiBoxes.get(d.orgId)?.has(box);
+  }
+
   /**
    * May this credential read this path? Only the vehicle's own stream, for a camera AI that still
    * follows it, held by the gateway the pass was given to, while that gateway is connected.
    */
   private mayRead(token: string, path: string): boolean {
     const [ver, body, sig] = token.split('.');
+    if (ver === 'r2' && body && sig) return this.mayReadAiJob(body, sig, path);
     if (ver !== 'r1' || !body || !sig) return false;
     const [aiId, vehicleId, gatewayId, expStr] = Buffer.from(body, 'base64url').toString().split('|');
     if (!(Number(expStr) > this.now())) return false;
@@ -1794,6 +1828,8 @@ export class Platform {
         const host = ai?.follows ? this.devices.get(ai.follows) : undefined;
         if (ai && host && host.orgId === orgId) reads.push({ deviceId: ai.id, follows: host.id, read: this.readUrl(orgId, ai.id, host.id, gatewayId) });
       }
+    // A vehicle that now pushes video may be waiting for an AI box.
+    if (accepted.length) this.assignAi(orgId);
     return { accepted, rejected, media, reads };
   }
 
@@ -1804,6 +1840,173 @@ export class Platform {
       if (holder === gatewayId) this.endDrive(id, sys, 'gateway disconnected');
     }
     this.audit(sys, 'gateway.disconnect', gatewayId);
+  }
+
+  // ---- AI boxes: AI on a device's video, switched on from the console ---------------
+  //
+  // An AI box is a gateway that offers to analyse video (a Jetson next to the server). It needs no
+  // device registration, only its gateway key. Someone switches AI on for a vehicle in the console;
+  // the server hands that vehicle's video to the box with the most room (a read pass for the
+  // vehicle's path on the site media server) and takes it back when AI is switched off or the box
+  // leaves. The box sends detections, live boxes and health under the vehicle's id; they are
+  // accepted from that box only while the job is its own. Jobs live in memory: the switch is stored
+  // on the device, so after a restart the boxes get their jobs again when they reconnect.
+
+  /** A gateway said hello as an AI box. `conn` tells its connections apart (a reconnect may overtake the old close). */
+  aiBoxHello(orgId: string, gatewayId: string, offer: AiBoxOffer, conn: number) {
+    const capacity = Number.isInteger(offer?.capacity) ? Math.min(AI_BOX_MAX_CAPACITY, Math.max(1, offer.capacity)) : 1;
+    const model = typeof offer?.model === 'string' && offer.model ? offer.model.slice(0, 120) : undefined;
+    const boxes = this.aiBoxes.get(orgId) ?? new Map<string, AiBoxOffer & { conn: number }>();
+    this.aiBoxes.set(orgId, boxes);
+    boxes.set(gatewayId, { capacity, model, conn });
+    this.audit(this.systemActor(orgId, 'gateway', gatewayId), 'ai.box_connect', gatewayId, 'ok', `capacity ${capacity}${model ? `, ${model}` : ''}`);
+    // Always tell the box what it has, also when nothing changed (it may have restarted).
+    if (!this.assignAi(orgId).has(gatewayId)) this.gateways.sendAiJobs?.(orgId, gatewayId, this.aiJobsOf(orgId, gatewayId));
+  }
+
+  /** The AI box's connection closed. Its jobs go to other boxes with room, or wait. */
+  aiBoxGone(orgId: string, gatewayId: string, conn: number) {
+    const boxes = this.aiBoxes.get(orgId);
+    if (boxes?.get(gatewayId)?.conn !== conn) return;
+    boxes.delete(gatewayId);
+    this.audit(this.systemActor(orgId, 'gateway', gatewayId), 'ai.box_disconnect', gatewayId);
+    this.assignAi(orgId);
+  }
+
+  /** The AI box doing this device's video, if any (the gateway hub checks it before accepting the box's messages). */
+  aiJobBox(orgId: string, deviceId: string): string | undefined {
+    const j = this.aiJobs.get(deviceId);
+    return j && j.orgId === orgId ? j.box : undefined;
+  }
+
+  /** AI boxes connected now (for the console's switch and for people checking the setup). */
+  listAiBoxes(a: Actor) {
+    this.require(a, 'media.view', 'ai-boxes', { mutating: false });
+    const boxes = this.aiBoxes.get(a.orgId) ?? new Map();
+    return [...boxes].map(([gatewayId, b]) => ({
+      gatewayId,
+      capacity: b.capacity,
+      model: b.model,
+      jobs: [...this.aiJobs].filter(([, j]) => j.orgId === a.orgId && j.box === gatewayId).map(([id]) => id),
+    }));
+  }
+
+  /** Switch AI on or off for a device's video. */
+  setAi(a: Actor, deviceId: string, on: unknown): Device {
+    this.require(a, 'camera.control', deviceId);
+    if (typeof on !== 'boolean') return fail(400, 'invalid', 'Say { "on": true } or { "on": false }.');
+    const d = this.getDevice(a, deviceId);
+    if (on && !this.aiVideo(d))
+      fail(
+        409,
+        'conflict',
+        this.pushEnabled
+          ? `${d.id} sends no video to the site media server, so there is nothing for the AI to read. Check that its gateway pushes video.`
+          : 'This server has no media server for vehicle video (MEDIA_INGEST_URL / MEDIA_PUBLIC_URL), so the AI cannot read any.',
+      );
+    if (!!d.ai?.on === on) return this.publicDevice(d);
+    d.ai = { on, by: a.name, at: this.now() };
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, on ? 'ai.on' : 'ai.off', d.id);
+    });
+    this.assignAi(d.orgId);
+    return this.publicDevice(this.devices.get(d.id)!);
+  }
+
+  /** Does this device have video on the site media server that an AI box can read? */
+  private aiVideo(d: Device) {
+    if (!this.pushEnabled) return false;
+    const whep = `${this.cfg.mediaPublicUrl}/${pushPath(d.id)}/whep`;
+    return d.stream?.whep === whep || !!d.components?.some((c) => c.stream?.whep === whep);
+  }
+
+  private aiJobsOf(orgId: string, box: string): AiJob[] {
+    return [...this.aiJobs].filter(([, j]) => j.orgId === orgId && j.box === box).map(([deviceId, j]) => ({ deviceId, read: j.read }));
+  }
+
+  /**
+   * Match the devices with AI switched on to the AI boxes connected now. A job stays with its box
+   * while both last; new ones go to the box with the most room, in the order they were switched on.
+   * Boxes whose list changed get the new list (returned); each device's `ai.state` says how it went.
+   */
+  private assignAi(orgId: string): Set<string> {
+    const boxes = this.aiBoxes.get(orgId) ?? new Map<string, AiBoxOffer & { conn: number }>();
+    const load = new Map([...boxes.keys()].map((b) => [b, 0]));
+    const changed = new Set<string>();
+    const sys = this.systemActor(orgId, 'system', 'AI');
+    // Jobs that should end: switched off, video gone, or their box left.
+    for (const [id, j] of [...this.aiJobs]) {
+      if (j.orgId !== orgId) continue;
+      const d = this.devices.get(id);
+      if (d?.ai?.on && boxes.has(j.box) && this.aiVideo(d)) {
+        load.set(j.box, (load.get(j.box) ?? 0) + 1);
+        continue;
+      }
+      this.aiJobs.delete(id);
+      changed.add(j.box);
+      if (!d) continue;
+      this.clearAiHealth(d);
+      // Clear the boxes on screen now rather than when they go stale.
+      this.publish({ orgId, siteId: d.siteId, event: { type: 'tracks', deviceId: id, at: this.now(), boxes: [] } });
+    }
+    const wanted = [...this.devices.values()].filter((d) => d.orgId === orgId && d.ai?.on).sort((x, y) => (x.ai?.at ?? 0) - (y.ai?.at ?? 0));
+    for (const d of wanted) {
+      let state: NonNullable<DeviceAi['state']>;
+      let box = this.aiJobs.get(d.id)?.box;
+      if (box) state = 'assigned';
+      else if (!this.aiVideo(d)) state = 'no_video';
+      else {
+        const room = [...boxes].filter(([b, o]) => (load.get(b) ?? 0) < o.capacity).sort(([b1, o1], [b2, o2]) => (load.get(b1) ?? 0) / o1.capacity - (load.get(b2) ?? 0) / o2.capacity || b1.localeCompare(b2));
+        box = room[0]?.[0];
+        if (box) {
+          load.set(box, (load.get(box) ?? 0) + 1);
+          this.aiJobs.set(d.id, { orgId, box, read: this.aiReadUrl(orgId, d.id, box), issued: this.now() });
+          changed.add(box);
+          this.audit(sys, 'ai.assign', d.id, 'ok', `AI box ${box}`);
+          state = 'assigned';
+        } else state = boxes.size ? 'full' : 'no_box';
+      }
+      if (d.ai?.state !== state || d.ai?.box !== box) {
+        d.ai = { ...d.ai!, state, ...(box ? { box } : {}) };
+        if (!box) delete d.ai.box;
+        this.saveDevice(d);
+      }
+    }
+    for (const b of changed) if (boxes.has(b)) this.gateways.sendAiJobs?.(orgId, b, this.aiJobsOf(orgId, b));
+    return changed;
+  }
+
+  /** Read passes last a week: give boxes that stay connected for days a new one a day early. */
+  private renewAiPasses() {
+    const renew = new Map<string, Set<string>>();
+    for (const [id, j] of this.aiJobs) {
+      if (this.now() - j.issued < MEDIA_PUBLISH_TTL_MS - 24 * 3600_000) continue;
+      j.read = this.aiReadUrl(j.orgId, id, j.box);
+      j.issued = this.now();
+      (renew.get(j.orgId) ?? renew.set(j.orgId, new Set()).get(j.orgId)!).add(j.box);
+    }
+    for (const [orgId, boxes] of renew) for (const b of boxes) this.gateways.sendAiJobs?.(orgId, b, this.aiJobsOf(orgId, b));
+  }
+
+  /** Health an AI box reported on a device is dropped when the job ends. */
+  private clearAiHealth(d: Device & { orgId: string; siteId: string }) {
+    if (!d.analytics?.provider?.startsWith('ai-box')) return;
+    delete d.analytics;
+    this.saveDevice(d);
+  }
+
+  /**
+   * A detection or health report from an AI box about a device it has the job for. Anything else
+   * an AI box sends about other devices (telemetry, route events, commands) is not accepted.
+   */
+  aiBoxEvent(orgId: string, box: string, e: GwDeviceEvent) {
+    if (this.aiJobBox(orgId, e.deviceId) !== box) return;
+    if (e.kind === 'detection' && e.detection) {
+      this.deviceEvent(orgId, { ...e, detection: { ...e.detection, source: `${e.deviceId} AI · ${box}` } });
+    } else if (e.kind === 'analytics' && e.analytics && typeof e.analytics === 'object') {
+      this.deviceEvent(orgId, { ...e, analytics: { ...e.analytics, provider: `ai-box ${box}` } });
+    }
   }
 
   // ---- live driving from the console --------------------------------------------------
@@ -2832,8 +3035,8 @@ export class Platform {
     if (req.action === 'publish') return this.pushEnabled && this.mayPublish(String(req.password || q.get('token') || ''), String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
     if (req.action !== 'read' && req.action !== 'playback') return false;
     const token = q.get('token') || req.token || req.password || '';
-    // A camera AI reading the vehicle it follows (RTSP basic auth: read / token).
-    if (token.startsWith('r1.')) return req.action === 'read' && this.mayRead(token, String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
+    // A camera AI reading the vehicle it follows, or an AI box reading a job's video (RTSP basic auth: read / token).
+    if (token.startsWith('r1.') || token.startsWith('r2.')) return req.action === 'read' && this.mayRead(token, String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
     const [b64, sig] = token.split('.');
     if (!b64 || !sig) return false;
     const body = Buffer.from(b64, 'base64url').toString();

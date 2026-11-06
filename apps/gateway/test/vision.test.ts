@@ -493,7 +493,9 @@ describe('sources', () => {
     srv.close();
     expect(got.length).toBeGreaterThanOrEqual(3);
     expect(got[0]).toBe(jpeg.length);
-    expect(hits).toBe(got.length);
+    // Every frame came from an authorised request; one request may still have been on its way when it stopped.
+    expect(hits - got.length).toBeGreaterThanOrEqual(0);
+    expect(hits - got.length).toBeLessThanOrEqual(1);
   });
 
   it('samples frames from anything ffmpeg can open (skipped when ffmpeg is not installed)', async () => {

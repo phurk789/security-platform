@@ -1,0 +1,17 @@
+[Unit]
+Description=13STORE edge gateway: camera AI UGV-01-AI (follows UGV-01)
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Environment=GATEWAY_CONFIG=%h/13store/edge/site.json
+Environment=GATEWAY_DATA_DIR=%h/13store/edge/data
+Environment=FFMPEG_PATH=/usr/bin/ffmpeg
+# GATEWAY_KEY lives here (mode 600), never in site.json.
+EnvironmentFile=%h/13store/edge/gateway.env
+ExecStart=%h/13store/node/current/bin/node %h/13store/edge/edge-gateway.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -12,6 +12,10 @@ const RULES: Rule[] = [
   // Messages that wrap another message come first, so the inner one is not matched as a whole.
   [/^Patrol "(.+?)" skipped: (.+)$/, (m, inner) => `ข้ามรอบลาดตระเวน "${m[1]}": ${inner(m[2])}`],
   [/^(.+) is on another mission\.$/, (m) => `${m[1]} ติดภารกิจอื่นอยู่`],
+  [
+    /^(.+) sends no video to the site media server, so there is nothing for the AI to read\. Check that its gateway pushes video\.$/,
+    (m) => `${m[1]} ไม่ได้ส่งภาพขึ้นเซิร์ฟเวอร์วิดีโอ AI จึงไม่มีภาพให้วิเคราะห์ ตรวจว่า gateway ของมันส่งภาพอยู่`,
+  ],
   [/^(.+) is not ready\.$/, (m) => `${m[1]} ยังไม่พร้อม`],
   [
     /^(.+) is in (\w+) mode\. A supervisor must promote it to LIVE_MANUAL before (\w+)\. Stop and pause still work\.$/,

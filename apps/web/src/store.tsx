@@ -44,6 +44,8 @@ export interface Session {
   recordService(deviceId: string, note: string): Promise<unknown>;
   /** Administrator: move an offline device to another site (its gateway is paired again there). True when moved. */
   moveDevice(deviceId: string, siteId: string): Promise<boolean>;
+  /** Switch AI on or off for a device's video (an AI box analyses it). False when refused (the reason is shown as a toast). */
+  setAi(deviceId: string, on: boolean): Promise<boolean>;
   /** Live driving: open a drive session (also takes control). False when refused (the reason is shown as a toast). */
   startDriving(deviceId: string): Promise<boolean>;
   /** End this console's drive session; the vehicle stops and the remote gets its sticks back. */

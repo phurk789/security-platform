@@ -52,7 +52,7 @@ export function analyticsOf(p: VisionPipeline, now: number): DeviceAnalytics {
  * Runs a pipeline for an adapter: detections and health go out through its context.
  * Returns a handle to stop it. `source` overrides the configured frame source.
  */
-export function attachVision(ctx: AdapterContext, cfg: VisionConfig, opts: { source?: FrameSource; healthMs?: number; label?: string } = {}) {
+export function attachVision(ctx: Pick<AdapterContext, 'now' | 'log' | 'event' | 'tracks'>, cfg: VisionConfig, opts: { source?: FrameSource; healthMs?: number; label?: string } = {}) {
   const log = (m: string) => ctx.log.info(`${opts.label ?? 'vision'}: ${m}`);
   let pipeline: VisionPipeline;
   try {

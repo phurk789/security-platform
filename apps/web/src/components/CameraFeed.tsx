@@ -11,6 +11,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Film } from 'lucide-react';
 import { DetectionOverlay } from './DetectionOverlay';
+import { AiBoxes } from './AiBoxes';
+import { aiSources } from '../domain/deviceAi';
 import { RecordedFeed } from './RecordedFeed';
 import { LocalCameraFeed } from './LocalCameraFeed';
 import { localCameraAvailable, setFeedSource, setWebcamDevice, useFeedPrefs, useSampleClip } from '../media/feeds';
@@ -62,6 +64,8 @@ export function CameraFeed({
   const frozen = freshness !== 'live';
   const id = deviceId ?? label.match(/^[A-Z]{2,5}(?:-[A-Z0-9]+)+/)?.[0];
   const dev = id ? s.devices[id] : undefined;
+  // Live AI boxes on this camera: an AI box analysing it, or a camera AI that follows it.
+  const aiIds = aiSources(dev, s.devices);
   // Real camera with a stream on the site media server: play it over WebRTC. Not in replay.
   const liveStream = !compact && !replay && !!session && !!dev && dev.integration !== 'simulated' && !!dev.stream?.whep;
   // Picture source when the device is not streaming for real: 3D twin, a recorded clip, or this computer's camera.
@@ -142,6 +146,7 @@ export function CameraFeed({
         </svg>
       )}
       {!replay && <DetectionOverlay deviceId={id} />}
+      {!replay && aiIds.length > 0 && <AiBoxes deviceIds={aiIds} />}
       {!compact && g && !frozen && (
         <>
           <div className="feed-reticle" />

@@ -1,0 +1,20 @@
+{
+  "gatewayId": "jetson-ai-01",
+  "serverUrl": "ws://192.168.1.10:8090",
+  "geo": { "originLat": 13.4367374, "originLon": 101.0275798, "rotationDeg": -28.5 },
+  "devices": [],
+  "aiBox": {
+    "capacity": 2,
+    "model": "YOLOv8s · TensorRT FP16 · Jetson Orin NX",
+    "fps": 8,
+    "width": 960,
+    "healthMs": 5000,
+    "vision": {
+      "detectors": { "http": { "url": "http://127.0.0.1:8601/detect", "timeoutMs": 1000 } },
+      "zones": [{ "id": "show", "name": "Show area", "kind": "protected", "poly": [[0, 0], [1, 0], [1, 1], [0, 1]] }],
+      "minConfidence": 0.5,
+      "minFrames": 2,
+      "cooldownS": 60
+    }
+  }
+}

@@ -1619,6 +1619,19 @@ export const TH: Record<string, string> = {
   'AI is watching': 'AI เฝ้าดูอยู่',
   'AI gets no pictures': 'AI ไม่ได้รับภาพ',
   'AI model not answering': 'โมเดล AI ไม่ตอบ',
+  // The AI switch on camera views (an AI box analyses the video).
+  'AI on': 'AI เปิด',
+  'AI off': 'AI ปิด',
+  'Switch AI on for {id}': 'เปิด AI วิเคราะห์ภาพของ {id}',
+  'Switch AI off for {id}': 'ปิด AI ของ {id}',
+  'Last switched by {name}': 'กดล่าสุดโดย {name}',
+  'Your role cannot switch the AI.': 'บทบาทของคุณเปิดปิด AI ไม่ได้',
+  'No AI box connected': 'ไม่มีกล่อง AI ต่ออยู่',
+  'All AI boxes are busy': 'กล่อง AI เต็ม',
+  'No video for the AI': 'ไม่มีภาพให้ AI',
+  'AI box {box}': 'กล่อง AI {box}',
+  'This server has no media server for vehicle video (MEDIA_INGEST_URL / MEDIA_PUBLIC_URL), so the AI cannot read any.':
+    'เซิร์ฟเวอร์นี้ไม่มีเซิร์ฟเวอร์วิดีโอสำหรับภาพจากรถ (MEDIA_INGEST_URL / MEDIA_PUBLIC_URL) AI จึงดึงภาพไม่ได้',
   // Mission planning: the plan list and each plan's map screen.
   Plans: 'แผน',
   Show: 'แสดง',
