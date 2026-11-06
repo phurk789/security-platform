@@ -11,7 +11,20 @@
 //  - On link loss the device must reach a safe state on its own. Nothing received or queued
 //    during the outage may run after the link comes back.
 
-import type { AdapterDeclaration, CameraAction, GwCameraResult, GwCommandUpdate, GwDeviceEvent, GwTelemetry, GwTracks, SrvCommand, SrvDemo, SrvDrive } from '@13store/shared';
+import type {
+  AdapterDeclaration,
+  CameraAction,
+  GwCameraResult,
+  GwCommandUpdate,
+  GwDeviceEvent,
+  GwTelemetry,
+  GwTracks,
+  GwVehicleControlResult,
+  SrvCommand,
+  SrvDemo,
+  SrvDrive,
+  VehicleControlAction,
+} from '@13store/shared';
 import type { CommandLedger } from './ledger';
 import type { PushState } from './videoPush';
 
@@ -61,6 +74,13 @@ export interface AdapterContext {
   cameraResult(r: Omit<GwCameraResult, 't' | 'deviceId'>): void;
   /** Live boxes from a vision pipeline (optional: test contexts may leave it out). */
   tracks?(t: Omit<GwTracks, 't' | 'deviceId'>): void;
+  /** How a vehicle control request ended (arm, disarm, mode, gear). */
+  vehicleControlResult?(r: Omit<GwVehicleControlResult, 't' | 'deviceId'>): void;
+  /**
+   * True while the server has this device: link up and accepted in the last welcome. A vehicle with no hand-held
+   * remote stops being driven when this stays false (the gateway is then its only remote).
+   */
+  serverConnected?(): boolean;
   /**
    * This device's command ledger. Use it (with admitCommand) instead of your own `new CommandLedger()`:
    * the gateway keeps it in `<dataDir>/ledger/<deviceId>.json` so dedupe survives a restart.
@@ -81,6 +101,8 @@ export interface Adapter {
   onDemo(action: SrvDemo['action'], target?: SrvDemo['target']): void;
   /** Camera control, for adapters that declare the 'gimbal' / 'zoom' / 'photo' capabilities. */
   onCamera?(requestId: string, action: CameraAction): void;
+  /** Arm, disarm, mode and gear, for adapters that declare `vehicleControl`. Answer with ctx.vehicleControlResult. */
+  onVehicleControl?(requestId: string, action: VehicleControlAction): void;
   /**
    * Push mode (`stream.push` in the declaration): the gateway pushes `stream.rtsp` to the platform
    * media server and reports how it goes here, e.g. to show it on the device's camera component.

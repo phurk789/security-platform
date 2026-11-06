@@ -12,6 +12,9 @@
 //  • Live driving (`teleop`, UGVs) overrides only the steering and throttle sticks, only while the
 //    pilot has armed the vehicle in a manual mode, and stops when stick samples stop coming. The
 //    arm switch and the mode switch stay on the remote.
+//  • No hand-held remote (`noRemote`, a computer on the vehicle): the gateway is the remote while the
+//    server has the vehicle (virtualRemote.ts). Arming, MANUAL/HOLD and gears then come from the
+//    console; when the gateway stops sending, the flight controller's radio failsafe holds the vehicle.
 import { ComponentTracker } from '../adapters/components';
 import { PassThrough } from 'node:stream';
 import { createLink, describeLink, type LinkConfig, type SerialDeps, type VehicleLink } from './mavlinkLink';
@@ -32,12 +35,14 @@ import {
   type SrvDrive,
   type StreamInfo,
   type TeleopLimits,
+  type VehicleControlAction,
 } from '@13store/shared';
 import { CommandLedger, admitCommand, type Adapter, type AdapterContext } from '../sdk';
 import type { PushState } from '../videoPush';
 import { DriveState } from '../drive';
 import { forceMainStreamH264 } from './siyiCodec';
 import { GCS_RELAY_DEFAULT, GcsRelay } from './gcsRelay';
+import { noRemoteSettings, type NoRemoteConfig, type NoRemoteSettings } from './virtualRemote';
 
 /** Try the camera codec fix at most this often (the camera restart takes several seconds). */
 export const CODEC_FIX_INTERVAL_MS = 10 * 60_000;
@@ -61,6 +66,8 @@ export interface MavlinkVehicleConfig {
   missionAltM?: number;
   /** Allow the platform to arm the vehicle. Default false — arm on the remote. */
   allowRemoteArm?: boolean;
+  /** No hand-held remote: this gateway is the vehicle's remote (ArduPilot Rover only; see virtualRemote.ts). */
+  noRemote?: true | NoRemoteConfig;
   /**
    * ArduPilot: turn the geofence on (MAV_CMD_DO_FENCE_ENABLE) before a route starts, and off again
    * once the vehicle is disarmed. Keep FENCE_ENABLE = 0 on the board: a fence that is on at arming
@@ -169,6 +176,8 @@ export function teleopProblem(t: unknown): string | undefined {
 /** RC overrides go out this often while driving (ArduPilot drops them after RC_OVERRIDE_TIME). */
 const DRIVE_TICK_MS = 100;
 /** RC_CHANNELS_OVERRIDE values: channels 1–8 ignore 65535 and release on 0; 9–18 ignore 0 and release on 65534. */
+/** MAV_CMD_COMPONENT_ARM_DISARM param2: disarm even if the autopilot would refuse (e.g. while moving). */
+const FORCE_DISARM = 21196;
 const rcIgnore = (ch: number) => (ch <= 8 ? 65535 : 0);
 const rcRelease = (ch: number) => (ch <= 8 ? 0 : 65534);
 
@@ -339,6 +348,10 @@ export class MavlinkVehicleAdapter implements Adapter {
   private overriding = false;
   /** Overrides have gone out to an armed vehicle at least once (the part is then known to work). */
   private droveOnce = false;
+  // no hand-held remote: the gateway's own sticks (virtualRemote.ts)
+  private vr?: { cfg: NoRemoteSettings; active: boolean; everActive: boolean; lostSince?: number; gear: number; sticks: { throttle: number; steer: number } };
+  /** The flight controller's last text message (a refused arm says why in one). */
+  private lastText?: { text: string; at: number };
   // camera codec fix
   private codecFixAt = 0;
   private codecFixNote?: string;
@@ -358,6 +371,10 @@ export class MavlinkVehicleAdapter implements Adapter {
       if (problem) throw new Error(`${cfg.deviceId}: ${problem}`);
       this.teleop = { ...TELEOP_DEFAULTS, ...(cfg.teleop === true ? {} : cfg.teleop) };
       this.drive = new DriveState(this.teleop.deadmanMs);
+    }
+    if (cfg.noRemote) {
+      if (cfg.profile !== 'ardupilot-rover') throw new Error(`${cfg.deviceId}: noRemote works with ArduPilot Rover only`);
+      this.vr = { cfg: noRemoteSettings(cfg.noRemote), active: false, everActive: false, gear: 0, sticks: { throttle: 0, steer: 0 } };
     }
     this.comps = new ComponentTracker([
       { id: 'fc', name: cfg.flightController ?? 'Flight controller (MAVLink)', kind: 'flight_controller', status: 'pending', detail: 'Waiting for the first heartbeat' },
@@ -389,6 +406,17 @@ export class MavlinkVehicleAdapter implements Adapter {
               kind: 'other' as const,
               status: 'pending' as const,
               detail: `Not driven from the console yet · steering ch${this.teleop.steerChannel}, throttle ch${this.teleop.throttleChannel}`,
+            },
+          ]
+        : []),
+      ...(this.vr
+        ? [
+            {
+              id: 'remote',
+              name: 'Virtual remote (this gateway)',
+              kind: 'remote' as const,
+              status: 'pending' as const,
+              detail: 'Waiting for the server: the vehicle holds until then',
             },
           ]
         : []),
@@ -427,14 +455,17 @@ export class MavlinkVehicleAdapter implements Adapter {
       indoor: cfg.indoor ? { buildingId: cfg.indoor.buildingId, level: cfg.indoor.level, positioning: 'slam' } : undefined,
       payloads: cfg.payload && PAYLOAD_CATALOG[cfg.payload.module] ? [cfg.payload.module] : undefined,
       teleop: this.teleop ? ({ maxThrottle: this.teleop.maxThrottle, maxSteer: this.teleop.maxSteer, deadmanMs: this.teleop.deadmanMs } satisfies TeleopLimits) : undefined,
+      vehicleControl: { noRemote: !!this.vr, gears: this.vr?.cfg.gears.length ?? 0 },
       commands: ['start', 'pause', 'resume', 'stop'],
       components: this.comps.list(),
       units: { position: 'site-m', altitude: 'm-site-datum', speed: 'm/s', battery: 'percent' },
       rateMs: 1000,
-      limitations: `Flight controller via ${describeLink(cfg.link)}. ${cfg.allowRemoteArm ? 'Remote arming enabled.' : 'Arm on the remote; the platform will not arm.'}${this.teleop ? ` Console driving overrides steering and throttle only, while armed in a manual mode; it stops ${this.teleop.deadmanMs} ms after stick samples stop.` : ''}${this.relayCfg ? ` UniGCS on the remote may run at the same time through the gateway (${this.relayCfg.host}:${this.relayCfg.port}); its commands do not pass the platform's approvals.` : ''}`,
+      limitations: `Flight controller via ${describeLink(cfg.link)}. ${this.vr ? `No hand-held remote: this gateway is the vehicle's remote while the server has it; arming, MANUAL/HOLD${this.vr.cfg.gears.length ? ' and gears' : ''} come from the console.` : cfg.allowRemoteArm ? 'Remote arming enabled.' : 'Arm on the remote; the platform will not arm.'}${this.teleop ? ` Console driving overrides steering and throttle only, while armed in a manual mode; it stops ${this.teleop.deadmanMs} ms after stick samples stop.` : ''}${this.relayCfg ? ` UniGCS on the remote may run at the same time through the gateway (${this.relayCfg.host}:${this.relayCfg.port}); its commands do not pass the platform's approvals.` : ''}`,
       linkLossBehavior: uav
         ? 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE / NAV_DLL_ACT): RTL or loiter as configured on the vehicle.'
-        : 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE, FS_ACTION=Hold): stop in place as configured on the vehicle.',
+        : this.vr
+          ? `The gateway stops being the remote ${this.vr.cfg.serverLossMs / 1000} s after the server link is lost (or at once if the gateway or its computer stops); the flight controller's radio failsafe then holds the vehicle (FS_THR_ENABLE, FS_ACTION=Hold), in AUTO too.`
+          : 'Flight controller GCS failsafe (e.g. FS_GCS_ENABLE, FS_ACTION=Hold): stop in place as configured on the vehicle.',
     };
   }
 
@@ -475,7 +506,9 @@ export class MavlinkVehicleAdapter implements Adapter {
       setInterval(() => this.sendGcsHeartbeat(), 1000),
       setInterval(() => this.tick(), 250),
     );
-    if (this.teleop) this.timers.push(setInterval(() => this.driveTick(), DRIVE_TICK_MS));
+    // No hand-held remote: one 10 Hz loop holds the sticks and runs console driving. Otherwise only driving needs one.
+    if (this.vr) this.timers.push(setInterval(() => this.vrTick(), DRIVE_TICK_MS));
+    else if (this.teleop) this.timers.push(setInterval(() => this.driveTick(), DRIVE_TICK_MS));
     this.sendGcsHeartbeat();
   }
 
@@ -559,8 +592,8 @@ export class MavlinkVehicleAdapter implements Adapter {
   private driveBlocked(now: number): string | undefined {
     if (!this.lastHeartbeat || now - this.lastHeartbeat > LINK_STALE_MS) return 'No heartbeat from the flight controller';
     const M = MODES[this.cfg.profile];
-    if (!M.manual.includes(this.mode)) return `The vehicle is in ${M.name(this.mode)}: switch it to MANUAL on the remote`;
-    if (!this.armed) return 'The vehicle is disarmed: the pilot arms it on the remote';
+    if (!M.manual.includes(this.mode)) return `The vehicle is in ${M.name(this.mode)}: switch it to MANUAL ${this.vr ? 'from the console' : 'on the remote'}`;
+    if (!this.armed) return this.vr ? 'The vehicle is disarmed: a supervisor arms it from the console' : 'The vehicle is disarmed: the pilot arms it on the remote';
     return undefined;
   }
 
@@ -602,11 +635,17 @@ export class MavlinkVehicleAdapter implements Adapter {
       this.ctx.log.info(`${this.cfg.deviceId}: console driving ended (${why})`);
       this.setPositionRate(1_000_000);
     }
-    this.comps.set('drive', { status: this.droveOnce ? 'ok' : 'pending', detail: `Idle, the remote has the sticks (${why})` });
+    this.comps.set('drive', { status: this.droveOnce ? 'ok' : 'pending', detail: `Idle, ${this.vr ? 'sticks centred by the virtual remote' : 'the remote has the sticks'} (${why})` });
   }
 
   /** Throttle and steering in −1…1 of the capped range → RC override on those two channels. */
   private sendSticks(throttle: number, steer: number) {
+    if (this.vr) {
+      // The virtual remote sends them with the gear channel on its next tick (at most 100 ms later).
+      this.vr.sticks = { throttle, steer };
+      this.overriding = true;
+      return;
+    }
     const t = this.teleop!;
     const pwm = (v: number, cap: number, reverse: boolean) => Math.round(t.center + (reverse ? -v : v) * cap * t.travel);
     this.sendOverride({ [t.steerChannel]: pwm(steer, t.maxSteer, t.reverseSteer), [t.throttleChannel]: pwm(throttle, t.maxThrottle, t.reverseThrottle) });
@@ -615,6 +654,12 @@ export class MavlinkVehicleAdapter implements Adapter {
 
   /** Hand the two channels back to the remote. Sent twice (UDP); ArduPilot also drops overrides after RC_OVERRIDE_TIME. */
   private releaseSticks() {
+    if (this.vr) {
+      // There is no remote to hand them back to: centre them.
+      this.vr.sticks = { throttle: 0, steer: 0 };
+      this.overriding = false;
+      return;
+    }
     const t = this.teleop!;
     const msg = { [t.steerChannel]: rcRelease(t.steerChannel), [t.throttleChannel]: rcRelease(t.throttleChannel) };
     this.sendOverride(msg);
@@ -871,7 +916,9 @@ export class MavlinkVehicleAdapter implements Adapter {
       }
       case MSG.STATUSTEXT: {
         const sev = data.severity as number;
-        if (sev <= 3) this.ctx.event({ kind: 'fault', detail: String(data.text).replace(/\0/g, '') });
+        const text = String(data.text).replace(/\0/g, '');
+        this.lastText = { text, at: this.ctx.now() };
+        if (sev <= 3) this.ctx.event({ kind: 'fault', detail: text });
         break;
       }
     }
@@ -1150,6 +1197,115 @@ export class MavlinkVehicleAdapter implements Adapter {
     return px
       ? this.command(CMD.DO_SET_MODE, [MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, (mode >> 16) & 0xff, (mode >> 24) & 0xff])
       : this.command(CMD.DO_SET_MODE, [MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, mode]);
+  }
+
+  // ---- no hand-held remote (virtualRemote.ts) ------------------------------------------
+
+  /** Every 100 ms: be the remote while the server has the vehicle, stop when it has been gone for serverLossMs. */
+  private vrTick() {
+    const v = this.vr!;
+    const now = this.ctx.now();
+    if (this.ctx.serverConnected?.() ?? true) {
+      v.lostSince = undefined;
+      if (!v.active) {
+        v.active = v.everActive = true;
+        this.ctx.log.info(`${this.cfg.deviceId}: virtual remote on`);
+      }
+    } else {
+      v.lostSince ??= now;
+      if (v.active && now - v.lostSince >= v.cfg.serverLossMs) {
+        v.active = false;
+        if (this.drive.active) this.endDrive('server link lost');
+        this.ctx.log.warn(
+          `${this.cfg.deviceId}: server link lost for ${v.cfg.serverLossMs / 1000} s: virtual remote off, the flight controller's radio failsafe holds the vehicle`,
+        );
+      }
+    }
+    if (this.drive.active) this.driveTick();
+    this.vrSend();
+    const gear = v.cfg.gears.length ? ` · gear ${v.gear + 1} of ${v.cfg.gears.length}` : '';
+    this.comps.set(
+      'remote',
+      v.active
+        ? { status: 'ok', detail: `Holding the sticks${gear} · the vehicle holds ${v.cfg.serverLossMs / 1000} s after the server link is lost` }
+        : v.everActive
+          ? { status: 'warn', detail: 'Off: the server link was lost. The flight controller holds the vehicle (radio failsafe) until the server is back.' }
+          : { status: 'pending', detail: 'Waiting for the server: the vehicle holds until then' },
+    );
+  }
+
+  /** Sticks (centred, or the console driver's) and the gear, as one RC override. Nothing else is touched. */
+  private vrSend() {
+    const v = this.vr;
+    if (!v?.active || !this.sys) return;
+    const t = this.teleop ?? TELEOP_DEFAULTS;
+    const pwm = (x: number, cap: number, reverse: boolean) => Math.round(t.center + (reverse ? -x : x) * cap * t.travel);
+    const values: Record<number, number> = {
+      [t.steerChannel]: pwm(v.sticks.steer, t.maxSteer, t.reverseSteer),
+      [t.throttleChannel]: pwm(v.sticks.throttle, t.maxThrottle, t.reverseThrottle),
+    };
+    if (v.cfg.gearChannel !== undefined) values[v.cfg.gearChannel] = v.cfg.gears[v.gear];
+    this.sendOverride(values);
+  }
+
+  /**
+   * Arm, disarm, MANUAL/HOLD and gear from the console. Disarm and HOLD work on every vehicle (they only make it
+   * safer); arm, MANUAL and gear only without a hand-held remote, where the pilot's switches do not exist.
+   */
+  onVehicleControl(requestId: string, a: VehicleControlAction) {
+    const reply = (ok: boolean, detail: string) => this.ctx.vehicleControlResult?.({ requestId, ok, detail });
+    const now = this.ctx.now();
+    if (!this.lastHeartbeat || now - this.lastHeartbeat > LINK_STALE_MS) return reply(false, 'No heartbeat from the flight controller. Not sent.');
+    const M = MODES[this.cfg.profile];
+    const v = this.vr;
+    const onRemote = 'This vehicle has a hand-held remote: that is done on the remote.';
+    void (async () => {
+      switch (a.kind) {
+        case 'disarm': {
+          if (this.drive.active || this.overriding) this.endDrive('disarm from the console');
+          if (!this.armed) return reply(true, 'Already disarmed.');
+          let r = await this.command(CMD.COMPONENT_ARM_DISARM, [0]);
+          // ArduPilot may refuse a normal disarm while moving; the force code always stops the motors.
+          if (!r.ok) r = await this.command(CMD.COMPONENT_ARM_DISARM, [0, FORCE_DISARM]);
+          return reply(r.ok, r.ok ? 'Disarmed.' : `Disarm refused: ${this.why(r.detail)}`);
+        }
+        case 'arm': {
+          if (!v) return reply(false, onRemote);
+          if (!v.active) return reply(false, 'The virtual remote is off (no server link). Not armed.');
+          if (this.armed) return reply(true, 'Already armed.');
+          if (!M.manual.includes(this.mode) && !M.hold.includes(this.mode))
+            return reply(false, `The vehicle is in ${M.name(this.mode)}. Switch it to HOLD or MANUAL first.`);
+          v.gear = 0;
+          const r = await this.command(CMD.COMPONENT_ARM_DISARM, [1]);
+          return reply(r.ok, r.ok ? `Armed in ${M.name(this.mode)}${v.cfg.gears.length ? ' · gear 1' : ''}.` : `Arming refused: ${this.why(r.detail)}`);
+        }
+        case 'mode': {
+          if (a.mode === 'manual' && !v) return reply(false, onRemote);
+          if (a.mode !== 'manual' && a.mode !== 'hold') return reply(false, 'Unknown mode.');
+          if (a.mode === 'hold' && (this.drive.active || this.overriding)) this.endDrive('HOLD from the console');
+          const want = a.mode === 'manual' ? M.manual[0] : M.hold[0];
+          if (this.mode === want) return reply(true, `Already in ${M.name(want)}.`);
+          const r = await this.setMode(want);
+          return reply(r.ok, r.ok ? `Mode ${M.name(want)}.` : `${M.name(want)} refused: ${this.why(r.detail)}`);
+        }
+        case 'gear': {
+          if (!v) return reply(false, onRemote);
+          if (!v.cfg.gears.length) return reply(false, 'This vehicle has no gears.');
+          if (!Number.isInteger(a.gear) || a.gear < 1 || a.gear > v.cfg.gears.length) return reply(false, `Gear must be 1–${v.cfg.gears.length}.`);
+          v.gear = a.gear - 1;
+          this.vrSend();
+          return reply(true, `Gear ${a.gear} of ${v.cfg.gears.length}.`);
+        }
+        default:
+          return reply(false, 'Unknown vehicle control.');
+      }
+    })();
+  }
+
+  /** A refusal's reason: the flight controller's own text when it just sent one (e.g. "PreArm: ..."). */
+  private why(detail?: string) {
+    const t = this.lastText;
+    return t && this.ctx.now() - t.at < 3000 ? t.text : (detail ?? 'no reason given');
   }
 
   /** 4-in-1 module: searchlight and warning light through the flight controller's relays. */

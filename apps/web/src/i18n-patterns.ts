@@ -117,6 +117,35 @@ const RULES: Rule[] = [
   [/^Not driving\. (.+)\.$/, (m, inner) => `ไม่ได้ขับ: ${inner(m[1])}`],
   [/^no stick input for ([\d.]+) s$/, (m) => `ไม่มีสัญญาณคันบังคับ ${m[1]} วินาที`],
   [/^The vehicle is in (\S+): switch it to MANUAL on the remote$/, (m) => `รถอยู่โหมด ${m[1]} ให้สลับเป็น MANUAL ที่รีโมต`],
+  // No hand-held remote: the gateway is the remote (virtualRemote.ts), and arm/disarm/mode/gear from the console.
+  [/^The vehicle is in (\S+): switch it to MANUAL from the console$/, (m) => `รถอยู่โหมด ${m[1]} ให้เปลี่ยนเป็น MANUAL จากหน้าเว็บ`],
+  [/^Idle, sticks centred by the virtual remote \((.+)\)$/, (m, inner) => `ว่าง รีโมตเสมือนตั้งคันบังคับไว้ตรงกลาง (${inner(m[1])})`],
+  [
+    /^Holding the sticks(?: · gear (\d+) of (\d+))? · the vehicle holds ([\d.]+) s after the server link is lost$/,
+    (m) => `ถือคันบังคับอยู่${m[1] ? ` · เกียร์ ${m[1]} จาก ${m[2]}` : ''} · ถ้าหลุดจากเซิร์ฟเวอร์ รถจะหยุดใน ${m[3]} วินาที`,
+  ],
+  [/^Armed in (\S+)( · gear 1)?\.$/, (m) => `arm แล้ว · โหมด ${m[1]}${m[2] ? ' · เกียร์ 1' : ''}`],
+  [/^Mode (\S+)\.$/, (m) => `เปลี่ยนเป็นโหมด ${m[1]} แล้ว`],
+  [/^Already in (\S+)\.$/, (m) => `อยู่โหมด ${m[1]} อยู่แล้ว`],
+  [/^Gear (\d+) of (\d+)\.$/, (m) => `เกียร์ ${m[1]} จาก ${m[2]}`],
+  [/^Gear must be 1–(\d+)\.$/, (m) => `เกียร์ต้องเป็น 1–${m[1]}`],
+  [/^(MANUAL|HOLD) refused: (.*)$/, (m) => `รถไม่ยอมเข้าโหมด ${m[1]}: ${m[2]}`],
+  [/^Disarm refused: (.*)$/, (m) => `รถไม่ยอม disarm: ${m[1]}`],
+  [/^The vehicle is in (\S+)\. Switch it to HOLD or MANUAL first\.$/, (m) => `รถอยู่โหมด ${m[1]} เปลี่ยนเป็น HOLD หรือ MANUAL ก่อน`],
+  [/^(.+) is in (\w+)\. A supervisor must promote it to LIVE_MANUAL first\.$/, (m) => `${m[1]} อยู่โหมด ${m[2]} หัวหน้าเวรต้องเปลี่ยนเป็น LIVE_MANUAL ก่อน`],
+  [
+    /^(.+) has a hand-held remote: (arming|gears|MANUAL) stays on the remote\.$/,
+    (m) => `${m[1]} มีรีโมตมือถือ ${({ arming: 'การ arm', gears: 'การเปลี่ยนเกียร์', MANUAL: 'โหมด MANUAL' } as Record<string, string>)[m[2]]} ยังทำที่รีโมต`,
+  ],
+  [/^(.+) gateway is not connected\. Not sent\.$/, (m) => `gateway ของ ${m[1]} ไม่ได้เชื่อมต่อ จึงไม่ได้ส่ง`],
+  [
+    /^(.+) telemetry is (\w+)\. Only a vehicle reporting live data can be armed or switched\.$/,
+    (m) => `ข้อมูลของ ${m[1]} เป็น ${m[2]} สั่ง arm หรือเปลี่ยนโหมดได้เฉพาะรถที่ส่งข้อมูลสดอยู่`,
+  ],
+  [/^(.+) has gears 1–(\d+)\.$/, (m) => `${m[1]} มีเกียร์ 1–${m[2]}`],
+  [/^(.+) has no gears\.$/, (m) => `${m[1]} ไม่มีเกียร์`],
+  [/^(.+) is running mission (.+)\. Pause or stop it before switching to MANUAL\.$/, (m) => `${m[1]} กำลังทำภารกิจ ${m[2]} พักหรือหยุดก่อนเปลี่ยนเป็น MANUAL`],
+  [/^Control of (.+) is held by (.+)\.$/, (m) => `${m[2]} ถือสิทธิ์ควบคุม ${m[1]} อยู่`],
 ];
 
 /** Thai for a message with names or numbers in it, or undefined when no rule matches. */

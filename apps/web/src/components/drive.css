@@ -61,3 +61,15 @@
 .drive-mode { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .drive-mode input { width: 100%; }
 .drive .fine { margin: 8px 0 0; }
+
+/* Arm, disarm, MANUAL/HOLD and gear (VehicleControls.tsx). */
+.vc-state { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
+.vc-state b { font-size: 0.95rem; letter-spacing: 0.06em; }
+.vc-state .vc-armed { color: var(--red); }
+.vc-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 6px; margin: 8px 0; }
+.vc-row button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.vc-gears { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
+.vc-gears small { font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin-right: 4px; }
+.vc-gears button { min-width: 40px; }
+.vc-gears button.on { border-color: var(--cyan); color: var(--cyan); }
+.vc-arm { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }

@@ -51,6 +51,10 @@ export type Action =
   | 'mission.approve'
   | 'mission.accept'
   | 'device.command'
+  /** Arm a vehicle that has no hand-held remote (supervisor, with step-up and a "the area is clear" check). */
+  | 'device.arm'
+  /** Disarm or HOLD a vehicle from the console: always allowed to everyone who works with vehicles. */
+  | 'device.disarm'
   | 'control.handover'
   | 'media.view'
   | 'camera.control'
@@ -92,6 +96,7 @@ const DISPATCH: Action[] = [
   'media.view',
   'camera.control',
   'payload.control',
+  'device.disarm',
   'evidence.view',
   'evidence.add',
   'report.view',
@@ -99,7 +104,7 @@ const DISPATCH: Action[] = [
 ];
 
 /** Operators accept missions and command the vehicle they hold. */
-const OPERATE: Action[] = ['mission.accept', 'device.command', 'media.view', 'camera.control', 'payload.control', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'];
+const OPERATE: Action[] = ['mission.accept', 'device.command', 'device.disarm', 'media.view', 'camera.control', 'payload.control', 'evidence.view', 'evidence.add', 'report.view', 'demo.control'];
 
 const uniq = (...lists: Action[][]): Action[] => [...new Set(lists.flat())];
 
@@ -113,6 +118,7 @@ const SUPERVISE: Action[] = uniq(DISPATCH, OPERATE, [
   'patrol.manage',
   'device.mode.promote',
   'device.mode.demote',
+  'device.arm',
 ]);
 
 /**
@@ -153,6 +159,7 @@ export const STEP_UP_ACTIONS: Action[] = [
   'patrol.manage',
   'site.manage',
   'device.mode.promote',
+  'device.arm',
   'admin.edge_origins',
 ];
 

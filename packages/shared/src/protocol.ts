@@ -20,6 +20,7 @@ import type {
   TimelineEvent,
   User,
   DeviceStats,
+  VehicleControlInfo,
 } from './types';
 import type { GeoAnchor } from './geo';
 import type { RoutePoint } from './route';
@@ -70,7 +71,10 @@ export interface AdapterDeclaration {
   components?: DeviceComponent[];
   /** The device can be driven live from the console (ground vehicles); limits applied by the adapter. */
   teleop?: TeleopLimits;
+  /** Arm, disarm, mode and gear from the console (MAVLink vehicles; see SrvVehicleControl). */
+  vehicleControl?: VehicleControlInfo;
 }
+
 
 /** Live driving from the console: the adapter's own caps (fractions of full stick, 0–1). */
 export interface TeleopLimits {
@@ -336,7 +340,16 @@ export interface GwTracks {
 /** Most boxes one tracks message may carry. */
 export const VISION_MAX_BOXES = 30;
 
-export type GatewayToServer = GwHello | GwTelemetry | GwCommandUpdate | GwDeviceEvent | GwCameraResult | GwTracks;
+/** Gateway → server: how a vehicle control request ended. `ok` only when the vehicle accepted it. */
+export interface GwVehicleControlResult {
+  t: 'vehicle_control_result';
+  requestId: string;
+  deviceId: string;
+  ok: boolean;
+  detail?: string;
+}
+
+export type GatewayToServer = GwHello | GwTelemetry | GwCommandUpdate | GwDeviceEvent | GwCameraResult | GwTracks | GwVehicleControlResult;
 
 // ---------------------------------------------------------------------------
 // Server → gateway
@@ -433,7 +446,17 @@ export interface AiJob {
 /** Most videos one AI box may take on, whatever it offers. */
 export const AI_BOX_MAX_CAPACITY = 16;
 
-export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera | SrvDrive | SrvAiJobs;
+/** Arm, disarm, MANUAL/HOLD and gear for one vehicle (see VehicleControlInfo for what each vehicle allows). */
+export type VehicleControlAction = { kind: 'arm' } | { kind: 'disarm' } | { kind: 'mode'; mode: 'manual' | 'hold' } | { kind: 'gear'; gear: number };
+
+export interface SrvVehicleControl {
+  t: 'vehicle_control';
+  requestId: string;
+  deviceId: string;
+  action: VehicleControlAction;
+}
+
+export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera | SrvDrive | SrvAiJobs | SrvVehicleControl;
 
 // ---------------------------------------------------------------------------
 // Client API
@@ -597,6 +620,9 @@ export type ConsoleEvent =
       stats?: DeviceStats;
       /** The device reports no position fix: `pos` is the last known one (or the registered default). */
       noFix?: boolean;
+      /** MAVLink vehicles: armed, and the autopilot's mode (e.g. HOLD), as last reported. */
+      armed?: boolean;
+      flightMode?: string;
       /** Equipment status, sent when it changed (flight mode, GNSS fix, camera push…). */
       components?: DeviceComponent[];
     }

@@ -76,6 +76,9 @@ import {
   type SrvCommand,
   type SrvDemo,
   type SrvCamera,
+  type SrvVehicleControl,
+  type VehicleControlAction,
+  type GwVehicleControlResult,
   type SrvDrive,
   type GwCameraResult,
   sanitizeCameraAction,
@@ -200,7 +203,7 @@ export interface BusMessage {
 
 /** Transport to edge gateways, implemented by the gateway hub. */
 export interface GatewayLink {
-  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera | SrvDrive): boolean;
+  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera | SrvDrive | SrvVehicleControl): boolean;
   /** Gateways connected right now and the devices each holds. */
   connected?(orgId: string): { gatewayId: string; devices: string[] }[];
   /** Hand an AI box its full list of jobs (replaces the previous one). False when it is not connected. */
@@ -222,6 +225,28 @@ export function sanitizeTeleop(raw: unknown): Device['teleop'] {
   const maxSteer = frac(t.maxSteer);
   const deadmanMs = typeof t.deadmanMs === 'number' && t.deadmanMs >= 100 && t.deadmanMs <= 3000 ? t.deadmanMs : undefined;
   return maxThrottle && maxSteer && deadmanMs ? { maxThrottle, maxSteer, deadmanMs } : undefined;
+}
+
+/** A gateway's declared console controls (arm, disarm, mode, gear), kept only when they make sense. */
+export function sanitizeVehicleControl(raw: unknown): Device['vehicleControl'] {
+  const v = raw as { noRemote?: unknown; gears?: unknown } | undefined;
+  if (!v || typeof v !== 'object' || typeof v.noRemote !== 'boolean') return undefined;
+  const gears = Number.isInteger(v.gears) && (v.gears as number) >= 0 && (v.gears as number) <= 6 ? (v.gears as number) : 0;
+  return { noRemote: v.noRemote, gears: v.noRemote ? gears : 0 };
+}
+
+/** A vehicle control action from the console, or undefined when it is not one. */
+export function sanitizeVehicleAction(raw: unknown): VehicleControlAction | undefined {
+  const a = raw as { kind?: unknown; mode?: unknown; gear?: unknown } | undefined;
+  if (!a || typeof a !== 'object') return undefined;
+  if (a.kind === 'arm' || a.kind === 'disarm') return { kind: a.kind };
+  if (a.kind === 'mode' && (a.mode === 'manual' || a.mode === 'hold')) return { kind: 'mode', mode: a.mode };
+  if (a.kind === 'gear' && Number.isInteger(a.gear) && (a.gear as number) >= 1 && (a.gear as number) <= 6) return { kind: 'gear', gear: a.gear as number };
+  return undefined;
+}
+
+function describeVehicleAction(a: VehicleControlAction) {
+  return a.kind === 'mode' ? `mode ${a.mode.toUpperCase()}` : a.kind === 'gear' ? `gear ${a.gear}` : a.kind;
 }
 
 /** One live box from a gateway, kept only when it makes sense: a known type, a box inside the frame. */
@@ -252,6 +277,14 @@ export function pushPath(deviceId: string) {
 
 /** How long to wait for the gateway to answer a camera request. */
 export const CAMERA_REPLY_TIMEOUT_MS = 3_000;
+/** Arm, disarm, mode and gear: the gateway waits up to 2.5 s for the vehicle, twice for a forced disarm. */
+export const VEHICLE_CONTROL_TIMEOUT_MS = 8_000;
+
+/** Answer to a vehicle control request: `ok` only when the vehicle accepted it. */
+export interface VehicleControlResult {
+  ok: boolean;
+  detail: string;
+}
 /** Auto-aim leaves a camera alone this long after an operator used it. */
 export const MANUAL_CAMERA_HOLD_MS = 60_000;
 /** Media tokens for the site media server (MediaMTX) are valid this long. */
@@ -308,6 +341,7 @@ export class Platform {
   /** When an operator last moved each camera; auto-aim leaves it alone for a while after. */
   private manualCamera = new Map<string, number>();
   private cameraWaits = new Map<string, { orgId: string; deviceId: string; done: (r: CameraResult) => void }>();
+  private vehicleWaits = new Map<string, { orgId: string; deviceId: string; done: (r: VehicleControlResult) => void }>();
   private sweepTimer?: NodeJS.Timeout;
   private purgeTimer?: NodeJS.Timeout;
   private backupTimer?: NodeJS.Timeout;
@@ -1802,6 +1836,7 @@ export class Platform {
         payloads: Array.isArray(decl.payloads) ? decl.payloads.filter((p) => typeof p === 'string' && PAYLOAD_CATALOG[p]) : d.payloads,
         components: comps?.components ?? d.components,
         teleop: d.kind === 'ugv' ? sanitizeTeleop(decl.teleop) : undefined,
+        vehicleControl: d.kind === 'ugv' ? sanitizeVehicleControl(decl.vehicleControl) : undefined,
         follows: typeof decl.follows === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(decl.follows) && decl.follows !== d.id ? decl.follows : undefined,
       });
       d.mode = modeOf(d);
@@ -2306,6 +2341,8 @@ export class Platform {
         gimbal: d.gimbal,
         stats: d.stats,
         noFix: d.noFix,
+        armed: d.armed,
+        flightMode: d.flightMode,
         ...(Array.isArray(t.components) && t.components.length ? { components: d.components } : {}),
       },
     });
@@ -2462,6 +2499,68 @@ export class Platform {
   }
 
   /** Answer from a gateway. Ignored unless it matches an open request from the same org and device. */
+  // ---- arm, disarm, mode and gear from the console ----------------------------------------
+  //
+  // Disarm and HOLD only make a vehicle safer: everyone who works with vehicles may send them, in any mode, to any
+  // vehicle whose gateway offers them. Arm, MANUAL and gear exist only for a vehicle without a hand-held remote
+  // (its gateway is the remote): they need LIVE_MANUAL and live telemetry, MANUAL and gear the control holder or
+  // nobody, and arming a supervisor with a recent password check who confirms the area around the vehicle is clear.
+  // Every request is audited with the vehicle's answer.
+
+  async vehicleControl(a: Actor, deviceId: string, raw: unknown): Promise<VehicleControlResult> {
+    const body = (raw ?? {}) as { action?: unknown; confirmClear?: unknown };
+    const action = sanitizeVehicleAction(body.action);
+    const safe = !action || action.kind === 'disarm' || (action.kind === 'mode' && action.mode === 'hold');
+    this.require(a, action?.kind === 'arm' ? 'device.arm' : safe ? 'device.disarm' : 'device.command', deviceId);
+    if (!action) return fail(400, 'invalid', 'Unknown or malformed vehicle control.');
+    const d = this.getDevice(a, deviceId);
+    const what = describeVehicleAction(action);
+    const deny = (status: number, code: string, why: string): never => {
+      this.audit(a, `vehicle.${action.kind}`, d.id, 'denied', `${what}: ${why}`);
+      return fail(status, code, why);
+    };
+    const vc = d.vehicleControl;
+    if (!vc) return deny(409, 'not_enabled', `${d.id} cannot be armed, disarmed or switched from the console (its gateway does not offer it).`);
+    if (!safe) {
+      if (!vc.noRemote) return deny(409, 'has_remote', `${d.id} has a hand-held remote: ${action.kind === 'arm' ? 'arming' : action.kind === 'gear' ? 'gears' : 'MANUAL'} stays on the remote.`);
+      const mode = modeOf(d);
+      if (mode !== 'LIVE_MANUAL') return deny(409, 'mode_locked', `${d.id} is in ${mode}. A supervisor must promote it to LIVE_MANUAL first.`);
+      const fresh = freshnessAt(this.now(), d);
+      if (fresh !== 'live') return deny(409, 'stale_telemetry', `${d.id} telemetry is ${fresh}. Only a vehicle reporting live data can be armed or switched.`);
+      if (action.kind === 'gear' && action.gear > vc.gears) return deny(400, 'invalid', `${d.id} has ${vc.gears ? `gears 1–${vc.gears}` : 'no gears'}.`);
+      if (action.kind === 'arm' && body.confirmClear !== true) return deny(400, 'confirm_required', 'Confirm that the area around the vehicle is clear of people before arming.');
+      if (action.kind !== 'arm' && d.controlOwner && d.controlOwner !== a.userId)
+        return deny(409, 'not_control_owner', `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}.`);
+      const m = this.activeMission(d.id);
+      if (action.kind === 'mode' && m?.status === 'executing') return deny(409, 'conflict', `${d.id} is running mission ${m.id}. Pause or stop it before switching to MANUAL.`);
+    }
+    const result = await this.sendVehicleControl(d, action);
+    this.audit(a, `vehicle.${action.kind}`, d.id, result.ok ? 'ok' : 'error', `${what} — ${result.detail}`);
+    return result;
+  }
+
+  /** One request to the vehicle through its gateway; resolves with the vehicle's answer or a timeout. */
+  private sendVehicleControl(d: Device & { orgId: string }, action: VehicleControlAction) {
+    const requestId = `veh-${randomUUID()}`;
+    return new Promise<VehicleControlResult>((resolve) => {
+      const timer = setTimeout(() => finish({ ok: false, detail: 'No answer from the gateway. Check the vehicle before you go on.' }), VEHICLE_CONTROL_TIMEOUT_MS);
+      const finish = (r: VehicleControlResult) => {
+        clearTimeout(timer);
+        this.vehicleWaits.delete(requestId);
+        resolve(r);
+      };
+      this.vehicleWaits.set(requestId, { orgId: d.orgId, deviceId: d.id, done: finish });
+      const msg: SrvVehicleControl = { t: 'vehicle_control', requestId, deviceId: d.id, action };
+      if (!this.gateways.send(d.orgId, d.id, msg)) finish({ ok: false, detail: `${d.id} gateway is not connected. Not sent.` });
+    });
+  }
+
+  vehicleControlResult(orgId: string, r: GwVehicleControlResult) {
+    const w = this.vehicleWaits.get(String(r.requestId));
+    if (!w || w.orgId !== orgId || w.deviceId !== r.deviceId) return;
+    w.done({ ok: !!r.ok, detail: String(r.detail ?? (r.ok ? 'Done.' : 'Failed.')).slice(0, 200) });
+  }
+
   cameraResult(orgId: string, r: GwCameraResult) {
     const w = this.cameraWaits.get(String(r.requestId));
     if (!w || w.orgId !== orgId || w.deviceId !== r.deviceId) return;
