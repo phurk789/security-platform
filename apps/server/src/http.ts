@@ -397,6 +397,10 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   // AI on a device's video by an AI box: { "on": true | false }.
   app.post('/api/v1/devices/:id/ai', async (req: Req) => p.setAi(A(req), req.params.id, body(req).on));
   app.get('/api/v1/ai/boxes', async (req: Req) => p.listAiBoxes(A(req)));
+  // Distance to people on a device's video: set the camera geometry, add a calibration point, or clear it.
+  app.put('/api/v1/devices/:id/ranging', async (req: Req) => p.setRanging(A(req), req.params.id, body(req) as any));
+  app.post('/api/v1/devices/:id/ranging/points', async (req: Req) => p.addRangingSample(A(req), req.params.id, body(req) as any));
+  app.delete('/api/v1/devices/:id/ranging', async (req: Req) => p.clearRanging(A(req), req.params.id));
   app.post('/api/v1/media/:id/session', async (req: Req) => p.mediaSession(A(req), req.params.id));
   app.get('/api/v1/media/:id/recordings', async (req: Req) => p.recordings(A(req), req.params.id, num(req.query.from, p.now() - 3600_000)!, num(req.query.to, p.now())!));
   app.post('/api/v1/media/:id/clip', async (req: Req) => p.clipUrl(A(req), req.params.id, Number(body(req).start), Number(body(req).duration ?? 30)));

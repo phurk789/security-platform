@@ -225,7 +225,7 @@ export interface DetectionInput {
   pos?: Point;
   /** Normalised box in the frame: x, y, width, height (0–1). */
   bbox?: [number, number, number, number];
-  attributes?: { temperatureC?: number; plate?: string; count?: number; label?: string };
+  attributes?: { temperatureC?: number; plate?: string; count?: number; label?: string; /** Estimated distance from the camera, metres. */ distanceM?: number };
   /** Frame at the moment of detection; stored as evidence when an incident is raised. */
   snapshot?: { mime: string; base64: string };
   /** The sender's own id for this detection; repeats are answered with the first outcome. */
@@ -314,6 +314,8 @@ export interface VisionBox {
   bbox: [number, number, number, number];
   /** Image zone it is in, by name. */
   zone?: string;
+  /** Estimated distance from the camera, metres (set by the server from the camera's ranging; feet in view). */
+  distM?: number;
 }
 
 /**

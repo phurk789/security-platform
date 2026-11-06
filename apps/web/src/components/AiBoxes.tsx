@@ -36,6 +36,7 @@ export function AiBoxes({ deviceIds }: { deviceIds: string[] }) {
           <div key={b.id !== undefined ? `t${b.id}` : `i${i}`} className={`ai-box k-${b.type}`} style={{ left: r.left, top: r.top, width: r.width, height: r.height }}>
             <span>
               {t(DETECTION_LABEL[b.type])} {Math.round(b.confidence * 100)}%{b.id !== undefined ? ` · #${b.id}` : ''}
+              {b.distM !== undefined ? ` · ${t('≈ {m} m', { m: b.distM })}` : ''}
             </span>
           </div>
         );

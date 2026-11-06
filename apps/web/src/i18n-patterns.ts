@@ -16,6 +16,8 @@ const RULES: Rule[] = [
     /^(.+) sends no video to the site media server, so there is nothing for the AI to read\. Check that its gateway pushes video\.$/,
     (m) => `${m[1]} ไม่ได้ส่งภาพขึ้นเซิร์ฟเวอร์วิดีโอ AI จึงไม่มีภาพให้วิเคราะห์ ตรวจว่า gateway ของมันส่งภาพอยู่`,
   ],
+  [/^No live AI boxes on (.+): switch AI on, then stand in front of the camera\.$/, (m) => `${m[1]} ยังไม่มีกรอบ AI สด เปิด AI ก่อน แล้วยืนหน้ากล้อง`],
+  [/^Calibration needs exactly one person in view of (.+); the AI sees (\d+)\.$/, (m) => `การปรับเทียบต้องมีคนในภาพของ ${m[1]} คนเดียว ตอนนี้ AI เห็น ${m[2]} คน`],
   [/^(.+) is not ready\.$/, (m) => `${m[1]} ยังไม่พร้อม`],
   [
     /^(.+) is in (\w+) mode\. A supervisor must promote it to LIVE_MANUAL before (\w+)\. Stop and pause still work\.$/,

@@ -141,6 +141,7 @@ export function sanitizeDetection(raw: unknown, now: number): DetectionInput & {
       plate: str(attrs.plate, 16),
       count: Number.isInteger(attrs.count) && (attrs.count as number) >= 0 ? (attrs.count as number) : undefined,
       label: str(attrs.label, 60),
+      distanceM: typeof attrs.distanceM === 'number' && attrs.distanceM > 0 && attrs.distanceM <= 1000 ? Math.round(attrs.distanceM * 10) / 10 : undefined,
     },
     snapshot: snapshot ? { mime: snapshot.mime as string, base64: snapshot.base64 as string } : undefined,
     externalId: str(d.externalId, 80),
@@ -174,6 +175,7 @@ export function detectionDetail(d: {
   if (d.attributes?.temperatureC !== undefined) bits.push(`${d.attributes.temperatureC} °C`);
   if (d.attributes?.plate) bits.push(`plate ${d.attributes.plate}`);
   if (d.attributes?.count !== undefined) bits.push(`${d.attributes.count} people`);
+  if (d.attributes?.distanceM !== undefined) bits.push(`about ${d.attributes.distanceM} m away`);
   if (d.bbox) bits.push(`box ${d.bbox.map((n) => Math.round(n * 100)).join('/')}%`);
   return bits.join(' · ');
 }

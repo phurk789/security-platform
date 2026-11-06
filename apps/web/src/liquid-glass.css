@@ -402,6 +402,7 @@
 :root .app.liquid-ui .lg-hud-ai > b { flex: none; font-size: .74rem; letter-spacing: .08em; }
 :root .app.liquid-ui .lg-hud-ai > span { min-width: 0; }
 :root .app.liquid-ui .lg-hud-ai > small { font-size: .6rem; color: var(--hud-dim); }
+:root .app.liquid-ui .lg-hud-ai > .lg-hud-ai-dist { font-style: normal; font-weight: 700; font-size: .7rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 :root .app.liquid-ui .lg-hud-ai.tone-ok { border-left-color: var(--hud-ok); }
 :root .app.liquid-ui .lg-hud-ai.tone-ok > svg { color: var(--hud-ok); }
 :root .app.liquid-ui .lg-hud-ai.tone-warn { border-left-color: var(--hud-warn); }

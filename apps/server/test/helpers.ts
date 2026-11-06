@@ -131,6 +131,8 @@ export class Client {
   get = (p: string) => this.req('GET', p);
   post = (p: string, b: unknown = {}) => this.req('POST', p, b);
   patch = (p: string, b: unknown) => this.req('PATCH', p, b);
+  put = (p: string, b: unknown) => this.req('PUT', p, b);
+  del = (p: string) => this.req('DELETE', p);
 }
 
 /** Opens a console WebSocket and records events. */

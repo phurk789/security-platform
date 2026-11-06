@@ -6,6 +6,7 @@ import type { Geofence } from './routing';
 import type { ChecklistItem, Playbook, SlaStage } from './ops';
 import type { Patrol, Detection, DeviceAnalytics } from './protocol';
 import type { CameraMount } from './aim';
+import type { CameraRanging } from './ranging';
 
 export type Role = 'dispatcher' | 'supervisor' | 'operator' | 'responder' | 'auditor' | 'admin';
 
@@ -165,6 +166,8 @@ export interface Device {
   follows?: string;
   /** AI on this device's video by an AI box, switched on and off from the console. */
   ai?: DeviceAi;
+  /** How the platform estimates distance to people on this device's video (camera height and tilt over a flat floor). */
+  ranging?: CameraRanging;
   /** Catalogue model (VEHICLE_CATALOG) and fitted payload modules (PAYLOAD_CATALOG). */
   catalogId?: string;
   payloads?: string[];

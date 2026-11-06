@@ -178,6 +178,8 @@ function AiRow({ d, ids }: { d: Device; ids: string[] }) {
     .find((e): e is string => typeof e === 'string' && !!e);
   const intruders = live?.boxes.filter((b) => b.type === 'intrusion').length ?? 0;
   const people = live?.boxes.filter((b) => b.type === 'person' || b.type === 'loitering').length ?? 0;
+  // The nearest person, when the camera's ranging gives distances.
+  const nearest = (live?.boxes ?? []).reduce<number | undefined>((m, b) => (b.distM !== undefined && b.type !== 'vehicle' && (m === undefined || b.distM < m) ? b.distM : m), undefined);
   const [tone, text] =
     intruders > 0
       ? ['bad', t('Intruders: {n}', { n: intruders })]
@@ -197,6 +199,7 @@ function AiRow({ d, ids }: { d: Device; ids: string[] }) {
       <ScanEye size={15} aria-hidden="true" />
       <b>AI</b>
       <span>{text}</span>
+      {nearest !== undefined && (intruders > 0 || people > 0) && <em className="lg-hud-ai-dist">{t('≈ {m} m', { m: nearest })}</em>}
       {watching && fps ? <small>{fps.toFixed(1)} fps</small> : null}
       <AiSwitch d={d} hud />
     </div>

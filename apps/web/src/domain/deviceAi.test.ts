@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Device } from '@13store/shared';
-import { aiSources, aiWaiting } from './deviceAi';
+import { aiSources, aiWaiting, calibrationReadiness } from './deviceAi';
 
 const dev = (id: string, extra: Partial<Device> = {}) => ({ id, ...extra }) as Device;
 
@@ -23,5 +23,15 @@ describe('AI on a device in the console', () => {
     expect(aiWaiting(dev('A', { ai: { on: true, state: 'assigned', box: 'b' } }))).toBeUndefined();
     expect(aiWaiting(dev('A', { ai: { on: false, state: 'full' } }))).toBeUndefined();
     expect(aiWaiting(dev('A'))).toBeUndefined();
+  });
+
+  it('is ready to calibrate distance only with one person in view and their feet in the picture', () => {
+    const person = (bbox: number[]) => ({ type: 'person', bbox });
+    expect(calibrationReadiness(undefined)).toBe('none');
+    expect(calibrationReadiness([{ type: 'motion', bbox: [0.1, 0.1, 0.2, 0.2] }])).toBe('none');
+    expect(calibrationReadiness([person([0.4, 0.3, 0.1, 0.4])])).toBe('ready');
+    expect(calibrationReadiness([{ type: 'intrusion', bbox: [0.4, 0.3, 0.1, 0.4] }])).toBe('ready');
+    expect(calibrationReadiness([person([0.4, 0.3, 0.1, 0.4]), person([0.1, 0.3, 0.1, 0.4])])).toBe('many');
+    expect(calibrationReadiness([person([0.4, 0.4, 0.1, 0.6])])).toBe('cut');
   });
 });
