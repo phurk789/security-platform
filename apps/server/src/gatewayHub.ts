@@ -1,5 +1,5 @@
 // Edge gateway connections. Commands go out here; telemetry, acks and device events come in.
-import { GATEWAY_PROTOCOL, type AiJob, type GatewayToServer, type ServerToGateway, type SrvCamera, type SrvCommand, type SrvDemo, type SrvDrive } from '@13store/shared';
+import { GATEWAY_PROTOCOL, type AiJob, type GatewayToServer, type ServerToGateway, type SrvCamera, type SrvCommand, type SrvDemo, type SrvDrive, type SrvVehicleControl } from '@13store/shared';
 import type { WebSocket } from 'ws';
 import type { Accounts } from './accounts';
 import type { GatewayLink, Platform } from './platform';
@@ -81,6 +81,9 @@ export class GatewayHub implements GatewayLink {
           case 'camera_result':
             if (conn.devices.has(msg.deviceId)) this.p.cameraResult(conn.orgId, msg);
             return;
+          case 'vehicle_control_result':
+            if (conn.devices.has(msg.deviceId)) this.p.vehicleControlResult(conn.orgId, msg);
+            return;
           case 'tracks':
             if (conn.devices.has(msg.deviceId) || (conn.aiBox && this.p.aiJobBox(conn.orgId, msg.deviceId) === conn.gatewayId)) this.p.visionTracks(conn.orgId, msg);
             return;
@@ -103,7 +106,7 @@ export class GatewayHub implements GatewayLink {
     });
   }
 
-  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera | SrvDrive): boolean {
+  send(orgId: string, deviceId: string, msg: SrvCommand | SrvDemo | SrvCamera | SrvDrive | SrvVehicleControl): boolean {
     const c = this.byDevice.get(deviceId);
     if (!c || c.orgId !== orgId || c.ws.readyState !== c.ws.OPEN) return false;
     c.ws.send(JSON.stringify(msg));

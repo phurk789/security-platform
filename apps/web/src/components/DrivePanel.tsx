@@ -203,7 +203,11 @@ export function DrivePanel({ d }: { d: Device }) {
                 {!simulated && (
                   <label className="drive-check">
                     <input type="checkbox" checked={ready} onChange={(e) => setReady(e.target.checked)} />
-                    <span>{t('I can see the vehicle or its video, the area is clear, and a pilot holds the remote ready to disarm.')}</span>
+                    <span>
+                      {d.vehicleControl?.noRemote
+                        ? t('I can see the vehicle or its video, the area is clear, and DISARM is in reach.')
+                        : t('I can see the vehicle or its video, the area is clear, and a pilot holds the remote ready to disarm.')}
+                    </span>
                   </label>
                 )}
                 <button className="btn-primary wide" disabled={busy || fresh !== 'live' || onMission || (!simulated && !ready)} onClick={() => void start()}>

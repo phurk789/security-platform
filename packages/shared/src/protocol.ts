@@ -20,6 +20,7 @@ import type {
   TimelineEvent,
   User,
   DeviceStats,
+  VehicleControlInfo,
 } from './types';
 import type { GeoAnchor } from './geo';
 import type { RoutePoint } from './route';
@@ -74,16 +75,6 @@ export interface AdapterDeclaration {
   vehicleControl?: VehicleControlInfo;
 }
 
-/**
- * What the console may do to a vehicle besides missions and driving. Every MAVLink vehicle can be disarmed and held.
- * A vehicle run without a hand-held remote (`noRemote`: a computer on the vehicle is its remote) can also be armed,
- * put in MANUAL and given a gear from the console.
- */
-export interface VehicleControlInfo {
-  noRemote: boolean;
-  /** Gears the console can choose from (0: none). Gear 1 is the slowest and is set at every arm. */
-  gears: number;
-}
 
 /** Live driving from the console: the adapter's own caps (fractions of full stick, 0–1). */
 export interface TeleopLimits {
@@ -629,6 +620,9 @@ export type ConsoleEvent =
       stats?: DeviceStats;
       /** The device reports no position fix: `pos` is the last known one (or the registered default). */
       noFix?: boolean;
+      /** MAVLink vehicles: armed, and the autopilot's mode (e.g. HOLD), as last reported. */
+      armed?: boolean;
+      flightMode?: string;
       /** Equipment status, sent when it changed (flight mode, GNSS fix, camera push…). */
       components?: DeviceComponent[];
     }

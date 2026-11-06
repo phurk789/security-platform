@@ -12,6 +12,7 @@ import { useStore } from '../store';
 import { CommandBadge, FreshBadge, IntegrationBadge, MissionBadge, ModeBadge } from '../components/Badges';
 import { CameraControls } from '../components/CameraControls';
 import { DrivePanel } from '../components/DrivePanel';
+import { VehicleControls } from '../components/VehicleControls';
 import { useVehicleThumb } from '../components/Hud';
 import { LiveMission } from '../components/IncidentPanel';
 import { UgvHardwareReadiness } from '../components/UgvHardwareReadiness';
@@ -162,6 +163,7 @@ export function CommandCenter() {
 
           <aside className="cc-side" aria-label={t('Mission control')}>
             {/* Keep driving controls mounted and visible. Never key this subtree by focus/theme. */}
+            {mode === 'remote' && d.vehicleControl && <VehicleControls d={d} />}
             {mode === 'remote' && d.kind === 'ugv' && d.teleop && <DrivePanel d={d} />}
             <section className="panel cc-box lg-mission-box">
               <div className="panel-head"><div><span className="lg-eyebrow">MISSION CONTROL</span><h2><ListChecks size={17} />{t('Mission control')}</h2></div>{m && <MissionBadge status={m.status} />}</div>
