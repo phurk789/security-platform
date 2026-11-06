@@ -162,6 +162,32 @@ detections are its own device's, drawn on the vehicle's views. Other placements 
 `ffmpeg` source with the media server's address. A protected zone over the whole frame turns
 every person into an intrusion (the default rule raises an incident at ≥ 60 %).
 
+## Distance to people (camera height and tilt over a flat floor)
+
+A box whose bottom edge is where someone stands (person, intrusion, loitering, vehicle) gets a
+distance on the server: the ray through the bottom middle of the box meets the floor at a point
+the camera's height and tilt fix (`packages/shared/src/ranging.ts`). It is shown on the live box
+(_≈ 4.2 m_), as the nearest person's distance in the cockpit's AI chip, and stored with detections
+(`attributes.distanceM`, and _about 4.2 m away_ in the incident detail). The server computes it;
+a gateway cannot send one. No distance is given until the camera's ranging is set, when the box
+touches the bottom edge (feet cut off), at or above the horizon, or beyond 40 m.
+
+- **Where it lives:** `device.ranging` on the vehicle (`heightM`, `tiltDeg`, `vfovDeg`; a gimbal
+  that reports its pitch overrides the tilt, plus a calibrated `pitchOffsetDeg`). Camera AIs that
+  follow a vehicle use the vehicle's.
+- **Set by hand:** `PUT /api/v1/devices/{id}/ranging` `{ heightM, tiltDeg?, vfovDeg? }` (the
+  camera tab's _Set by hand_).
+- **Calibrate without a tape measure on the camera:** one person stands at a known distance (count
+  the floor tiles) and `POST /api/v1/devices/{id}/ranging/points` `{ distanceM }` (_Save this
+  point_) keeps where their feet are in the live boxes of the last 2 s; exactly one person, feet in
+  view. One point gives the height with the tilt kept; two or more (near and far) give height and
+  tilt, with the mean error reported. Up to 6 points are kept; `DELETE …/ranging` clears it.
+- **Permission and record:** `camera.control`; audited as `ranging.set`, `ranging.calibrate`,
+  `ranging.clear`.
+- **Accuracy:** with a camera half a metre up, about 5 % at 2 m, 10–15 % at 5 m and 25–30 % at
+  10 m (a pixel or two at the feet, a fraction of a degree of tilt). A depth model calibrated
+  against the floor is the planned next step for far away.
+
 ## Configuration
 
 `apps/gateway/config/vision-site.example.json` shows an ONVIF PTZ camera with motion + YOLO on
@@ -183,3 +209,4 @@ until false alarms stop, then shorten `cooldownS` if repeats are missed.
 | http detector and the Jetson AI service (`deploy/jetson/`) | Done — locally with `vision_server.py --fake`, including the service going down and back; on the office Jetson Orin NX with YOLOv8s TensorRT FP16 (a sample photo: 4 people and a bus, about 60 ms each) | `vision.test.ts` |
 | Read pass for a follow source (welcome → media auth → ffmpeg) | Done in tests; not yet run against the real media server and a vehicle's stream | `vision-tracks.test.ts`, `vision.test.ts` |
 | AI switch and AI boxes (jobs, read passes per job, what a box may send, console switch) | Done — tests, and locally in the browser with a stand-in vehicle and AI box (switch on, boxes and an incident, off, no box, box back); on 6 Nov 2026 at the office: UGV-01's real video through .13's media server to the Jetson Orin NX (about 8 pictures a second, 45 ms each), people boxed on the cockpit | `apps/server/test/ai-boxes.test.ts`, `apps/gateway/test/aiBox.test.ts`, `apps/web/src/domain/deviceAi.test.ts` |
+| Distance to people (floor geometry, set by hand or calibrated from people at known distances) | Done — tests, and locally in the browser with a stand-in AI box (set by hand, one calibration point, labels and cockpit chip); not yet calibrated on UGV-01 | `packages/shared/test/ranging.test.ts`, `apps/server/test/ranging.test.ts`, `apps/web/src/domain/deviceAi.test.ts` |

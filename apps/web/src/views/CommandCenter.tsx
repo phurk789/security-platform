@@ -139,26 +139,24 @@ export function CommandCenter() {
       {d ? (
         <>
           <section className="cc-main" aria-label={t('Mission workspace')}>
+            {/* One slim bar: the unit, its badges and the view switch, so the stage keeps the height. */}
             <div className="lg-device-header panel">
               <DevicePortrait d={d} />
-              <div className="lg-device-title"><span className="lg-eyebrow">MISSION WORKSPACE</span><h1>{d.id}</h1><p>{d.model}</p></div>
+              <div className="lg-device-title"><h1>{d.id}</h1><p title={d.model}>{d.model}</p></div>
               <div className="lg-device-badges">
                 {s.replay.active ? <span className="badge badge-grey"><History size={12} /> REPLAY</span> : <FreshBadge f={freshness(s, d)} />}
                 <ModeBadge d={d} />
                 <IntegrationBadge i={d.integration} />
               </div>
-            </div>
-            {s.replay.active && (
-              <div className="lg-data-notice" role="status"><History size={16} /><b>REPLAY · {fmtTime(s.replay.at, true)}</b><span>{t('You are viewing past data. Device control is off.')}</span></div>
-            )}
-            <div className="lg-view-switch">
-              <span><MapPinned size={15} /> {t('Operational view')}</span>
-              <div className="seg" role="group" aria-label={t('Primary view')}>
+              <div className="seg lg-view-seg" role="group" aria-label={t('Primary view')}>
                 <button type="button" aria-pressed={visibleFocus === 'map'} className={visibleFocus === 'map' ? 'on' : ''} onClick={() => setFocus('map')}><MapPinned size={14} /> {t('Map first')}</button>
                 <button type="button" disabled={!canViewMedia} aria-pressed={visibleFocus === 'cockpit'} className={visibleFocus === 'cockpit' ? 'on' : ''} onClick={() => setFocus('cockpit')}
                   title={canViewMedia ? t('Camera in front with a driving HUD') : t('Your role cannot view video. Ask a supervisor if you need access.')}><Gamepad2 size={14} /> {t('Cockpit')}</button>
               </div>
             </div>
+            {s.replay.active && (
+              <div className="lg-data-notice" role="status"><History size={16} /><b>REPLAY · {fmtTime(s.replay.at, true)}</b><span>{t('You are viewing past data. Device control is off.')}</span></div>
+            )}
             <CockpitStage d={d} m={m} focus={visibleFocus} onFocus={setFocus} canViewMedia={canViewMedia} />
           </section>
 

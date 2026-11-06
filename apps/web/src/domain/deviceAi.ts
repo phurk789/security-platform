@@ -1,6 +1,14 @@
 // AI on a device's video, as the console shows it: which AI draws boxes on it, and why AI that is
 // switched on is not running yet.
-import type { Device } from '@13store/shared';
+import { RANGING_TYPES, footOf, type Device } from '@13store/shared';
+
+/** What the distance calibration needs: exactly one person in view, feet visible. */
+export function calibrationReadiness(boxes: readonly { type: string; bbox: readonly number[] }[] | undefined): 'ready' | 'none' | 'many' | 'cut' {
+  const people = (boxes ?? []).filter((b) => (RANGING_TYPES as readonly string[]).includes(b.type));
+  if (!people.length) return 'none';
+  if (people.length > 1) return 'many';
+  return footOf(people[0].bbox) ? 'ready' : 'cut';
+}
 
 /**
  * Devices whose live boxes belong on this device's video: the device itself when AI runs on it (an

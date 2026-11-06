@@ -609,6 +609,34 @@ export function RemoteProvider({
           },
           () => void session.setAi(deviceId, on),
         ).then((ok) => ok === true),
+      // Ranging changes come back as a device update over the live connection.
+      setRanging: (deviceId: string, r: { heightM: number; tiltDeg?: number; vfovDeg?: number }) =>
+        guarded(
+          async () => {
+            await api.put<Device>(`/devices/${encodeURIComponent(deviceId)}/ranging`, r);
+            toast('ok', tr('Camera geometry saved for {id}.', { id: deviceId }));
+            return true;
+          },
+          () => void session.setRanging(deviceId, r),
+        ).then((ok) => ok === true),
+      addRangingPoint: (deviceId: string, distanceM: number) =>
+        guarded(
+          async () => {
+            const d = await api.post<Device>(`/devices/${encodeURIComponent(deviceId)}/ranging/points`, { distanceM });
+            const r = d.ranging;
+            if (r) toast('ok', tr('Point saved: camera {h} m above the floor, tilted {tilt}° down (error {e}%).', { h: r.heightM.toFixed(2), tilt: r.tiltDeg.toFixed(1), e: r.errorPct ?? 0 }));
+            return true;
+          },
+          () => void session.addRangingPoint(deviceId, distanceM),
+        ).then((ok) => ok === true),
+      clearRanging: (deviceId: string) =>
+        guarded(
+          async () => {
+            await api.del(`/devices/${encodeURIComponent(deviceId)}/ranging`);
+            return true;
+          },
+          () => void session.clearRanging(deviceId),
+        ).then((ok) => ok === true),
       startDriving: (deviceId: string) =>
         guarded(
           () => api.post<Device>(`/devices/${encodeURIComponent(deviceId)}/drive`, { action: 'start' }),

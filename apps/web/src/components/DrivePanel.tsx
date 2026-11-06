@@ -147,7 +147,7 @@ export function DrivePanel({ d }: { d: Device }) {
         <ModeBadge d={d} />
       </div>
       <div className="cc-box-body">
-        {part?.detail && <p className={`drive-state tone-${part.status}`}>{part.detail}</p>}
+        {part?.detail && <p className={`drive-state tone-${part.status}`}>{t(part.detail)}</p>}
 
         {mine ? (
           <>

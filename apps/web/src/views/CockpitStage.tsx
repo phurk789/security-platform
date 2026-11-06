@@ -3,15 +3,16 @@
 // numbers. The cockpit (ห้องบังคับ) puts the onboard camera in front with a driving HUD over it
 // and the map in the corner, following the vehicle.
 // Both views stay mounted in a fixed order, so swapping them never restarts the video stream
-// or the map. Driving controls are NOT here: DrivePanel stays in the right column.
+// or the map. Driving controls are NOT here: DrivePanel stays in the right column. The unit's
+// name and badges are in the workspace header above the stage, so the HUD does not repeat them.
 import { useState, type ReactNode } from 'react';
-import { Activity, Battery, Camera, Gauge, History, MapPinned, Maximize2, Navigation, Radio, ScanEye, Signal, Thermometer, Timer, X, type LucideIcon } from 'lucide-react';
+import { Activity, Battery, Camera, Gauge, MapPinned, Maximize2, Navigation, Radio, ScanEye, Signal, Thermometer, Timer, X, type LucideIcon } from 'lucide-react';
 import { MISSION_BATTERY_HOLD_PCT, MISSION_BATTERY_WARN_PCT, checkpointLabel, dist, routeSpeedOf, type Device, type Mission } from '@13store/shared';
 import { fmtTime, freshness } from '../domain/policy';
 import { displayNumber } from '../domain/liquidPresentation';
 import { ago, useT, type T } from '../i18n';
 import { useStore } from '../store';
-import { FreshBadge, ModeBadge } from '../components/Badges';
+import { FreshBadge } from '../components/Badges';
 import { CameraFeed } from '../components/CameraFeed';
 import { MainMap } from '../components/MainMap';
 import { TelemetryPanel } from '../components/TelemetryPanel';
@@ -81,34 +82,38 @@ export function CockpitStage({ d, m, focus, onFocus, canViewMedia }: { d: Device
       )}
 
       {cockpit ? (
+        // One grid, so the parts share the room and never land on each other on a short screen:
+        // left = what drives the vehicle and the AI, then the speed tape in the height left over;
+        // top centre = heading, the no-data banner and the route; right = room for the map inset
+        // (and the altitude tape); bottom = the number bar. The unit and its badges are in the header.
         <div className={`lg-hud${usable ? '' : ' is-nodata'}`} aria-label={t('Driving HUD')} role="group">
-          <div className="lg-hud-tl">
-            <div className="lg-hud-glass lg-hud-id">
-              <b>{d.id}</b>
-              <span className="lg-hud-badges">
-                {s.replay.active ? <span className="badge badge-grey"><History size={11} /> REPLAY</span> : <FreshBadge f={f} />}
-                <ModeBadge d={d} />
-              </span>
+          <div className="lg-ck">
+            <div className="lg-ck-left">
+              <div className="lg-ck-cards">
+                <ControlMode d={d} m={m} usable={usable} />
+                <AiRow d={d} ids={aiIds} />
+              </div>
+              <VTape value={usable ? d.speed : undefined} step={1} label="SPD" unit="m/s" side="left" />
             </div>
-            <ControlMode d={d} m={m} usable={usable} />
-            {aiIds.length > 0 && <AiChip d={d} ids={aiIds} />}
-            <AiSwitch d={d} hud />
+            <div className="lg-ck-top">
+              <HeadingTape heading={usable ? d.heading : undefined} />
+              <NoData d={d} />
+              {m && <MissionChip d={d} m={m} usable={usable} />}
+            </div>
+            <div className="lg-ck-right">{d.kind === 'uav' && <VTape value={usable ? d.alt : undefined} step={5} label="ALT" unit="m" side="right" />}</div>
+            <HudBar d={d} usable={usable} items={['battery', 'gnss', 'link', 'latency', 'temp']} graphs={graphs} onGraphs={toggleGraphs} />
           </div>
-          <VTape value={usable ? d.speed : undefined} step={1} label="SPD" unit="m/s" side="left" />
-          {d.kind === 'uav' && <VTape value={usable ? d.alt : undefined} step={5} label="ALT" unit="m" side="right" />}
-          <HudBar d={d} usable={usable} items={['battery', 'gnss', 'link', 'latency', 'temp']} graphs={graphs} onGraphs={toggleGraphs} />
         </div>
       ) : (
-        <div className="lg-hud lg-hud-map">
-          <HudBar d={d} usable={usable} items={['speed', 'battery', 'gnss', 'link']} graphs={graphs} onGraphs={toggleGraphs} unit />
-        </div>
+        <>
+          <div className="lg-hud lg-hud-map">
+            <HudBar d={d} usable={usable} items={['speed', 'battery', 'gnss', 'link']} graphs={graphs} onGraphs={toggleGraphs} unit />
+          </div>
+          <div className="lg-stage-top">
+            <NoData d={d} />
+          </div>
+        </>
       )}
-
-      <div className="lg-stage-top">
-        {cockpit && <HeadingTape heading={usable ? d.heading : undefined} />}
-        <NoData d={d} />
-        {cockpit && m && <MissionChip d={d} m={m} usable={usable} />}
-      </div>
 
       {graphs && (
         <section className="lg-graphs" aria-label={t('Telemetry graphs')}>
@@ -148,11 +153,18 @@ function ControlMode({ d, m, usable }: { d: Device; m?: Mission; usable: boolean
   );
 }
 
-/** The AI at a glance: who it sees now, that it is watching, that it gets no pictures, or why it has not started. */
-function AiChip({ d, ids }: { d: Device; ids: string[] }) {
-  const { s } = useStore();
+/**
+ * The AI at a glance, with its switch on the same row: who it sees now, that it is watching, that it
+ * gets no pictures, why it has not started, or that it is off.
+ */
+function AiRow({ d, ids }: { d: Device; ids: string[] }) {
+  const { s, session } = useStore();
   const t = useT();
   const live = useLiveTracks(ids);
+  // The switch needs the server (not the offline demo) and live time (not replay).
+  const canSwitch = !!session && !s.replay.active;
+  if (!ids.length && !canSwitch) return null;
+  const off = !ids.length && !d.ai?.on;
   // Switched on, but no AI box has it yet: say why instead of "no pictures".
   const waiting = aiWaiting(d);
   const ai = ids.map((id) => s.devices[id]).filter((x): x is Device => !!x);
@@ -166,6 +178,8 @@ function AiChip({ d, ids }: { d: Device; ids: string[] }) {
     .find((e): e is string => typeof e === 'string' && !!e);
   const intruders = live?.boxes.filter((b) => b.type === 'intrusion').length ?? 0;
   const people = live?.boxes.filter((b) => b.type === 'person' || b.type === 'loitering').length ?? 0;
+  // The nearest person, when the camera's ranging gives distances.
+  const nearest = (live?.boxes ?? []).reduce<number | undefined>((m, b) => (b.distM !== undefined && b.type !== 'vehicle' && (m === undefined || b.distM < m) ? b.distM : m), undefined);
   const [tone, text] =
     intruders > 0
       ? ['bad', t('Intruders: {n}', { n: intruders })]
@@ -173,17 +187,21 @@ function AiChip({ d, ids }: { d: Device; ids: string[] }) {
         ? ['warn', t('People in view: {n}', { n: people })]
         : waiting
           ? ['idle', t(waiting)]
-          : watching && modelError
-          ? ['idle', t('AI model not answering')]
-          : watching
-            ? ['ok', t('AI is watching')]
-            : ['idle', t('AI gets no pictures')];
+          : off
+            ? ['idle', t('Off')]
+            : watching && modelError
+              ? ['idle', t('AI model not answering')]
+              : watching
+                ? ['ok', t('AI is watching')]
+                : ['idle', t('AI gets no pictures')];
   return (
-    <div className={`lg-hud-glass lg-hud-ai tone-${tone}`} title={modelError ?? ai.map((x) => x.analytics?.model ?? x.model).join(' · ')}>
+    <div className={`lg-hud-glass lg-hud-ai tone-${tone}`} title={modelError ?? (ai.map((x) => x.analytics?.model ?? x.model).join(' · ') || undefined)}>
       <ScanEye size={15} aria-hidden="true" />
       <b>AI</b>
       <span>{text}</span>
+      {nearest !== undefined && (intruders > 0 || people > 0) && <em className="lg-hud-ai-dist">{t('≈ {m} m', { m: nearest })}</em>}
       {watching && fps ? <small>{fps.toFixed(1)} fps</small> : null}
+      <AiSwitch d={d} hud />
     </div>
   );
 }

@@ -27,6 +27,7 @@ import { VehicleSpecs } from '../views/CommandCenter';
 import { Badge, CommandBadge, FreshBadge, IntegrationBadge, MissionBadge, ModeBadge } from './Badges';
 import { CameraFeed } from './CameraFeed';
 import { AiSwitch } from './AiSwitch';
+import { RangingCard } from './RangingCard';
 import { LiveMission } from './IncidentPanel';
 import { TelemetryPanel } from './TelemetryPanel';
 import { LatLon } from './LatLon';
@@ -170,6 +171,7 @@ function FeedTab({ d }: { d: Device }) {
           {d.ai?.on && d.ai.state === 'assigned' && d.ai.box && <span className="fine">{t('AI box {box}', { box: d.ai.box })}</span>}
         </div>
       )}
+      {(d.stream || cams.some((c) => c.stream) || d.ranging) && <RangingCard d={d} />}
       {d.analytics && (
         <p className={`dp-caption${d.analytics.running ? '' : ' dim'}`}>
           <ScanLine size={12} /> {t('Analytics')} · {d.analytics.provider}

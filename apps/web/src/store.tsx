@@ -46,6 +46,12 @@ export interface Session {
   moveDevice(deviceId: string, siteId: string): Promise<boolean>;
   /** Switch AI on or off for a device's video (an AI box analyses it). False when refused (the reason is shown as a toast). */
   setAi(deviceId: string, on: boolean): Promise<boolean>;
+  /** Distance to people: camera geometry typed in by hand. False when refused. */
+  setRanging(deviceId: string, r: { heightM: number; tiltDeg?: number; vfovDeg?: number }): Promise<boolean>;
+  /** Distance to people: the one person in view stands this far away (a calibration point). False when refused. */
+  addRangingPoint(deviceId: string, distanceM: number): Promise<boolean>;
+  /** Distance to people: forget the geometry and its points. */
+  clearRanging(deviceId: string): Promise<boolean>;
   /** Live driving: open a drive session (also takes control). False when refused (the reason is shown as a toast). */
   startDriving(deviceId: string): Promise<boolean>;
   /** End this console's drive session; the vehicle stops and the remote gets its sticks back. */

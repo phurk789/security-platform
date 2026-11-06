@@ -77,8 +77,12 @@
 .ai-switch.on.waiting { border-color: var(--amber); }
 .ai-switch.on.waiting .ai-switch-knob { background: var(--amber); }
 .ai-switch > small { color: var(--amber); font-weight: 600; }
-/* On the cockpit HUD it sits on dark glass like the other HUD chips. */
-.ai-switch.lg-hud-glass { padding: 6px 10px 6px 9px; border-radius: 12px; }
+/* On the cockpit HUD only the knob shows, at the end of the AI row (dark glass, so light tones). */
+.ai-switch.is-hud { flex: none; margin-left: auto; padding: 4px; border: 0; border-radius: 999px; background: transparent; }
+.ai-switch.is-hud .ai-switch-knob { background: rgba(255, 255, 255, 0.26); }
+.ai-switch.is-hud.on .ai-switch-knob { background: var(--hud-ok, #97d9b0); }
+.ai-switch.is-hud.on.waiting .ai-switch-knob { background: var(--hud-warn, #f2c477); }
+.ai-switch.is-hud:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) {
   .ai-switch-knob, .ai-switch-knob::after { transition: none; }
 }

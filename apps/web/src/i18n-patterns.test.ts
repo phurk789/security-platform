@@ -15,6 +15,14 @@ describe('Thai for server and vehicle messages', () => {
     expect(th('Route uploaded (8 waypoints).')).toBe('ส่งเส้นทางให้รถแล้ว (8 จุด)');
   });
 
+  it('translates what the gateway says about console driving', () => {
+    expect(th('Not driven from the console yet · steering ch1, throttle ch3')).toBe('ยังไม่ได้ขับจากคอนโซล · เลี้ยว ch1 · คันเร่ง ch3');
+    expect(th('Driving from the console · throttle ≤30% · steering ≤60%')).toBe('กำลังขับจากคอนโซล · คันเร่ง ≤30% · เลี้ยว ≤60%');
+    expect(th('Idle, the remote has the sticks (no stick input for 1.5 s)')).toBe('ว่าง รีโมตคุมคันบังคับอยู่ (ไม่มีสัญญาณคันบังคับ 1.5 วินาที)');
+    expect(th('Not driving. The vehicle is in HOLD: switch it to MANUAL on the remote.')).toBe('ไม่ได้ขับ: รถอยู่โหมด HOLD ให้สลับเป็น MANUAL ที่รีโมต');
+    expect(th('Idle')).toBe('ว่าง');
+  });
+
   it('translates the reason inside a skipped patrol, and leaves unknown text alone', () => {
     expect(th('Patrol "Gggg" skipped: UGV-01 is on another mission.')).toBe('ข้ามรอบลาดตระเวน "Gggg": UGV-01 ติดภารกิจอื่นอยู่');
     expect(th('Patrol "Night" skipped: checkpoints 2, 3 are outside the site.')).toBe('ข้ามรอบลาดตระเวน "Night": จุดตรวจ 2, 3 อยู่นอกพื้นที่ไซต์');

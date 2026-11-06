@@ -51,6 +51,15 @@ import {
   type AiJob,
   type DeviceAi,
   AI_BOX_MAX_CAPACITY,
+  type CameraRanging,
+  type RangingSample,
+  DEFAULT_RANGING_VFOV_DEG,
+  RANGING_MAX_SAMPLES,
+  RANGING_TYPES,
+  boxDistance,
+  fitRanging,
+  footOf,
+  rangingProblem,
   DETECTION_TYPES,
   VISION_MAX_BOXES,
   type GwTelemetry,
@@ -272,6 +281,8 @@ export class Platform {
   private lastSeq = new Map<string, number>();
   /** When each device's live boxes were last passed on (they are thinned to 10 per second). */
   private lastTracks = new Map<string, number>();
+  /** The latest live boxes per device (memory only): what calibration measures from. */
+  private lastBoxes = new Map<string, { at: number; aspect: number; boxes: VisionBox[] }>();
   /** AI boxes connected now, per organisation: gateway id → what it offers and which connection it is. Memory only. */
   private aiBoxes = new Map<string, Map<string, AiBoxOffer & { conn: number }>>();
   /** Which AI box analyses which device's video, with the read pass it was given. Memory only. */
@@ -2009,6 +2020,94 @@ export class Platform {
     }
   }
 
+  // ---- distance to people on a camera's video (camera height and tilt over a flat floor) ----
+  //
+  // The ranging lives on the device whose camera it is (the vehicle). Live boxes and detections from
+  // that camera (an AI box job, or a camera AI that follows it) get a distance from it. It is set by
+  // hand, or calibrated: someone stands at a known distance and the latest box of that one person
+  // becomes a point; one point gives the height, two or more the height and the tilt.
+
+  /** The ranging that applies to a device's boxes (its own, or the vehicle's it follows) and the gimbal tilt reported now. */
+  private rangingFor(d: Device): { ranging?: CameraRanging; gimbalPitch?: number } {
+    const host = d.follows ? this.devices.get(d.follows) : d;
+    if (!host?.ranging) return {};
+    const p = host.capabilities?.includes('gimbal') ? host.gimbal?.pitch : undefined;
+    return { ranging: host.ranging, gimbalPitch: typeof p === 'number' && Number.isFinite(p) ? p : undefined };
+  }
+
+  /** Set the camera geometry by hand: { heightM, tiltDeg?, vfovDeg? }. Clears calibration points. */
+  setRanging(a: Actor, deviceId: string, raw: { heightM?: unknown; tiltDeg?: unknown; vfovDeg?: unknown }): Device {
+    this.require(a, 'camera.control', deviceId);
+    const d = this.getDevice(a, deviceId);
+    const body = raw && typeof raw === 'object' ? raw : {};
+    const problem = rangingProblem(body);
+    if (problem) fail(400, 'invalid', problem);
+    d.ranging = {
+      heightM: Math.round((body.heightM as number) * 1000) / 1000,
+      tiltDeg: (body.tiltDeg as number | undefined) ?? d.ranging?.tiltDeg ?? 0,
+      vfovDeg: (body.vfovDeg as number | undefined) ?? d.ranging?.vfovDeg ?? d.mount?.fovDeg ?? DEFAULT_RANGING_VFOV_DEG,
+      source: 'manual',
+      by: a.name,
+      at: this.now(),
+    };
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, 'ranging.set', d.id, 'ok', `height ${d.ranging!.heightM} m, tilt ${d.ranging!.tiltDeg}°, field of view ${d.ranging!.vfovDeg}°`);
+    });
+    return this.publicDevice(d);
+  }
+
+  /** Calibration point: the one person in view stands `distanceM` from the camera. */
+  addRangingSample(a: Actor, deviceId: string, raw: { distanceM?: unknown }): Device {
+    this.require(a, 'camera.control', deviceId);
+    const d = this.getDevice(a, deviceId);
+    const given = raw?.distanceM;
+    if (typeof given !== 'number' || !Number.isFinite(given) || given < 0.5 || given > 30) fail(400, 'invalid', 'The distance must be 0.5–30 m.');
+    const distanceM = given as number;
+    // The newest live boxes of this camera: its own AI box job, or a camera AI that follows it.
+    const sources = [d.id, ...[...this.devices.values()].filter((x) => x.follows === d.id).map((x) => x.id)];
+    const live = sources
+      .map((id) => this.lastBoxes.get(id))
+      .filter((x): x is NonNullable<typeof x> => !!x && this.now() - x.at < 2_000)
+      .sort((x, y) => y.at - x.at)[0];
+    if (!live) fail(409, 'conflict', `No live AI boxes on ${d.id}: switch AI on, then stand in front of the camera.`);
+    const people = live!.boxes.filter((b) => (RANGING_TYPES as readonly string[]).includes(b.type));
+    if (people.length !== 1) fail(409, 'conflict', `Calibration needs exactly one person in view of ${d.id}; the AI sees ${people.length}.`);
+    const foot = footOf(people[0].bbox);
+    if (!foot) fail(409, 'conflict', 'The feet are cut off at the bottom of the picture: step back until the whole body is in view.');
+    const { gimbalPitch } = this.rangingFor({ ...d, ranging: d.ranging ?? ({} as CameraRanging) } as Device);
+    const sample: RangingSample = {
+      distanceM: Math.round(distanceM * 100) / 100,
+      foot: [Math.round(foot![0] * 10000) / 10000, Math.round(foot![1] * 10000) / 10000],
+      aspect: Math.round(live!.aspect * 10000) / 10000,
+      ...(gimbalPitch !== undefined ? { gimbalTiltDeg: -gimbalPitch } : {}),
+      at: this.now(),
+    };
+    const samples = [...(d.ranging?.samples ?? []), sample].slice(-RANGING_MAX_SAMPLES);
+    const vfovDeg = d.ranging?.vfovDeg ?? d.mount?.fovDeg ?? DEFAULT_RANGING_VFOV_DEG;
+    const fit = fitRanging(samples, vfovDeg, { tiltDeg: d.ranging?.tiltDeg, pitchOffsetDeg: d.ranging?.pitchOffsetDeg });
+    if (!fit) fail(409, 'conflict', 'These points do not fit a camera over a flat floor. Clear the points and try again, standing straight with both feet on the floor.');
+    d.ranging = { ...fit!, vfovDeg, source: 'calibrated', samples, by: a.name, at: this.now() };
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, 'ranging.calibrate', d.id, 'ok', `point ${samples.length} at ${sample.distanceM} m → height ${fit!.heightM} m, tilt ${fit!.tiltDeg}°, error ${fit!.errorPct}%`);
+    });
+    return this.publicDevice(d);
+  }
+
+  /** Forget the camera geometry: no distances until it is set or calibrated again. */
+  clearRanging(a: Actor, deviceId: string): Device {
+    this.require(a, 'camera.control', deviceId);
+    const d = this.getDevice(a, deviceId);
+    if (!d.ranging) return this.publicDevice(d);
+    delete d.ranging;
+    tx(this.db, () => {
+      this.saveDevice(d);
+      this.audit(a, 'ranging.clear', d.id);
+    });
+    return this.publicDevice(d);
+  }
+
   // ---- live driving from the console --------------------------------------------------
   //
   // A vehicle in LIVE_MANUAL (simulators in SIMULATION) that declares `teleop` can be driven by the
@@ -2398,11 +2497,21 @@ export class Platform {
     const d = this.devices.get(m.deviceId);
     if (!d || d.orgId !== orgId) return;
     const now = this.now();
-    const boxes = (Array.isArray(m.boxes) ? m.boxes.slice(0, VISION_MAX_BOXES) : []).map(sanitizeVisionBox).filter((b): b is VisionBox => !!b);
+    const px = (v: unknown) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 16384 ? (v as number) : undefined);
+    const aspect = px(m.width) && px(m.height) ? px(m.width)! / px(m.height)! : 16 / 9;
+    // Distance to whoever stands in a box, from the camera's ranging (never from the gateway).
+    const { ranging, gimbalPitch } = this.rangingFor(d);
+    const boxes = (Array.isArray(m.boxes) ? m.boxes.slice(0, VISION_MAX_BOXES) : [])
+      .map(sanitizeVisionBox)
+      .filter((b): b is VisionBox => !!b)
+      .map((b) => {
+        const distM = (RANGING_TYPES as readonly string[]).includes(b.type) ? boxDistance(b.bbox, aspect, ranging, gimbalPitch) : undefined;
+        return distM === undefined ? b : { ...b, distM };
+      });
+    this.lastBoxes.set(d.id, { at: now, aspect, boxes });
     // An empty list (the last box left) always goes through, so the boxes on screen are cleared.
     if (boxes.length && now - (this.lastTracks.get(d.id) ?? -Infinity) < 100) return;
     this.lastTracks.set(d.id, now);
-    const px = (v: unknown) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 16384 ? (v as number) : undefined);
     this.publish({
       orgId,
       siteId: d.siteId,
@@ -2419,9 +2528,18 @@ export class Platform {
         // A camera AI that follows a vehicle files what it sees where the vehicle is (when it has a fix).
         const host = d.follows ? this.devices.get(d.follows) : undefined;
         const at = host && host.orgId === orgId && !host.noFix ? host.pos : undefined;
+        // How far away it was, from the camera's ranging (the server's estimate, not the gateway's).
+        const { ranging, gimbalPitch } = this.rangingFor(d);
+        const bbox = e.detection.bbox;
+        const distanceM =
+          ranging && Array.isArray(bbox) && (RANGING_TYPES as readonly string[]).includes(e.detection.type)
+            ? boxDistance(bbox, this.lastBoxes.get(d.id)?.aspect ?? 16 / 9, ranging, gimbalPitch)
+            : undefined;
+        const { distanceM: _fromGateway, ...attributes } = e.detection.attributes ?? {};
         // The camera speaks for itself: a system actor named after the device raises the detection.
         this.ingestDetection(this.systemActor(orgId, 'system', d.id), {
           ...e.detection,
+          attributes: { ...attributes, ...(distanceM !== undefined ? { distanceM } : {}) },
           deviceId: d.id,
           at: e.at,
           source: e.detection.source ?? `${d.id} analytics`,

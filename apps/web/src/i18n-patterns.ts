@@ -16,6 +16,8 @@ const RULES: Rule[] = [
     /^(.+) sends no video to the site media server, so there is nothing for the AI to read\. Check that its gateway pushes video\.$/,
     (m) => `${m[1]} ไม่ได้ส่งภาพขึ้นเซิร์ฟเวอร์วิดีโอ AI จึงไม่มีภาพให้วิเคราะห์ ตรวจว่า gateway ของมันส่งภาพอยู่`,
   ],
+  [/^No live AI boxes on (.+): switch AI on, then stand in front of the camera\.$/, (m) => `${m[1]} ยังไม่มีกรอบ AI สด เปิด AI ก่อน แล้วยืนหน้ากล้อง`],
+  [/^Calibration needs exactly one person in view of (.+); the AI sees (\d+)\.$/, (m) => `การปรับเทียบต้องมีคนในภาพของ ${m[1]} คนเดียว ตอนนี้ AI เห็น ${m[2]} คน`],
   [/^(.+) is not ready\.$/, (m) => `${m[1]} ยังไม่พร้อม`],
   [
     /^(.+) is in (\w+) mode\. A supervisor must promote it to LIVE_MANUAL before (\w+)\. Stop and pause still work\.$/,
@@ -107,6 +109,14 @@ const RULES: Rule[] = [
   [/^Still moving at ([\d.]+) m\/s (\d+) s after HOLD was asked\. Stop it on the remote\.$/, (m) => `รถยังวิ่งอยู่ ${m[1]} ม./วิ ${m[2]} วินาทีหลังสั่ง HOLD ให้หยุดรถที่รีโมต`],
   [/^Waypoint (\d+) on the vehicle differs from the route sent\. Route not started\.$/, (m) => `จุดที่ ${m[1]} บนรถไม่ตรงกับเส้นทางที่ส่ง จึงไม่เริ่มวิ่ง`],
   [/^The vehicle holds (\d+) mission items instead of (\d+)\. Route not started\.$/, (m) => `บนรถมีรายการภารกิจ ${m[1]} รายการ แทนที่จะเป็น ${m[2]} รายการ จึงไม่เริ่มวิ่ง`],
+  // Console driving, as the gateway reports it (the line at the top of the Drive panel).
+  [/^Not driven from the console yet · steering ch(\d+), throttle ch(\d+)$/, (m) => `ยังไม่ได้ขับจากคอนโซล · เลี้ยว ch${m[1]} · คันเร่ง ch${m[2]}`],
+  [/^Driving from the console · throttle ≤(\d+)% · steering ≤(\d+)%$/, (m) => `กำลังขับจากคอนโซล · คันเร่ง ≤${m[1]}% · เลี้ยว ≤${m[2]}%`],
+  [/^Idle, the remote has the sticks \((.+)\)$/, (m, inner) => `ว่าง รีโมตคุมคันบังคับอยู่ (${inner(m[1])})`],
+  [/^Idle \((.+)\)$/, (m, inner) => `ว่าง (${inner(m[1])})`],
+  [/^Not driving\. (.+)\.$/, (m, inner) => `ไม่ได้ขับ: ${inner(m[1])}`],
+  [/^no stick input for ([\d.]+) s$/, (m) => `ไม่มีสัญญาณคันบังคับ ${m[1]} วินาที`],
+  [/^The vehicle is in (\S+): switch it to MANUAL on the remote$/, (m) => `รถอยู่โหมด ${m[1]} ให้สลับเป็น MANUAL ที่รีโมต`],
 ];
 
 /** Thai for a message with names or numbers in it, or undefined when no rule matches. */
