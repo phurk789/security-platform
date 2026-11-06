@@ -14,13 +14,16 @@ import { CommandCenter } from './views/CommandCenter';
 import { BoothScript } from './components/BoothScript';
 import { SoundEffects } from './components/SoundEffects';
 import { EventTicker, useWall } from './components/Wall';
+import { useCockpitFull } from './domain/cockpitFull';
 
 export function App() {
   const { s } = useStore();
   const theme = useTheme();
   const wall = useWall();
+  // Only the Command Centre's cockpit can be full screen (it switches this off when left).
+  const full = useCockpitFull() && s.view === 'command';
   return (
-    <div className={`app liquid-ui theme-${theme}${s.presentation ? ' presentation' : ''}${s.replay.active ? ' is-replay' : ''}${wall ? ' wall' : ''}`}>
+    <div className={`app liquid-ui theme-${theme}${s.presentation ? ' presentation' : ''}${s.replay.active ? ' is-replay' : ''}${wall ? ' wall' : ''}${full ? ' cockpit-full' : ''}`}>
       <TopBar />
       <div className="main">
         <SideNav />

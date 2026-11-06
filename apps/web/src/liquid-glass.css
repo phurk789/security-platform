@@ -580,3 +580,36 @@
 @media (prefers-reduced-motion: reduce) {
   :root .app.liquid-ui .cc { transition: none; }
 }
+
+/* Cockpit: the stage gets the room. The unit list steps aside and the side column becomes a slim
+   drive dock: the Drive panel and a running mission first, then the "Other panels" button, and
+   the other boxes (shown only when that button is open). Only classes change, so the Drive panel
+   never remounts when the view switches. */
+:root .app.liquid-ui .cc.is-cockpit { grid-template-columns: minmax(0,1fr) clamp(280px, 21vw, 330px); }
+:root .app.liquid-ui .cc.is-cockpit > .cc-rail { display: none; }
+:root .app.liquid-ui .cc-more { display: contents; }
+:root .app.liquid-ui .cc-side.is-dock > *, :root .app.liquid-ui .cc-side.is-dock > .cc-more > * { order: 2; }
+:root .app.liquid-ui .cc-side.is-dock > :is(.drive, .lg-mission-box.is-live) { order: 0; }
+:root .app.liquid-ui .cc-side.is-dock > .cc-more-toggle { order: 1; }
+:root .app.liquid-ui .cc-side.is-dock:not(.more-open) > :is(.cc-more, .lg-mission-box:not(.is-live)) { display: none; }
+:root .app.liquid-ui .cc-more-toggle { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 9px 14px; border: 1px solid var(--line-2); border-radius: 14px; color: var(--text-2); background: var(--lg-surface); box-shadow: var(--lg-inset); font: 600 .76rem var(--font); text-align: left; cursor: pointer; }
+:root .app.liquid-ui .cc-more-toggle:hover { color: var(--text); border-color: var(--text-3); }
+:root .app.liquid-ui .cc-more-n { margin-left: auto; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--lg-surface-2); color: var(--text-2); font-size: .66rem; text-align: center; }
+:root .app.liquid-ui .lg-full-btn { flex: none; display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--text-2); background: var(--lg-surface-2); cursor: pointer; }
+:root .app.liquid-ui .lg-full-btn:is(:hover,[aria-pressed='true']) { color: var(--text); border-color: var(--text-3); }
+@media (max-width: 1279px) {
+  /* Narrow: the dock goes under the stage, two boxes a row; the Drive panel and the button span it. */
+  :root .app.liquid-ui .cc.is-cockpit { grid-template-columns: minmax(0,1fr); }
+  :root .app.liquid-ui .cc.is-cockpit > .cc-side { grid-column: 1; }
+  :root .app.liquid-ui .cc-side.is-dock > :is(.drive, .lg-mission-box.is-live, .cc-more-toggle) { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  :root .app.liquid-ui .lg-view-seg { flex: 1 1 calc(100% - 50px); }
+}
+/* Full-screen cockpit (the button in the workspace header): the app's top bar, menu and footer
+   step aside until it is pressed again or the cockpit is left. */
+:root .app.liquid-ui.cockpit-full { grid-template-rows: minmax(0,1fr); }
+:root .app.liquid-ui.cockpit-full > :is(.topbar,.footer) { display: none; }
+:root .app.liquid-ui.cockpit-full .main { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(0,1fr); }
+:root .app.liquid-ui.cockpit-full .main > .sidenav { display: none; }
+:root .app.liquid-ui.cockpit-full .main > :not(.sidenav) { grid-column: 1; grid-row: 1; }

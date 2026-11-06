@@ -1717,4 +1717,9 @@ export const TH: Record<string, string> = {
   'gateway stopping': 'gateway กำลังปิด',
   'released by the console': 'คอนโซลปล่อยการควบคุมแล้ว',
   'a route started': 'เริ่มวิ่งตามเส้นทางแล้ว',
+  // Command Centre cockpit: the drive dock and full screen.
+  'Other panels': 'แผงอื่น',
+  'Hide other panels': 'ซ่อนแผงอื่น',
+  'Full screen': 'เต็มจอ',
+  'Leave full screen': 'ออกจากเต็มจอ',
 };
