@@ -218,6 +218,7 @@ export function EdgePairingCard({
                 title={t('Flight controller cable')}
               >
                 <option value="uart">{t('TELEM1 to the Pi pins (/dev/ttyAMA0)')}</option>
+                <option value="pi5">{t('TELEM1 to the Pi 5 UART connector (/dev/ttyAMA10)')}</option>
                 <option value="usb">{t('USB cable (/dev/ttyACM0)')}</option>
               </select>
             )}
