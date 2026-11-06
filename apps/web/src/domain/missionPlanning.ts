@@ -2,7 +2,7 @@
 // mission, how missions are grouped in the queue, where a mission is in the planning steps, what a
 // route adds up to, and when the patrol schedules run next.
 import { REAL_ROUTE_SPEED, ROUTINE_TASK_TYPE, can, routeLength, routeSpeedOf, routeTimeS } from '@13store/shared';
-import type { AppState, Device, Incident, Mission, MissionStatus, Patrol, Role, RoutePoint } from '@13store/shared';
+import type { AppState, Device, Incident, Mission, MissionStatus, Patrol, Role, RoutePoint, SavedRoute } from '@13store/shared';
 
 export const PLANNING: MissionStatus[] = ['draft', 'rejected', 'pending_approval', 'approved'];
 export const RUNNING: MissionStatus[] = ['assigned', 'executing', 'paused'];
@@ -75,6 +75,72 @@ export function missionQueue(s: Pick<AppState, 'missions' | 'incidents' | 'users
   out.planning.sort(newest);
   out.ended.sort(newest);
   return out;
+}
+
+// ---- the plan list: missions, patrol schedules and saved routes in one list ----------------
+
+/** Which plans the list shows. */
+export type PlanFilter = 'all' | 'missions' | 'patrols' | 'routes';
+
+/** One row of the plan list. */
+export type PlanRow = { kind: 'mission'; m: Mission; turn: string | null } | { kind: 'patrol'; p: Patrol } | { kind: 'route'; r: SavedRoute };
+
+export type PlanGroupKey = 'mine' | 'running' | 'planning' | 'patrols' | 'routes' | 'ended';
+
+export interface PlanGroup {
+  key: PlanGroupKey;
+  rows: PlanRow[];
+}
+
+/** Group titles, in list order (English labels to translate). */
+export const PLAN_GROUPS: Record<PlanGroupKey, string> = {
+  mine: 'Waiting for you',
+  running: 'Running',
+  planning: 'Being planned',
+  patrols: 'Scheduled patrols',
+  routes: 'Saved routes',
+  ended: 'Finished',
+};
+
+/**
+ * Every plan of the site as one list: missions waiting on this person first, then running and
+ * planned missions, the patrol schedules (next run first), the saved routes (latest change first)
+ * and finished missions last. Empty groups are left out.
+ */
+export function planList(s: Pick<AppState, 'missions' | 'incidents' | 'users' | 'patrols'>, me: Viewer, routes: SavedRoute[], query = '', filter: PlanFilter = 'all'): PlanGroup[] {
+  const q = query.trim().toLowerCase();
+  const name = (id: string) => s.users.find((u) => u.id === id)?.name ?? id;
+  const hit = (text: string) => !q || text.toLowerCase().includes(q);
+  const show = (f: PlanFilter) => filter === 'all' || filter === f;
+  const queue = show('missions') ? missionQueue(s, me, query) : { mine: [], running: [], planning: [], ended: [] };
+  const missions = (items: QueueItem[]): PlanRow[] => items.map((x) => ({ kind: 'mission', ...x }));
+  const patrols: PlanRow[] = show('patrols')
+    ? s.patrols
+        .filter((p) => hit(`${p.id} ${p.name} ${p.deviceId} ${name(p.operatorId)}`))
+        .sort((a, b) => Number(b.enabled) - Number(a.enabled) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity) || a.name.localeCompare(b.name))
+        .map((p) => ({ kind: 'patrol', p }))
+    : [];
+  const saved: PlanRow[] = show('routes')
+    ? routes
+        .filter((r) => hit(`${r.name} ${name(r.createdBy)}`))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .map((r) => ({ kind: 'route', r }))
+    : [];
+  const groups: PlanGroup[] = [
+    { key: 'mine', rows: missions(queue.mine) },
+    { key: 'running', rows: missions(queue.running) },
+    { key: 'planning', rows: missions(queue.planning) },
+    { key: 'patrols', rows: patrols },
+    { key: 'routes', rows: saved },
+    { key: 'ended', rows: missions(queue.ended) },
+  ];
+  return groups.filter((g) => g.rows.length > 0);
+}
+
+/** How many plans each filter holds. */
+export function planCounts(s: Pick<AppState, 'missions' | 'patrols'>, routes: SavedRoute[]): Record<PlanFilter, number> {
+  const n = { missions: s.missions.length, patrols: s.patrols.length, routes: routes.length };
+  return { all: n.missions + n.patrols + n.routes, ...n };
 }
 
 /** The planning steps, in order (English labels to translate). */

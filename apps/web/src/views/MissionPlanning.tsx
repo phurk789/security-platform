@@ -1,27 +1,26 @@
-// Mission planning (ภารกิจ): one page to plan, approve and follow missions.
-// Left: the queue, with what waits on the person signed in first. Centre: where the mission is in
-// its steps, the site map with its route, and what the route adds up to. Right: the planning steps
-// themselves. Two more tabs swap the left and right columns for the site's route library and the
-// patrol schedules; the map stays. Approvals, checks and commands use the original components, so
-// the server's rules (two-person approval, route checks, operating area) apply unchanged.
+// Mission planning (การวางแผนภารกิจ): the site's plans as one list, one row each — missions,
+// patrol schedules and saved routes. Creating a plan, or opening one, goes to its map screen: the
+// site map with the route on it, and beside it the steps for that plan (vehicle, route drawn on
+// the map, operator, checks, approval; a patrol's timetable; a saved route's checkpoints).
+// Approvals, checks and commands use the original components, so the server's rules (two-person
+// approval, route checks, operating area) apply unchanged.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarClock, Camera, Check, ChevronRight, CircleAlert, FolderOpen, Gamepad2, Hourglass, ListChecks, MapPinned, Pencil, Plus, Route as RouteIcon, Search, Siren, Trash2, X } from 'lucide-react';
-import { ROUTINE_TASK_TYPE, TASK_NAME_MAX, fmtDate, type Mission, type Patrol, type RoutePoint, type SavedRoute } from '@13store/shared';
+import { ArrowLeft, CalendarClock, Camera, Check, ChevronRight, CircleAlert, FolderOpen, Gamepad2, Hourglass, ListChecks, MapPinned, MousePointerClick, Pause, Pencil, Play, Plus, Route as RouteIcon, Search, Siren, Trash2, X } from 'lucide-react';
+import { ROUTINE_TASK_TYPE, TASK_NAME_MAX, fmtDate, operatingAreas, type AppState, type Mission, type Patrol, type Point, type RoutePoint, type SavedRoute } from '@13store/shared';
 import { can, currentUser, fmtTime, userName } from '../domain/policy';
 import { mapFocus } from '../domain/mapFocus';
-import { ENDED, PLANNING, RUNNING, STEPS, missionPurpose, missionQueue, routeNumbers, stepIndex, upcomingRuns, type QueueItem, type RouteNumbers } from '../domain/missionPlanning';
-import { routeDraft, useRouteDraft, type LibraryMeta } from '../domain/routeDraft';
+import { ENDED, PLANNING, PLAN_GROUPS, RUNNING, STEPS, missionPurpose, planCounts, planList, routeNumbers, stepIndex, upcomingRuns, type PlanFilter, type PlanRow, type RouteNumbers } from '../domain/missionPlanning';
+import { routeDraft, routeDraftDock, useRouteDraft, type DraftPurpose, type LibraryMeta } from '../domain/routeDraft';
 import { savedRoutes, useSavedRoutes } from '../domain/savedRoutes';
-import { useT } from '../i18n';
+import { useT, type T } from '../i18n';
 import { useStore } from '../store';
-import { CommandBadge, MissionBadge } from '../components/Badges';
+import { Badge, CommandBadge, MissionBadge } from '../components/Badges';
+import { Dialog } from '../components/Dialog';
 import { LiveMission, Planner, PrepareMission, fmtEta } from '../components/IncidentPanel';
 import { MainMap } from '../components/MainMap';
-import { PatrolsCard } from '../components/Patrols';
+import { DAYS, PatrolForm, PatrolsOffline } from '../components/Patrols';
+import { RouteEditorDock } from '../components/RouteEditorDock';
 import './mission-planning.css';
-
-type Tab = 'missions' | 'routes' | 'patrols';
-const TAB_KEY = 'ps.mp.tab';
 
 /** A new mission being set up: for an alert or a routine task, maybe starting from a saved route. */
 interface Creating {
@@ -29,78 +28,429 @@ interface Creating {
   incidentId?: string;
   task: string;
   route?: string;
-  /** Missions that existed when it started: the new one is the first that is not among them. */
-  known: Set<string>;
+}
+
+/** What the page shows: the plan list, or one plan on its map screen. */
+type Screen =
+  | { kind: 'list' }
+  | { kind: 'mission'; id: string }
+  | { kind: 'new-mission'; c: Creating }
+  /** The draft was sent: open it once it arrives. `known`: the missions there before it. */
+  | { kind: 'saving-mission'; known: Set<string> }
+  | { kind: 'route'; id: string }
+  | { kind: 'new-route' }
+  | { kind: 'patrol'; id: string }
+  | { kind: 'new-patrol'; route?: string };
+
+type Go = (s: Screen) => void;
+type Msg = { ok: boolean; text: string };
+
+const FILTER_KEY = 'ps.mp.filter';
+const FILTERS: { id: PlanFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'missions', label: 'Missions' },
+  { id: 'patrols', label: 'Patrols' },
+  { id: 'routes', label: 'Routes' },
+];
+/** Drawings that belong to this page: dropped when its map screen is left. */
+const PAGE_DRAFTS: DraftPurpose[] = ['mission-new', 'mission-edit', 'library', 'patrol'];
+const dropPageDraft = () => {
+  const d = routeDraft.get();
+  if (d && PAGE_DRAFTS.includes(d.purpose)) routeDraft.clear();
+};
+
+/** The screen open when the page was left, so coming back to the page opens it again. */
+let lastScreen: Screen = { kind: 'list' };
+
+/** Confirmed alerts with no mission yet: what a new mission can be for. */
+function openIncidents(s: Pick<AppState, 'incidents' | 'missions'>) {
+  return s.incidents
+    .filter((i) => i.status === 'confirmed' && i.type !== ROUTINE_TASK_TYPE && !i.patrolId)
+    .filter((i) => !s.missions.some((m) => m.incidentId === i.id && !ENDED.includes(m.status)))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** "Route 3": the first number no saved route of the site uses (names are unique per site). */
+function nextRouteName(t: T, routes: SavedRoute[]) {
+  const taken = new Set(routes.map((r) => r.name.toLowerCase()));
+  for (let n = routes.length + 1; ; n++) {
+    const name = t('Route {n}', { n });
+    if (!taken.has(name.toLowerCase())) return name;
+  }
 }
 
 export function MissionPlanning() {
-  const { s, session, dispatch } = useStore();
+  const { s, session } = useStore();
+  const t = useT();
+  const [screen, setScreen] = useState<Screen>(() => lastScreen);
+  const go: Go = (v) => {
+    lastScreen = v;
+    setScreen(v);
+  };
+  const [libMsg, setLibMsg] = useState<Msg | null>(null);
+  const draft = useRouteDraft();
+
+  // A saved route drawn on the map: keep it in the library (or back to drawing if the server refuses it).
+  const handled = useRef<unknown>(null);
+  useEffect(() => {
+    if (!draft || draft.state !== 'done' || draft.purpose !== 'library' || !session || handled.current === draft) return;
+    handled.current = draft;
+    const meta = (draft.meta as LibraryMeta | undefined) ?? { name: '' };
+    const points = draft.points;
+    routeDraft.clear();
+    if (draft.cancelled) {
+      // Cancel: a new route is given up, a saved one stays as it was.
+      setLibMsg(null);
+      if (!meta.id) go({ kind: 'list' });
+      return;
+    }
+    const again = (text: string) => {
+      setLibMsg({ ok: false, text });
+      routeDraft.start({ purpose: 'library', deviceId: '', points, meta });
+    };
+    if (!meta.name.trim()) return again(t('Name the route first.'));
+    void (async () => {
+      try {
+        const r = meta.id
+          ? await session.api.patch<SavedRoute>(`/saved-routes/${encodeURIComponent(meta.id)}`, { name: meta.name.trim(), points })
+          : await session.api.post<SavedRoute>('/saved-routes', { siteId: s.site?.id, name: meta.name.trim(), points });
+        await savedRoutes.refresh(session.api, s.site?.id);
+        setLibMsg({ ok: true, text: t('Saved as “{name}”.', { name: r.name }) });
+        go({ kind: 'route', id: r.id });
+      } catch (e) {
+        again(t(e instanceof Error ? e.message : String(e)));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+
+  if (screen.kind === 'list') return <PlanList go={(v) => (setLibMsg(null), go(v))} />;
+  return <PlanScreen screen={screen} go={go} libMsg={libMsg} setLibMsg={setLibMsg} />;
+}
+
+// ---------------------------------------------------------------------------
+// The plan list
+// ---------------------------------------------------------------------------
+
+function PlanList({ go }: { go: Go }) {
+  const { s, session } = useStore();
   const t = useT();
   const me = currentUser(s);
-  const [tab, setTabState] = useState<Tab>(() => {
+  const library = useSavedRoutes(session?.api, s.site?.id);
+  const [filter, setFilterState] = useState<PlanFilter>(() => {
     try {
-      const v = localStorage.getItem(TAB_KEY);
-      return v === 'routes' || v === 'patrols' ? v : 'missions';
+      const v = localStorage.getItem(FILTER_KEY);
+      return v === 'missions' || v === 'patrols' || v === 'routes' ? v : 'all';
     } catch {
-      return 'missions';
+      return 'all';
     }
   });
-  const setTab = (v: Tab) => {
-    setTabState(v);
+  const setFilter = (v: PlanFilter) => {
+    setFilterState(v);
     try {
-      localStorage.setItem(TAB_KEY, v);
+      localStorage.setItem(FILTER_KEY, v);
     } catch {
       /* this page only */
     }
   };
   const [query, setQuery] = useState('');
-  const [selId, setSelId] = useState<string | null>(null);
-  const [creating, setCreating] = useState<Creating | null>(null);
-  const [justMade, setJustMade] = useState<Set<string> | null>(null);
-  const [routeSel, setRouteSel] = useState<string | null>(null);
-  const [naming, setNaming] = useState<string | null>(null);
-  const [libMsg, setLibMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [patrolSel, setPatrolSel] = useState<string | null>(null);
-  const [patrolRoute, setPatrolRoute] = useState<string | null>(null);
-  const library = useSavedRoutes(session?.api, s.site?.id);
-  const draft = useRouteDraft();
-  const canPrepare = can(me.role, 'mission.prepare') && !s.replay.active;
-  const canRoutes = canPrepare && !!session;
-
-  const queue = useMemo(() => missionQueue(s, me, query), [s.missions, s.incidents, s.users, me.id, me.role, query]); // eslint-disable-line react-hooks/exhaustive-deps
-  const fallback = queue.mine[0] ?? queue.running[0] ?? queue.planning[0] ?? queue.ended[0];
-  const sel = creating ? undefined : ((selId ? s.missions.find((m) => m.id === selId) : undefined) ?? fallback?.m);
-  const route = library.find((r) => r.id === routeSel) ?? (naming === null ? library[0] : undefined);
-  const patrol = s.patrols.find((p) => p.id === patrolSel) ?? s.patrols[0];
-
-  const counts = {
+  const [choosing, setChoosing] = useState(false);
+  const [allEnded, setAllEnded] = useState(false);
+  const groups = useMemo(() => planList(s, me, library, query, filter), [s.missions, s.incidents, s.users, s.patrols, library, me.id, me.role, query, filter]); // eslint-disable-line react-hooks/exhaustive-deps
+  const counts = planCounts(s, library);
+  const allowed = {
+    mission: can(me.role, 'mission.prepare') && !s.replay.active,
+    patrol: can(me.role, 'patrol.manage') && !s.replay.active && !!session,
+    route: can(me.role, 'mission.prepare') && !s.replay.active && !!session,
+  };
+  const canCreate = allowed.mission || allowed.patrol || allowed.route;
+  const stats = {
     draft: s.missions.filter((m) => m.status === 'draft' || m.status === 'rejected').length,
     approval: s.missions.filter((m) => m.status === 'pending_approval').length,
     accept: s.missions.filter((m) => m.status === 'approved').length,
     running: s.missions.filter((m) => RUNNING.includes(m.status)).length,
   };
+  const create = (kind: 'mission' | 'patrol' | 'route') => {
+    setChoosing(false);
+    dropPageDraft();
+    if (kind === 'mission') go({ kind: 'new-mission', c: { source: openIncidents(s).length ? 'incident' : 'task', task: '' } });
+    else if (kind === 'patrol') go({ kind: 'new-patrol' });
+    else go({ kind: 'new-route' });
+  };
+  const open = (row: PlanRow) => go(row.kind === 'mission' ? { kind: 'mission', id: row.m.id } : row.kind === 'patrol' ? { kind: 'patrol', id: row.p.id } : { kind: 'route', id: row.r.id });
 
-  // The draft just saved: select it as soon as it arrives.
-  useEffect(() => {
-    if (!justMade) return;
-    const fresh = s.missions.filter((m) => !justMade.has(m.id));
-    if (fresh.length) {
-      setSelId(fresh[fresh.length - 1].id);
-      setJustMade(null);
-    }
-  }, [s.missions, justMade]);
+  return (
+    <div className="mp mp-listpage">
+      <header className="panel mp-head">
+        <div className="mp-title">
+          <span className="lg-eyebrow">MISSION PLANNING</span>
+          <h1>{t('Mission planning')}</h1>
+          <p>{t('{a} drafts · {b} awaiting approval · {c} ready to accept · {d} running', { a: stats.draft, b: stats.approval, c: stats.accept, d: stats.running })}</p>
+        </div>
+        {canCreate && (
+          <button type="button" className="btn-primary mp-create" onClick={() => setChoosing(true)}>
+            <Plus size={16} /> {t('New plan')}
+          </button>
+        )}
+      </header>
 
-  // The map: the selected mission's route (through the selected incident), or the route being looked at.
-  const selKey = tab === 'missions' && sel ? `${sel.id}:${sel.planVersion}` : '';
+      <section className="panel mp-plans" aria-label={t('Plans')}>
+        <div className="mp-tools">
+          <div className="seg mp-filter" role="tablist" aria-label={t('Show')}>
+            {FILTERS.map((f) => (
+              <button key={f.id} type="button" role="tab" aria-selected={filter === f.id} className={filter === f.id ? 'on' : ''} onClick={() => setFilter(f.id)}>
+                {t(f.label)} <small>{counts[f.id]}</small>
+              </button>
+            ))}
+          </div>
+          <label className="lg-search mp-search">
+            <Search size={16} aria-hidden="true" />
+            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Search plans…')} aria-label={t('Search plans…')} />
+          </label>
+        </div>
+        <div className="mp-rows">
+          {groups.map((g) => {
+            const rows = g.key === 'ended' && !allEnded ? g.rows.slice(0, 6) : g.rows;
+            return (
+              <div key={g.key} className={`mp-group${g.key === 'mine' ? ' is-accent' : ''}`}>
+                <div className="mp-group-h">
+                  <span>{t(PLAN_GROUPS[g.key])}</span>
+                  <b>{g.rows.length}</b>
+                </div>
+                {rows.map((row) => (
+                  <PlanRowView key={`${row.kind}:${row.kind === 'mission' ? row.m.id : row.kind === 'patrol' ? row.p.id : row.r.id}`} row={row} onOpen={() => open(row)} />
+                ))}
+                {rows.length < g.rows.length && (
+                  <button type="button" className="btn-ghost small mp-more" onClick={() => setAllEnded(true)}>
+                    {t('Show all {n}', { n: g.rows.length })}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {!groups.length &&
+            (query ? (
+              <p className="empty">{t('No plans match the search.')}</p>
+            ) : filter === 'patrols' && !session ? (
+              <PatrolsOffline />
+            ) : filter === 'routes' && !session ? (
+              <p className="empty">{t('Saved routes are kept on the platform server.')}</p>
+            ) : (
+              <div className="mp-empty">
+                <ListChecks size={30} />
+                <h3>{filter === 'missions' ? t('No missions yet.') : filter === 'patrols' ? t('No patrol schedules yet') : filter === 'routes' ? t('No saved routes yet') : t('No plans yet')}</h3>
+                <p>{t('A plan is a mission, a scheduled patrol or a saved route. Create one, then draw its route on the map.')}</p>
+                {canCreate && (
+                  <button type="button" className="btn-secondary" onClick={() => setChoosing(true)}>
+                    <Plus size={15} /> {t('New plan')}
+                  </button>
+                )}
+              </div>
+            ))}
+        </div>
+      </section>
+
+      {choosing && (
+        <Dialog title={t('What kind of plan?')} onClose={() => setChoosing(false)}>
+          <div className="mp-kinds">
+            {allowed.mission && (
+              <button type="button" className="mp-kind-opt k-mission" onClick={() => create('mission')}>
+                <ListChecks size={20} />
+                <span>
+                  <b>{t('Mission')}</b>
+                  <small>{t('The vehicle drives a route once. A supervisor approves it first.')}</small>
+                </span>
+                <ChevronRight size={16} />
+              </button>
+            )}
+            {allowed.patrol && (
+              <button type="button" className="mp-kind-opt k-patrol" onClick={() => create('patrol')}>
+                <CalendarClock size={20} />
+                <span>
+                  <b>{t('Scheduled patrol')}</b>
+                  <small>{t('The vehicle drives the route again on set days and times.')}</small>
+                </span>
+                <ChevronRight size={16} />
+              </button>
+            )}
+            {allowed.route && (
+              <button type="button" className="mp-kind-opt k-route" onClick={() => create('route')}>
+                <FolderOpen size={20} />
+                <span>
+                  <b>{t('Route')}</b>
+                  <small>{t('Draw a route and keep it, to use for missions and patrols later.')}</small>
+                </span>
+                <ChevronRight size={16} />
+              </button>
+            )}
+          </div>
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
+const KIND_LABEL = { mission: 'Mission', patrol: 'Patrol', route: 'Route' } as const;
+
+function PlanRowView({ row, onOpen }: { row: PlanRow; onOpen: () => void }) {
+  const { s } = useStore();
+  const t = useT();
+  let title: string;
+  let id: string | undefined;
+  let sub: React.ReactNode;
+  let status: React.ReactNode;
+  let extra: React.ReactNode = null;
+  if (row.kind === 'mission') {
+    const { m, turn } = row;
+    const purpose = missionPurpose(s, m);
+    const n = routeNumbers(RUNNING.includes(m.status) ? m.checkpoints.slice(m.nextCp) : m.checkpoints, s.devices[m.deviceId]);
+    const total = m.checkpoints.length;
+    title = purpose.title;
+    id = m.id;
+    sub = (
+      <>
+        {purpose.kind === 'task' ? t('Routine task') : purpose.kind === 'patrol' ? t('Patrol run') : m.incidentId} · {m.deviceId} · {userName(s, m.operatorId)} · {t('{n} checkpoints', { n: total })} ·{' '}
+        {n.lengthM} m · {fmtEta(n.timeS)}
+      </>
+    );
+    status = <MissionBadge status={m.status} />;
+    extra = (
+      <>
+        {(m.status === 'executing' || m.status === 'paused') && (
+          <span className="mp-progress" aria-label={t('{n} of {total} checkpoints passed', { n: m.nextCp, total })}>
+            <i style={{ width: `${Math.round((100 * m.nextCp) / Math.max(1, total))}%` }} />
+          </span>
+        )}
+        {m.interruption && (
+          <small className="mp-warn">
+            <CircleAlert size={12} /> {t(m.interruption.reason)}
+          </small>
+        )}
+        {turn && (
+          <small className="mp-turn">
+            <ChevronRight size={12} /> {t(turn)}
+          </small>
+        )}
+      </>
+    );
+  } else if (row.kind === 'patrol') {
+    const { p } = row;
+    title = p.name;
+    id = p.id;
+    sub = (
+      <>
+        {p.deviceId} · {userName(s, p.operatorId)} · {p.days.map((d) => t(DAYS[d])).join(' ')} · {p.times.join(', ')} · {t('{n} checkpoints', { n: p.route.length })}
+        {p.autoStart ? ` · ${t('auto-start')}` : ''}
+      </>
+    );
+    status = p.enabled ? (
+      <Badge tone="cyan">{p.nextRunAt ? t('Next {date} {time}', { date: fmtDate(p.nextRunAt), time: fmtTime(p.nextRunAt) }) : t('Enabled')}</Badge>
+    ) : (
+      <Badge tone="grey">{t('Disabled')}</Badge>
+    );
+  } else {
+    const { r } = row;
+    const n = routeNumbers(r.points);
+    title = r.name;
+    sub = (
+      <>
+        {t('{n} checkpoints', { n: n.checkpoints })} · {n.lengthM} m · {fmtEta(n.timeS)}
+        {n.captures > 0 && (
+          <>
+            {' '}
+            · <Camera size={11} /> {n.captures}
+          </>
+        )}{' '}
+        · {t('Updated {date}', { date: fmtDate(r.updatedAt) })}
+      </>
+    );
+    status = <Badge tone="grey">{t('Kept for later')}</Badge>;
+  }
+  return (
+    <button type="button" className={`mp-row k-${row.kind}`} onClick={onOpen}>
+      <span className={`mp-type t-${row.kind}`}>{t(KIND_LABEL[row.kind])}</span>
+      <span className="mp-row-main">
+        <span className="mp-row-title">
+          <b>{title}</b>
+          {id && <span className="mono">{id}</span>}
+        </span>
+        <small>{sub}</small>
+        {extra}
+      </span>
+      <span className="mp-row-status">{status}</span>
+      <ChevronRight size={16} className="mp-row-go" aria-hidden="true" />
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One plan on its map screen
+// ---------------------------------------------------------------------------
+
+function PlanScreen({ screen, go, libMsg, setLibMsg }: { screen: Exclude<Screen, { kind: 'list' }>; go: Go; libMsg: Msg | null; setLibMsg: (m: Msg | null) => void }) {
+  const { s, session, dispatch } = useStore();
+  const t = useT();
+  const me = currentUser(s);
+  const library = useSavedRoutes(session?.api, s.site?.id);
+  const draft = useRouteDraft();
+  const drawing = draft?.state === 'drawing' && PAGE_DRAFTS.includes(draft.purpose) ? draft : null;
+  const [patrolLoop, setPatrolLoop] = useState<Point[] | undefined>();
+  const m = screen.kind === 'mission' ? s.missions.find((x) => x.id === screen.id) : undefined;
+  const route = screen.kind === 'route' ? library.find((r) => r.id === screen.id) : undefined;
+  const patrol = screen.kind === 'patrol' ? s.patrols.find((p) => p.id === screen.id) : undefined;
+  const back = () => {
+    dropPageDraft();
+    setLibMsg(null);
+    go({ kind: 'list' });
+  };
+  const newMission = (extra: Partial<Creating> = {}) => {
+    dropPageDraft();
+    setLibMsg(null);
+    go({ kind: 'new-mission', c: { source: openIncidents(s).length ? 'incident' : 'task', task: '', ...extra } });
+  };
+
+  // Routes are drawn with the editor beside the map, so nothing floats over the map here.
+  useEffect(() => routeDraftDock.add(), []);
+  // A drawing starts: frame its checkpoints, or the site's operating area for a new route.
+  const drawKey = drawing ? `${drawing.purpose}:${drawing.missionId ?? ''}:${(drawing.meta as LibraryMeta | undefined)?.id ?? ''}:${drawing.initial.length}` : '';
   useEffect(() => {
-    if (!sel || tab !== 'missions') return;
-    if (s.selectedIncidentId !== sel.incidentId) dispatch({ type: 'selectIncident', id: sel.incidentId });
-    const d = s.devices[sel.deviceId];
-    mapFocus.fit([...sel.checkpoints, ...(d && !d.noFix ? [d.pos] : [])]);
+    if (!drawing) return;
+    const kind = s.devices[drawing.deviceId]?.kind === 'uav' ? 'uav' : 'ugv';
+    const d = s.devices[drawing.deviceId];
+    // The operating area, else where the site's vehicles are.
+    const area = operatingAreas(s.geofences, kind).flatMap((f) => f.poly);
+    const fleet = Object.values(s.devices)
+      .filter((v) => (v.kind === 'ugv' || v.kind === 'uav') && !v.noFix && !v.indoor)
+      .map((v) => v.pos);
+    const pts = drawing.points.length ? [...drawing.points, ...(d && !d.noFix ? [d.pos] : [])] : area.length ? area : fleet;
+    if (pts.length) mapFocus.fit(pts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawKey]);
+
+  // The draft just sent: open it as soon as it arrives.
+  useEffect(() => {
+    if (screen.kind !== 'saving-mission') return;
+    const fresh = s.missions.filter((x) => !screen.known.has(x.id));
+    if (fresh.length) go({ kind: 'mission', id: fresh[fresh.length - 1].id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.missions, screen]);
+
+  // The map: a mission's route (through its incident), or the route or patrol being looked at.
+  const selKey = m ? `${m.id}:${m.planVersion}` : '';
+  useEffect(() => {
+    if (!m) return;
+    if (s.selectedIncidentId !== m.incidentId) dispatch({ type: 'selectIncident', id: m.incidentId });
+    const d = s.devices[m.deviceId];
+    mapFocus.fit([...m.checkpoints, ...(d && !d.noFix ? [d.pos] : [])]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selKey]);
-  const previewPts: RoutePoint[] | null = draft?.state === 'drawing' ? null : tab === 'routes' ? (route?.points ?? null) : tab === 'patrols' ? (patrol?.route ?? null) : null;
-  const previewKey = previewPts ? `${tab}:${route?.id ?? ''}:${patrol?.id ?? ''}:${previewPts.length}` : '';
+  // Any other plan: only its own route on the map, not the last mission's (drawn through its incident).
+  useEffect(() => {
+    if (screen.kind !== 'mission' && s.selectedIncidentId) dispatch({ type: 'selectIncident', id: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen.kind]);
+  const previewPts: Point[] | null = drawing ? null : (route?.points ?? patrol?.route ?? (screen.kind === 'new-patrol' ? patrolLoop : undefined) ?? null);
+  const previewKey = previewPts ? `${screen.kind}:${previewPts.map((p) => `${p.x},${p.y}`).join(';')}` : '';
   useEffect(() => {
     mapFocus.setPreview(previewPts);
     if (previewPts?.length) mapFocus.fit(previewPts);
@@ -108,238 +458,114 @@ export function MissionPlanning() {
   }, [previewKey]);
   useEffect(() => () => mapFocus.setPreview(null), []);
 
-  // A saved route drawn on the map: keep it in the library (or back to drawing if the server refuses it).
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (!draft || draft.state !== 'done' || draft.purpose !== 'library' || !session || handled.current === draft) return;
-    handled.current = draft;
-    const meta = draft.meta as LibraryMeta;
-    const points = draft.points;
-    routeDraft.clear();
-    void (async () => {
-      try {
-        const r = meta.id
-          ? await session.api.patch<SavedRoute>(`/saved-routes/${encodeURIComponent(meta.id)}`, { name: meta.name, points })
-          : await session.api.post<SavedRoute>('/saved-routes', { siteId: s.site?.id, name: meta.name, points });
-        await savedRoutes.refresh(session.api, s.site?.id);
-        setRouteSel(r.id);
-        setNaming(null);
-        setLibMsg({ ok: true, text: t('Saved as “{name}”.', { name: meta.name }) });
-      } catch (e) {
-        setLibMsg({ ok: false, text: t(e instanceof Error ? e.message : String(e)) });
-        routeDraft.start({ purpose: 'library', deviceId: '', points, meta });
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft]);
+  // What the route adds up to: the one being drawn, else the plan's.
+  // What the plan's route adds up to (a route being drawn shows its numbers in the editor).
+  const numbers: RouteNumbers | undefined = m
+    ? routeNumbers(RUNNING.includes(m.status) ? m.checkpoints.slice(m.nextCp) : m.checkpoints, s.devices[m.deviceId])
+    : route
+      ? routeNumbers(route.points)
+      : patrol
+        ? routeNumbers(patrol.route, s.devices[patrol.deviceId])
+        : screen.kind === 'new-patrol' && patrolLoop?.length
+          ? routeNumbers(patrolLoop)
+          : undefined;
 
-  const newMission = (extra: Partial<Creating> = {}) => {
-    setTab('missions');
-    setCreating({ source: 'incident', task: '', known: new Set(s.missions.map((m) => m.id)), ...extra });
-  };
-  const doneCreating = (saved: boolean) => {
-    if (saved && creating) setJustMade(creating.known);
-    setCreating(null);
-  };
-
-  return (
-    <div className="mp">
-      <header className="panel mp-head">
-        <div className="mp-title">
-          <span className="lg-eyebrow">MISSION PLANNING</span>
-          <h1>{t('Mission planning')}</h1>
-          <p>{t('{a} drafts · {b} awaiting approval · {c} ready to accept · {d} running', { a: counts.draft, b: counts.approval, c: counts.accept, d: counts.running })}</p>
-        </div>
-        <div className="seg mp-tabs" role="tablist" aria-label={t('Mission planning')}>
-          <button type="button" role="tab" aria-selected={tab === 'missions'} className={tab === 'missions' ? 'on' : ''} onClick={() => setTab('missions')}>
-            <ListChecks size={14} /> {t('Missions')}
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'routes'} className={tab === 'routes' ? 'on' : ''} onClick={() => setTab('routes')}>
-            <FolderOpen size={14} /> {t('Saved routes')} <small>{library.length}</small>
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'patrols'} className={tab === 'patrols' ? 'on' : ''} onClick={() => setTab('patrols')}>
-            <CalendarClock size={14} /> {t('Scheduled patrols')} <small>{s.patrols.length}</small>
-          </button>
-        </div>
-        {tab === 'missions' && canPrepare && (
-          <button type="button" className="btn-primary" onClick={() => newMission()}>
-            <Plus size={16} /> {t('New mission')}
-          </button>
-        )}
-        {tab === 'routes' && canRoutes && (
-          <button type="button" className="btn-primary" onClick={() => setNaming('')}>
-            <Plus size={16} /> {t('New route')}
-          </button>
-        )}
-      </header>
-
-      <div className="mp-body">
-        <aside className="panel mp-list" aria-label={t('List')}>
-          {tab === 'missions' && <MissionQueue queue={queue} selId={creating ? null : (sel?.id ?? null)} onPick={(id) => (setCreating(null), setSelId(id))} query={query} setQuery={setQuery} />}
-          {tab === 'routes' && <RouteList routes={library} selId={naming === null ? (route?.id ?? null) : null} onPick={(id) => (setNaming(null), setRouteSel(id))} canAdd={canRoutes} onAdd={() => setNaming('')} />}
-          {tab === 'patrols' && (
-            <div className="mp-scroll">
-              <PatrolsCard key={patrolRoute ?? 'list'} selected={patrol?.id ?? null} onSelect={setPatrolSel} startWithRoute={patrolRoute} />
+  let head: React.ReactNode;
+  let side: React.ReactNode;
+  switch (screen.kind) {
+    case 'mission':
+      head = m ? <MissionTitle m={m} /> : <StageTitle eyebrow="MISSION" title={screen.id} />;
+      side = m ? <MissionDetail key={m.id} m={m} /> : <Gone onBack={back} />;
+      break;
+    case 'new-mission':
+    case 'saving-mission':
+      head = <StageTitle eyebrow="NEW MISSION" title={t('New mission')} />;
+      side =
+        screen.kind === 'new-mission' ? (
+          <NewMission c={screen.c} setC={(c) => go({ kind: 'new-mission', c })} onDone={(saved) => (saved ? go({ kind: 'saving-mission', known: new Set(s.missions.map((x) => x.id)) }) : back())} />
+        ) : (
+          <Saving onBack={back} />
+        );
+      break;
+    case 'route':
+      head = <StageTitle eyebrow="SAVED ROUTE" title={route?.name ?? t('Saved routes')} sub={route ? `${t('Updated {date}', { date: `${fmtDate(route.updatedAt)} ${fmtTime(route.updatedAt)}` })} · ${userName(s, route.createdBy)}` : undefined} />;
+      side = route ? (
+        <RouteDetail
+          key={route.id}
+          r={route}
+          canEdit={can(me.role, 'mission.prepare') && !s.replay.active && !!session}
+          msg={libMsg}
+          onUse={() => newMission({ source: 'task', route: `lib:${route.id}` })}
+          onPatrol={can(me.role, 'patrol.manage') && !!session && !s.replay.active ? () => (dropPageDraft(), setLibMsg(null), go({ kind: 'new-patrol', route: `lib:${route.id}` })) : undefined}
+          onDeleted={back}
+        />
+      ) : (
+        <Gone onBack={back} />
+      );
+      break;
+    case 'new-route':
+      head = <StageTitle eyebrow="NEW ROUTE" title={(draft?.purpose === 'library' && (draft.meta as LibraryMeta | undefined)?.name) || t('New route')} />;
+      side = <NewRoute defaultName={nextRouteName(t, library)} msg={libMsg} onCancel={back} />;
+      break;
+    case 'patrol':
+      head = <StageTitle eyebrow={`PATROL · ${screen.id}`} title={patrol?.name ?? screen.id} sub={patrol ? `${patrol.deviceId} · ${patrol.days.map((d) => t(DAYS[d])).join(' ')} · ${patrol.times.join(', ')}` : undefined} />;
+      side = patrol ? <PatrolDetail key={patrol.id} p={patrol} onDeleted={back} /> : <Gone onBack={back} />;
+      break;
+    case 'new-patrol':
+      head = <StageTitle eyebrow="NEW PATROL" title={t('New patrol schedule')} />;
+      side = (
+        <section className="panel mp-box">
+          <div className="panel-head">
+            <div>
+              <span className="lg-eyebrow">NEW PATROL</span>
+              <h2>{t('Set the route and the timetable')}</h2>
             </div>
-          )}
-        </aside>
-
-        <section className="mp-stage" aria-label={t('Route on the map')}>
-          <div className="panel mp-stage-head">
-            {tab === 'missions' && (creating ? <StageTitle eyebrow="NEW MISSION" title={t('New mission')} /> : sel ? <MissionTitle m={sel} /> : <StageTitle eyebrow="MISSION" title={t('No mission selected')} />)}
-            {tab === 'missions' && (creating || sel) && <StepBar m={creating ? undefined : sel} />}
-            {tab === 'routes' && <StageTitle eyebrow="SAVED ROUTE" title={naming !== null ? t('New route') : (route?.name ?? t('No saved routes yet'))} />}
-            {tab === 'patrols' && <StageTitle eyebrow="PATROL" title={patrol?.name ?? t('No patrol schedules yet')} sub={patrol ? `${patrol.deviceId} · ${patrol.times.join(', ')}` : undefined} />}
+            <button type="button" className="btn-ghost small" onClick={back} aria-label={t('Close')} title={t('Close')}>
+              <X size={16} />
+            </button>
           </div>
-          <div className="panel mp-map">
-            <MainMap />
+          <div className="step">
+            <PatrolForm startWithRoute={screen.route} onSaved={(p) => go({ kind: 'patrol', id: p.id })} onCancel={back} onLoop={setPatrolLoop} />
           </div>
-          <StageStats
-            n={
-              tab === 'missions'
-                ? sel && routeNumbers(RUNNING.includes(sel.status) ? sel.checkpoints.slice(sel.nextCp) : sel.checkpoints, s.devices[sel.deviceId])
-                : tab === 'routes'
-                  ? route && naming === null && routeNumbers(route.points)
-                  : patrol && routeNumbers(patrol.route, s.devices[patrol.deviceId])
-            }
-            left={tab === 'missions' && !!sel && RUNNING.includes(sel.status)}
-            noVehicle={tab === 'routes'}
-          />
         </section>
+      );
+      break;
+  }
 
+  return (
+    <div className="mp mp-mapscreen">
+      <header className="panel mp-head mp-maphead">
+        <button type="button" className="btn-ghost mp-back" onClick={back}>
+          <ArrowLeft size={16} /> {t('Plan list')}
+        </button>
+        <div className="mp-maphead-main">
+          {head}
+          {(screen.kind === 'mission' || screen.kind === 'new-mission' || screen.kind === 'saving-mission') && <StepBar m={m} />}
+        </div>
+      </header>
+      <div className="mp-body">
+        <section className="mp-stage" aria-label={t('Route on the map')}>
+          <div className={`panel mp-map${drawing ? ' is-drawing' : ''}`}>
+            <MainMap />
+            {drawing && (
+              <div className="mp-map-hint" aria-hidden="true">
+                <MousePointerClick size={15} /> {drawing.points.length ? t('Click to add the next checkpoint') : t('Click the map to place the first checkpoint')}
+              </div>
+            )}
+          </div>
+          {/* The numbers of a route being drawn are in the editor beside the map. */}
+          {!drawing && numbers && <StageStats n={numbers} left={!!m && RUNNING.includes(m.status)} noVehicle={screen.kind === 'route'} />}
+        </section>
         <aside className="mp-side" aria-label={t('Planning steps')}>
-          {tab === 'missions' &&
-            (creating ? (
-              <NewMission c={creating} setC={setCreating} onDone={doneCreating} />
-            ) : sel ? (
-              <MissionDetail key={sel.id} m={sel} />
-            ) : (
-              <Empty
-                icon={<ListChecks size={30} />}
-                title={t('Nothing to plan yet')}
-                text={t('Start a mission for a confirmed incident, or plan a routine task such as a fence check.')}
-                action={canPrepare ? { label: t('New mission'), run: () => newMission() } : undefined}
-              />
-            ))}
-          {tab === 'routes' &&
-            (naming !== null ? (
-              <NewRoute name={naming} setName={setNaming} msg={libMsg} />
-            ) : route ? (
-              <RouteDetail
-                key={route.id}
-                r={route}
-                canEdit={canRoutes}
-                msg={libMsg}
-                onUse={() => newMission({ source: 'task', route: `lib:${route.id}` })}
-                onPatrol={can(me.role, 'patrol.manage') && session ? () => (setPatrolRoute(`lib:${route.id}`), setTab('patrols')) : undefined}
-                onDeleted={() => setRouteSel(null)}
-              />
-            ) : (
-              <Empty
-                icon={<FolderOpen size={30} />}
-                title={t('No saved routes yet')}
-                text={session ? t('Draw a route once and use it for missions and patrols.') : t('Saved routes are kept on the platform server.')}
-                action={canRoutes ? { label: t('New route'), run: () => setNaming('') } : undefined}
-              />
-            ))}
-          {tab === 'patrols' && <PatrolSide patrol={patrol} />}
+          {drawing && <RouteEditorDock d={drawing} msg={drawing.purpose === 'library' ? libMsg : null} />}
+          {/* Kept mounted while drawing so the forms keep what was filled in. */}
+          <div className="mp-side-rest" hidden={!!drawing}>
+            {side}
+          </div>
         </aside>
       </div>
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Missions tab
-// ---------------------------------------------------------------------------
-
-function MissionQueue({ queue, selId, onPick, query, setQuery }: { queue: ReturnType<typeof missionQueue>; selId: string | null; onPick: (id: string) => void; query: string; setQuery: (q: string) => void }) {
-  const t = useT();
-  const [allEnded, setAllEnded] = useState(false);
-  const total = queue.mine.length + queue.running.length + queue.planning.length + queue.ended.length;
-  const ended = allEnded ? queue.ended : queue.ended.slice(0, 6);
-  return (
-    <>
-      <label className="lg-search mp-search">
-        <Search size={16} aria-hidden="true" />
-        <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Search missions…')} aria-label={t('Search missions…')} />
-      </label>
-      <div className="mp-scroll">
-        <Group title={t('Waiting for you')} items={queue.mine} selId={selId} onPick={onPick} accent />
-        <Group title={t('Running')} items={queue.running} selId={selId} onPick={onPick} />
-        <Group title={t('Being planned')} items={queue.planning} selId={selId} onPick={onPick} />
-        <Group title={t('Finished')} items={ended} count={queue.ended.length} selId={selId} onPick={onPick} />
-        {queue.ended.length > ended.length && (
-          <button type="button" className="btn-ghost small mp-more" onClick={() => setAllEnded(true)}>
-            {t('Show all {n}', { n: queue.ended.length })}
-          </button>
-        )}
-        {!total && <p className="empty">{query ? t('No missions match the search.') : t('No missions yet.')}</p>}
-      </div>
-    </>
-  );
-}
-
-function Group({ title, items, count, selId, onPick, accent }: { title: string; items: QueueItem[]; count?: number; selId: string | null; onPick: (id: string) => void; accent?: boolean }) {
-  if (!items.length) return null;
-  return (
-    <div className={`mp-group${accent ? ' is-accent' : ''}`}>
-      <div className="mp-group-h">
-        <span>{title}</span>
-        <b>{count ?? items.length}</b>
-      </div>
-      {items.map((x) => (
-        <MissionCard key={x.m.id} item={x} selected={x.m.id === selId} onPick={() => onPick(x.m.id)} />
-      ))}
-    </div>
-  );
-}
-
-function MissionCard({ item: { m, turn }, selected, onPick }: { item: QueueItem; selected: boolean; onPick: () => void }) {
-  const { s } = useStore();
-  const t = useT();
-  const { kind, title } = missionPurpose(s, m);
-  const n = routeNumbers(RUNNING.includes(m.status) ? m.checkpoints.slice(m.nextCp) : m.checkpoints, s.devices[m.deviceId]);
-  const total = m.checkpoints.length;
-  return (
-    <button type="button" className={`mp-card${selected ? ' is-selected' : ''}`} aria-pressed={selected} onClick={onPick}>
-      <span className="mp-card-top">
-        <span className="mono">{m.id}</span>
-        <MissionBadge status={m.status} />
-      </span>
-      <b className="mp-card-title">
-        <KindTag kind={kind} />
-        {title}
-      </b>
-      <small>
-        {m.deviceId} · {userName(s, m.operatorId)}
-      </small>
-      <small>
-        {t('{n} checkpoints', { n: total })} · {n.lengthM} m · {fmtEta(n.timeS)}
-      </small>
-      {(m.status === 'executing' || m.status === 'paused') && (
-        <span className="mp-progress" aria-label={t('{n} of {total} checkpoints passed', { n: m.nextCp, total })}>
-          <i style={{ width: `${Math.round((100 * m.nextCp) / Math.max(1, total))}%` }} />
-        </span>
-      )}
-      {m.interruption && (
-        <small className="mp-warn">
-          <CircleAlert size={12} /> {t(m.interruption.reason)}
-        </small>
-      )}
-      {turn && (
-        <small className="mp-turn">
-          <ChevronRight size={12} /> {t(turn)}
-        </small>
-      )}
-    </button>
-  );
-}
-
-function KindTag({ kind }: { kind: 'incident' | 'task' | 'patrol' }) {
-  const t = useT();
-  if (kind === 'incident') return null;
-  return <span className={`mp-kind k-${kind}`}>{kind === 'task' ? t('Routine task') : t('Patrol')}</span>;
 }
 
 function StageTitle({ eyebrow, title, sub }: { eyebrow: string; title: string; sub?: string }) {
@@ -390,9 +616,8 @@ function StepBar({ m }: { m?: Mission }) {
   );
 }
 
-function StageStats({ n, left, noVehicle }: { n?: RouteNumbers | false; left?: boolean; noVehicle?: boolean }) {
+function StageStats({ n, left, noVehicle }: { n: RouteNumbers; left?: boolean; noVehicle?: boolean }) {
   const t = useT();
-  if (!n) return <div className="panel mp-stats mp-stats-empty">{t('Pick a mission or a route to see it on the map.')}</div>;
   return (
     <div className="panel mp-stats">
       <span>
@@ -417,6 +642,48 @@ function StageStats({ n, left, noVehicle }: { n?: RouteNumbers | false; left?: b
     </div>
   );
 }
+
+/** The plan is not there any more (deleted, or another site). */
+function Gone({ onBack }: { onBack: () => void }) {
+  const t = useT();
+  return (
+    <section className="panel mp-box mp-empty">
+      <CircleAlert size={30} />
+      <h3>{t('This plan is no longer here.')}</h3>
+      <button type="button" className="btn-secondary" onClick={onBack}>
+        <ArrowLeft size={15} /> {t('Plan list')}
+      </button>
+    </section>
+  );
+}
+
+/** The new mission was sent: waiting for the server to send it back. */
+function Saving({ onBack }: { onBack: () => void }) {
+  const t = useT();
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => setLate(true), 10_000);
+    return () => window.clearTimeout(id);
+  }, []);
+  return (
+    <section className="panel mp-box mp-empty">
+      <Hourglass size={30} />
+      <h3>{t('Saving the plan…')}</h3>
+      {late && (
+        <>
+          <p>{t('The new mission has not come back from the server yet. It shows in the plan list when it does.')}</p>
+          <button type="button" className="btn-secondary" onClick={onBack}>
+            <ArrowLeft size={15} /> {t('Plan list')}
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Missions
+// ---------------------------------------------------------------------------
 
 function MissionDetail({ m }: { m: Mission }) {
   const { s, dispatch } = useStore();
@@ -567,7 +834,7 @@ function SaveRoute({ points }: { points: RoutePoint[] }) {
   const { s, session } = useStore();
   const t = useT();
   const [name, setName] = useState<string | null>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [msg, setMsg] = useState<Msg | null>(null);
   if (!session || !can(currentUser(s).role, 'mission.prepare') || s.replay.active || !points.length) return null;
   const save = async () => {
     if (!name?.trim()) return;
@@ -609,10 +876,7 @@ function SaveRoute({ points }: { points: RoutePoint[] }) {
 function NewMission({ c, setC, onDone }: { c: Creating; setC: (c: Creating) => void; onDone: (saved: boolean) => void }) {
   const { s } = useStore();
   const t = useT();
-  const open = s.incidents
-    .filter((i) => i.status === 'confirmed' && i.type !== ROUTINE_TASK_TYPE && !i.patrolId)
-    .filter((i) => !s.missions.some((m) => m.incidentId === i.id && !ENDED.includes(m.status)))
-    .sort((a, b) => b.createdAt - a.createdAt);
+  const open = openIncidents(s);
   const inc = c.source === 'incident' ? open.find((i) => i.id === c.incidentId) : undefined;
   const ready = c.source === 'incident' ? !!inc : !!c.task.trim();
   return (
@@ -628,11 +892,11 @@ function NewMission({ c, setC, onDone }: { c: Creating; setC: (c: Creating) => v
       </div>
       <div className="step">
         <div className="seg mp-source" role="group" aria-label={t('What is the mission for?')}>
-          <button type="button" aria-pressed={c.source === 'incident'} className={c.source === 'incident' ? 'on' : ''} onClick={() => setC({ ...c, source: 'incident' })}>
-            <Siren size={14} /> {t('A confirmed incident')}
-          </button>
           <button type="button" aria-pressed={c.source === 'task'} className={c.source === 'task' ? 'on' : ''} onClick={() => setC({ ...c, source: 'task' })}>
             <ListChecks size={14} /> {t('A routine task')}
+          </button>
+          <button type="button" aria-pressed={c.source === 'incident'} className={c.source === 'incident' ? 'on' : ''} onClick={() => setC({ ...c, source: 'incident' })}>
+            <Siren size={14} /> {t('A confirmed incident')}
           </button>
         </div>
         {c.source === 'incident' ? (
@@ -667,108 +931,44 @@ function NewMission({ c, setC, onDone }: { c: Creating; setC: (c: Creating) => v
   );
 }
 
-function Empty({ icon, title, text, action }: { icon: React.ReactNode; title: string; text: string; action?: { label: string; run: () => void } }) {
+// ---------------------------------------------------------------------------
+// Saved routes
+// ---------------------------------------------------------------------------
+
+/**
+ * A new saved route: drawing starts at once, in the editor beside the map (name, checkpoints,
+ * Save). This box shows only while the route is being saved, or if the drawing was left.
+ */
+function NewRoute({ defaultName, msg, onCancel }: { defaultName: string; msg: Msg | null; onCancel: () => void }) {
+  const t = useT();
+  const draft = useRouteDraft();
+  const saving = draft?.purpose === 'library' && draft.state === 'done';
+  useEffect(() => {
+    const d = routeDraft.get();
+    if (d?.purpose === 'library' && !(d.meta as LibraryMeta | undefined)?.id) return;
+    routeDraft.start({ purpose: 'library', deviceId: '', points: [], meta: { name: defaultName } satisfies LibraryMeta });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <section className="panel mp-box mp-empty">
-      {icon}
-      <h3>{title}</h3>
-      <p>{text}</p>
-      {action && (
-        <button type="button" className="btn-secondary" onClick={action.run}>
-          <Plus size={15} /> {action.label}
-        </button>
+      {saving ? <Hourglass size={30} /> : <MapPinned size={30} />}
+      <h3>{saving ? t('Saving the route…') : t('New route')}</h3>
+      {msg && <p className={msg.ok ? 'fine' : 'mp-bad'}>{msg.text}</p>}
+      {!saving && (
+        <div className="row gap-s">
+          <button type="button" className="btn-secondary" onClick={onCancel}>
+            {t('Cancel')}
+          </button>
+          <button type="button" className="btn-primary" onClick={() => routeDraft.start({ purpose: 'library', deviceId: '', points: [], meta: { name: defaultName } satisfies LibraryMeta })}>
+            <MapPinned size={15} /> {t('Draw on the map')}
+          </button>
+        </div>
       )}
     </section>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Saved routes tab
-// ---------------------------------------------------------------------------
-
-function RouteList({ routes, selId, onPick, canAdd, onAdd }: { routes: SavedRoute[]; selId: string | null; onPick: (id: string) => void; canAdd: boolean; onAdd: () => void }) {
-  const t = useT();
-  const [q, setQ] = useState('');
-  const shown = routes.filter((r) => !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()));
-  return (
-    <>
-      <label className="lg-search mp-search">
-        <Search size={16} aria-hidden="true" />
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search routes…')} aria-label={t('Search routes…')} />
-      </label>
-      <div className="mp-scroll">
-        {shown.map((r) => {
-          const n = routeNumbers(r.points);
-          return (
-            <button key={r.id} type="button" className={`mp-card${r.id === selId ? ' is-selected' : ''}`} aria-pressed={r.id === selId} onClick={() => onPick(r.id)}>
-              <b className="mp-card-title">{r.name}</b>
-              <small>
-                {t('{n} checkpoints', { n: n.checkpoints })} · {n.lengthM} m · {fmtEta(n.timeS)}
-              </small>
-              <small>
-                {n.captures > 0 && (
-                  <>
-                    <Camera size={11} /> {n.captures} ·{' '}
-                  </>
-                )}
-                {t('Updated {date}', { date: fmtDate(r.updatedAt) })}
-              </small>
-            </button>
-          );
-        })}
-        {!shown.length && <p className="empty">{routes.length ? t('No routes match the search.') : t('No saved routes yet.')}</p>}
-        {canAdd && !routes.length && (
-          <button type="button" className="btn-secondary small mp-more" onClick={onAdd}>
-            <Plus size={14} /> {t('New route')}
-          </button>
-        )}
-      </div>
-    </>
-  );
-}
-
-function NewRoute({ name, setName, msg }: { name: string; setName: (v: string | null) => void; msg: { ok: boolean; text: string } | null }) {
-  const t = useT();
-  const draft = useRouteDraft();
-  const drawing = draft?.state === 'drawing' && draft.purpose === 'library';
-  return (
-    <section className="panel mp-box">
-      <div className="panel-head">
-        <div>
-          <span className="lg-eyebrow">SAVED ROUTE</span>
-          <h2>{t('New route')}</h2>
-        </div>
-        <button
-          type="button"
-          className="btn-ghost small"
-          onClick={() => {
-            if (routeDraft.get()?.purpose === 'library') routeDraft.clear();
-            setName(null);
-          }}
-          aria-label={t('Close')}
-        >
-          <X size={16} />
-        </button>
-      </div>
-      <div className="step">
-        <label className="field">
-          <span>{t('Route name')}</span>
-          <input value={name} maxLength={60} placeholder={t('Route name, e.g. Night loop')} onChange={(e) => setName(e.target.value)} autoFocus disabled={drawing} />
-        </label>
-        {drawing ? (
-          <p className="fine">{t('Click the map to add checkpoints, then press “Save route” in the map panel.')}</p>
-        ) : (
-          <button type="button" className="btn-primary" disabled={!name.trim()} onClick={() => routeDraft.start({ purpose: 'library', deviceId: '', points: [], meta: { name: name.trim() } satisfies LibraryMeta })}>
-            <MapPinned size={15} /> {t('Draw on the map')}
-          </button>
-        )}
-        {msg && <p className={msg.ok ? 'fine' : 'mp-bad'}>{msg.text}</p>}
-      </div>
-    </section>
-  );
-}
-
-function RouteDetail({ r, canEdit, msg, onUse, onPatrol, onDeleted }: { r: SavedRoute; canEdit: boolean; msg: { ok: boolean; text: string } | null; onUse: () => void; onPatrol?: () => void; onDeleted: () => void }) {
+function RouteDetail({ r, canEdit, msg, onUse, onPatrol, onDeleted }: { r: SavedRoute; canEdit: boolean; msg: Msg | null; onUse: () => void; onPatrol?: () => void; onDeleted: () => void }) {
   const { s, session } = useStore();
   const t = useT();
   const [rename, setRename] = useState<string | null>(null);
@@ -776,14 +976,17 @@ function RouteDetail({ r, canEdit, msg, onUse, onPatrol, onDeleted }: { r: Saved
   const [err, setErr] = useState<string | null>(null);
   const draft = useRouteDraft();
   const editing = draft?.state === 'drawing' && draft.purpose === 'library' && (draft.meta as LibraryMeta | undefined)?.id === r.id;
+  /** True when the server took the change. */
   const call = async (fn: () => Promise<unknown>) => {
-    if (!session) return;
+    if (!session) return false;
     try {
       setErr(null);
       await fn();
       await savedRoutes.refresh(session.api, s.site?.id);
+      return true;
     } catch (e) {
       setErr(t(e instanceof Error ? e.message : String(e)));
+      return false;
     }
   };
   return (
@@ -792,7 +995,7 @@ function RouteDetail({ r, canEdit, msg, onUse, onPatrol, onDeleted }: { r: Saved
         <div className="panel-head">
           <div>
             <span className="lg-eyebrow">SAVED ROUTE</span>
-            <h2>{r.name}</h2>
+            <h2>{t('Checkpoints')}</h2>
           </div>
         </div>
         <div className="step">
@@ -811,10 +1014,9 @@ function RouteDetail({ r, canEdit, msg, onUse, onPatrol, onDeleted }: { r: Saved
               </li>
             ))}
           </ol>
-          <small className="fine">
-            {t('Updated {date}', { date: `${fmtDate(r.updatedAt)} ${fmtTime(r.updatedAt)}` })} · {userName(s, r.createdBy)}
-          </small>
         </div>
+      </section>
+      <section className="panel mp-box">
         <div className="step">
           <button type="button" className="btn-primary" onClick={onUse} disabled={!can(currentUser(s).role, 'mission.prepare') || s.replay.active}>
             <ListChecks size={15} /> {t('Use for a new mission')}
@@ -837,7 +1039,11 @@ function RouteDetail({ r, canEdit, msg, onUse, onPatrol, onDeleted }: { r: Saved
                 </button>
                 {confirm ? (
                   <>
-                    <button type="button" className="btn-ghost small danger" onClick={() => void call(() => session!.api.del(`/saved-routes/${encodeURIComponent(r.id)}`)).then(onDeleted)}>
+                    <button
+                      type="button"
+                      className="btn-ghost small danger"
+                      onClick={() => void call(() => session!.api.del(`/saved-routes/${encodeURIComponent(r.id)}`)).then((ok) => ok && onDeleted())}
+                    >
                       <Trash2 size={14} /> {t('Delete “{name}”', { name: r.name })}
                     </button>
                     <button type="button" className="btn-ghost small" onClick={() => setConfirm(false)}>
@@ -856,7 +1062,7 @@ function RouteDetail({ r, canEdit, msg, onUse, onPatrol, onDeleted }: { r: Saved
               className="row gap-s"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (rename.trim()) void call(() => session!.api.patch(`/saved-routes/${encodeURIComponent(r.id)}`, { name: rename.trim() })).then(() => setRename(null));
+                if (rename.trim()) void call(() => session!.api.patch(`/saved-routes/${encodeURIComponent(r.id)}`, { name: rename.trim() })).then((ok) => ok && setRename(null));
               }}
             >
               <input autoFocus className="grow" value={rename} maxLength={60} onChange={(e) => setRename(e.target.value)} aria-label={t('Route name')} />
@@ -874,12 +1080,14 @@ function RouteDetail({ r, canEdit, msg, onUse, onPatrol, onDeleted }: { r: Saved
 }
 
 // ---------------------------------------------------------------------------
-// Scheduled patrols tab
+// Scheduled patrols
 // ---------------------------------------------------------------------------
 
-function PatrolSide({ patrol }: { patrol?: Patrol }) {
-  const { s } = useStore();
+function PatrolDetail({ p, onDeleted }: { p: Patrol; onDeleted: () => void }) {
+  const { s, session } = useStore();
   const t = useT();
+  const manage = can(currentUser(s).role, 'patrol.manage') && !s.replay.active && !!session;
+  const [confirm, setConfirm] = useState(false);
   const runs = useMemo(() => upcomingRuns(s.patrols, Date.now(), 7), [s.patrols]);
   const days = new Map<string, typeof runs>();
   for (const r of runs) {
@@ -888,42 +1096,66 @@ function PatrolSide({ patrol }: { patrol?: Patrol }) {
   }
   return (
     <>
-      {patrol && (
-        <section className="panel mp-box">
-          <div className="panel-head">
-            <div>
-              <span className="lg-eyebrow">PATROL · {patrol.id}</span>
-              <h2>{patrol.name}</h2>
-            </div>
+      <section className="panel mp-box">
+        <dl className="mp-facts">
+          <div>
+            <dt>{t('Vehicle')}</dt>
+            <dd>{p.deviceId}</dd>
           </div>
-          <dl className="mp-facts">
-            <div>
-              <dt>{t('Vehicle')}</dt>
-              <dd>{patrol.deviceId}</dd>
-            </div>
-            <div>
-              <dt>{t('Operator')}</dt>
-              <dd>{userName(s, patrol.operatorId)}</dd>
-            </div>
-            <div>
-              <dt>{t('Approved by')}</dt>
-              <dd>{userName(s, patrol.createdBy)}</dd>
-            </div>
-            <div>
-              <dt>{t('Start')}</dt>
-              <dd>{patrol.autoStart ? t('Automatic when ready') : t('By the operator')}</dd>
-            </div>
-            <div>
-              <dt>{t('Next run')}</dt>
-              <dd>{patrol.enabled && patrol.nextRunAt ? `${fmtDate(patrol.nextRunAt)} ${fmtTime(patrol.nextRunAt)}` : t('Disabled')}</dd>
-            </div>
-            <div>
-              <dt>{t('Last run')}</dt>
-              <dd>{patrol.lastRunAt ? `${fmtTime(patrol.lastRunAt)} · ${t(patrol.lastOutcome ?? '—')}` : '—'}</dd>
-            </div>
-          </dl>
-        </section>
-      )}
+          <div>
+            <dt>{t('Operator')}</dt>
+            <dd>{userName(s, p.operatorId)}</dd>
+          </div>
+          <div>
+            <dt>{t('Days')}</dt>
+            <dd>{p.days.map((d) => t(DAYS[d])).join(' ')}</dd>
+          </div>
+          <div>
+            <dt>{t('Times')}</dt>
+            <dd>{p.times.join(', ')}</dd>
+          </div>
+          <div>
+            <dt>{t('Approved by')}</dt>
+            <dd>{userName(s, p.createdBy)}</dd>
+          </div>
+          <div>
+            <dt>{t('Start')}</dt>
+            <dd>{p.autoStart ? t('Automatic when ready') : t('By the operator')}</dd>
+          </div>
+          <div>
+            <dt>{t('Next run')}</dt>
+            <dd>{p.enabled && p.nextRunAt ? `${fmtDate(p.nextRunAt)} ${fmtTime(p.nextRunAt)}` : t('Disabled')}</dd>
+          </div>
+          <div>
+            <dt>{t('Last run')}</dt>
+            <dd>{p.lastRunAt ? `${fmtTime(p.lastRunAt)} · ${t(p.lastOutcome ?? '—')}${p.lastMissionId ? ` (${p.lastMissionId})` : ''}` : '—'}</dd>
+          </div>
+        </dl>
+        {manage && session && (
+          <div className="mp-links">
+            <button type="button" className="btn-secondary small" onClick={() => void session.runPatrol(p.id)}>
+              <Play size={14} /> {t('Run now')}
+            </button>
+            <button type="button" className="btn-ghost small" onClick={() => void session.savePatrol({ enabled: !p.enabled }, p.id)}>
+              {p.enabled ? <Pause size={14} /> : <Play size={14} />} {p.enabled ? t('Disable') : t('Enable')}
+            </button>
+            {confirm ? (
+              <>
+                <button type="button" className="btn-ghost small danger" onClick={() => void session.deletePatrol(p.id).then(onDeleted)}>
+                  <Trash2 size={14} /> {t('Delete “{name}”', { name: p.name })}
+                </button>
+                <button type="button" className="btn-ghost small" onClick={() => setConfirm(false)}>
+                  {t('Keep it')}
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn-ghost small" onClick={() => setConfirm(true)}>
+                <Trash2 size={14} /> {t('Delete')}
+              </button>
+            )}
+          </div>
+        )}
+      </section>
       <section className="panel mp-box">
         <div className="panel-head">
           <div>
@@ -938,7 +1170,7 @@ function PatrolSide({ patrol }: { patrol?: Patrol }) {
               <b>{day}</b>
               <ul>
                 {list.map((r) => (
-                  <li key={`${r.patrol.id}:${r.at}`} className={r.patrol.id === patrol?.id ? 'is-selected' : ''}>
+                  <li key={`${r.patrol.id}:${r.at}`} className={r.patrol.id === p.id ? 'is-selected' : ''}>
                     <span className="mono">{fmtTime(r.at)}</span>
                     <span className="grow">{r.patrol.name}</span>
                     <small>

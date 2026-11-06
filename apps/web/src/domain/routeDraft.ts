@@ -57,6 +57,8 @@ export interface RouteDraft {
   selected?: number;
   /** drawing: the map takes clicks. done: finished, the caller collects the points. */
   state: 'drawing' | 'done';
+  /** Done by Cancel: the points are the ones it started with. */
+  cancelled?: boolean;
   /** Page to go back to when the drawing ends (the patrol and zone forms are not on the map page). */
   returnTo?: View;
   /** Caller's form values, restored when it comes back. */
@@ -175,9 +177,9 @@ const emit = () => listeners.forEach((f) => f());
 
 export const routeDraft = {
   get: (): RouteDraft | null => current,
-  start(d: Omit<RouteDraft, 'state' | 'initial' | 'past'>) {
+  start(d: Omit<RouteDraft, 'state' | 'initial' | 'past' | 'cancelled'>) {
     const points = d.points.map(roundKeep);
-    current = { ...d, points, initial: points, past: [], state: 'drawing', selected: undefined };
+    current = { ...d, points, initial: points, past: [], state: 'drawing', selected: undefined, cancelled: undefined };
     emit();
   },
   setPoints(points: RoutePoint[]) {
@@ -212,7 +214,7 @@ export const routeDraft = {
   /** Stop drawing and keep what was there before (the caller's form still gets its values back). */
   cancel() {
     if (!current) return;
-    current = { ...current, points: current.initial, state: 'done' };
+    current = { ...current, points: current.initial, state: 'done', cancelled: true };
     emit();
   },
   clear() {
@@ -231,6 +233,28 @@ export const routeDraft = {
 export function useRouteDraft() {
   return useSyncExternalStore(routeDraft.subscribe, routeDraft.get, routeDraft.get);
 }
+
+// ---- docked editor -----------------------------------------------------------------------
+// A page that shows the route editor beside the map (the mission planning page) docks it: the
+// floating panel on the map then stays out of the way. Zones keep their own editor on the map.
+
+let docked = 0;
+const isDocked = () => docked > 0;
+
+export const routeDraftDock = {
+  /** Dock the editor while the caller is shown; returns the undock function. */
+  add() {
+    docked++;
+    emit();
+    return () => {
+      docked--;
+      emit();
+    };
+  },
+  get: isDocked,
+};
+
+export const useDraftDocked = () => useSyncExternalStore(routeDraft.subscribe, isDocked, isDocked);
 
 /** A finished drawing with points for this purpose and vehicle, if there is one. */
 export function finishedDraft(d: RouteDraft | null, purpose: DraftPurpose, deviceId: string) {
