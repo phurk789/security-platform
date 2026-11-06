@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Incident, Mission, MissionStatus, Patrol } from '@13store/shared';
+import type { Incident, Mission, MissionStatus, Patrol, SavedRoute } from '@13store/shared';
 import { ROUTINE_TASK_TYPE } from '@13store/shared';
-import { missionPurpose, missionQueue, myTurn, routeNumbers, stepIndex, upcomingRuns } from './missionPlanning';
+import { missionPurpose, missionQueue, myTurn, planCounts, planList, routeNumbers, stepIndex, upcomingRuns, type PlanRow } from './missionPlanning';
 
 const mission = (id: string, status: MissionStatus, extra: Partial<Mission> = {}): Mission => ({
   id,
@@ -120,5 +120,51 @@ describe('upcoming patrol runs', () => {
     const thu = upcomingRuns([patrol({ days: [4], times: ['08:30'] })], now, 7);
     expect(thu).toHaveLength(1);
     expect(new Date(thu[0].at).getDay()).toBe(4);
+  });
+});
+
+describe('the plan list', () => {
+  const patrol = (id: string, extra: Partial<Patrol> = {}): Patrol => ({
+    id,
+    name: `Patrol ${id}`,
+    deviceId: 'UGV-01',
+    operatorId: 'u-somchai',
+    route: [{ x: 0, y: 0 }],
+    days: [1],
+    times: ['22:00'],
+    enabled: true,
+    autoStart: false,
+    createdBy: 'u-nida',
+    createdAt: 0,
+    ...extra,
+  });
+  const route = (id: string, name: string, updatedAt: number): SavedRoute => ({ id, siteId: 'S1', name, points: [{ x: 0, y: 0 }], createdBy: 'Nida W.', updatedAt });
+  const missions = [mission('M1', 'pending_approval'), mission('M2', 'executing'), mission('M3', 'completed'), mission('M5', 'draft')];
+  const patrols = [patrol('P1', { nextRunAt: 5000 }), patrol('P2', { enabled: false, name: 'Old loop' }), patrol('P3', { nextRunAt: 2000 })];
+  const routes = [route('R1', 'Yard loop', 100), route('R2', 'Gate check', 300)];
+  const s = { missions, incidents: [], users, patrols };
+  const keys = (rows: PlanRow[]) => rows.map((r) => (r.kind === 'mission' ? r.m.id : r.kind === 'patrol' ? r.p.id : r.r.id));
+
+  it('puts every plan in one list: my turn, running, planned, patrols, routes, finished', () => {
+    const groups = planList(s, nida, routes);
+    expect(groups.map((g) => g.key)).toEqual(['mine', 'running', 'planning', 'patrols', 'routes', 'ended']);
+    expect(groups.map((g) => keys(g.rows))).toEqual([['M1'], ['M2'], ['M5'], ['P3', 'P1', 'P2'], ['R2', 'R1'], ['M3']]);
+  });
+
+  it('shows one kind of plan at a time and leaves empty groups out', () => {
+    expect(planList(s, nida, routes, '', 'routes').map((g) => g.key)).toEqual(['routes']);
+    expect(planList(s, nida, routes, '', 'patrols').map((g) => g.key)).toEqual(['patrols']);
+    expect(planList(s, nida, routes, '', 'missions').map((g) => g.key)).toEqual(['mine', 'running', 'planning', 'ended']);
+    expect(planList({ ...s, missions: [], patrols: [] }, nida, [])).toEqual([]);
+  });
+
+  it('searches missions, patrols and routes alike', () => {
+    expect(planList(s, nida, routes, 'gate').flatMap((g) => keys(g.rows))).toEqual(['R2']);
+    expect(planList(s, nida, routes, 'old loop').flatMap((g) => keys(g.rows))).toEqual(['P2']);
+    expect(planList(s, nida, routes, 'm2').flatMap((g) => keys(g.rows))).toEqual(['M2']);
+  });
+
+  it('counts the plans under each filter', () => {
+    expect(planCounts(s, routes)).toEqual({ all: 9, missions: 4, patrols: 3, routes: 2 });
   });
 });

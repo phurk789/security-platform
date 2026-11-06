@@ -1,49 +1,68 @@
-/* Mission planning page (MissionPlanning.tsx), in the Liquid Glass console look. */
+/* Mission planning page (MissionPlanning.tsx), in the Liquid Glass console look: the plan list,
+   and one plan on its map screen. */
 :root .app.liquid-ui .mp { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; min-width: 0; padding: 12px 18px 14px 16px; overflow: hidden; }
 :root .app.liquid-ui .mp-head { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 12px 18px; height: auto; flex: none; padding: 12px 18px; border-radius: 21px; }
 :root .app.liquid-ui .mp-title { min-width: 0; }
 :root .app.liquid-ui .mp-title h1 { margin: 2px 0 0; font-size: 1.45rem; font-weight: 650; letter-spacing: -.03em; line-height: 1.15; }
 :root .app.liquid-ui .mp-title p { margin: 4px 0 0; font-size: .68rem; color: var(--text-3); }
-:root .app.liquid-ui .mp-tabs { margin-left: auto; }
-:root .app.liquid-ui .mp-tabs button { display: inline-flex; align-items: center; gap: 6px; font-size: .7rem; padding: 6px 11px; }
-:root .app.liquid-ui .mp-tabs small { font-size: .6rem; color: var(--text-3); }
 :root .app.liquid-ui .mp-head .btn-primary { display: inline-flex; align-items: center; gap: 6px; }
+:root .app.liquid-ui .mp-create { margin-left: auto; }
 
-:root .app.liquid-ui .mp-body { display: grid; grid-template-columns: 276px minmax(0, 1fr) 360px; gap: 14px; flex: 1; min-height: 0; }
-/* Left: the queue or list */
-:root .app.liquid-ui .mp-list { display: flex; flex-direction: column; min-height: 0; height: auto; overflow: hidden; border-radius: 21px; padding: 0; }
-:root .app.liquid-ui .mp-search { margin: 12px 12px 6px; }
-:root .app.liquid-ui .mp-scroll { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 14px; }
-:root .app.liquid-ui .mp-group { display: flex; flex-direction: column; gap: 7px; }
-:root .app.liquid-ui .mp-group + .mp-group { margin-top: 6px; }
-:root .app.liquid-ui .mp-group-h { display: flex; align-items: center; justify-content: space-between; margin: 6px 4px 0; font-size: .6rem; font-weight: 650; letter-spacing: .08em; color: var(--text-3); }
+/* ---- The plan list -------------------------------------------------------------------- */
+:root .app.liquid-ui .mp-plans { display: flex; flex-direction: column; flex: 1; min-height: 0; height: auto; padding: 0; overflow: hidden; border-radius: 21px; }
+:root .app.liquid-ui .mp-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
+:root .app.liquid-ui .mp-filter { display: inline-flex; }
+:root .app.liquid-ui .mp-filter button { display: inline-flex; align-items: center; gap: 6px; font-size: .72rem; padding: 6px 12px; }
+:root .app.liquid-ui .mp-filter small { font-size: .6rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
+:root .app.liquid-ui .mp-tools .mp-search { flex: 1; min-width: 200px; max-width: 360px; margin: 0 0 0 auto; }
+:root .app.liquid-ui .mp-rows { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 18px; }
+:root .app.liquid-ui .mp-group { display: flex; flex-direction: column; gap: 6px; }
+:root .app.liquid-ui .mp-group-h { display: flex; align-items: center; gap: 8px; margin: 0 4px 2px; font-size: .62rem; font-weight: 650; letter-spacing: .06em; color: var(--text-3); }
 :root .app.liquid-ui .mp-group-h b { min-width: 20px; padding: 1px 6px; border-radius: 999px; text-align: center; font-size: .58rem; background: var(--lg-surface-2); border: 1px solid var(--line); color: var(--text-2); }
 :root .app.liquid-ui .mp-group.is-accent .mp-group-h { color: var(--text); }
 :root .app.liquid-ui .mp-group.is-accent .mp-group-h b { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, transparent); }
-:root .app.liquid-ui .mp-card { display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%; padding: 10px 12px; text-align: left; border: 1px solid var(--line); border-radius: 15px; color: var(--text); background: var(--lg-surface-2); cursor: pointer; }
-:root .app.liquid-ui .mp-card:hover { border-color: var(--text-3); }
-:root .app.liquid-ui .mp-card.is-selected { border-color: var(--text-2); box-shadow: inset 0 0 0 1px var(--text-2); }
-:root .app.liquid-ui .mp-card:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
-:root .app.liquid-ui .mp-card-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: .62rem; color: var(--text-3); }
-:root .app.liquid-ui .mp-card-title { display: block; font-size: .8rem; font-weight: 620; line-height: 1.35; overflow-wrap: anywhere; }
-:root .app.liquid-ui .mp-card small { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: .64rem; color: var(--text-2); }
-:root .app.liquid-ui .mp-kind { display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 6px; font-size: .56rem; font-weight: 650; vertical-align: 1px; color: var(--text-2); background: var(--lg-surface); border: 1px solid var(--line); }
-:root .app.liquid-ui .mp-kind.k-task { color: var(--green); border-color: color-mix(in srgb, var(--green) 30%, transparent); }
-:root .app.liquid-ui .mp-progress { display: block; height: 4px; margin: 3px 0 1px; border-radius: 2px; background: var(--line); overflow: hidden; }
+/* One plan: type, name and details, status, arrow */
+:root .app.liquid-ui .mp-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto 16px; align-items: center; gap: 6px 14px; width: 100%; padding: 11px 14px; text-align: left; border: 1px solid var(--line); border-radius: 15px; color: var(--text); background: var(--lg-surface-2); cursor: pointer; }
+:root .app.liquid-ui .mp-row:hover { border-color: var(--text-3); }
+:root .app.liquid-ui .mp-row:hover .mp-row-go { color: var(--text); transform: translateX(2px); }
+:root .app.liquid-ui .mp-row:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+:root .app.liquid-ui .mp-type { justify-self: start; padding: 3px 9px; border-radius: 8px; font-size: .62rem; font-weight: 650; white-space: nowrap; border: 1px solid var(--line); background: var(--lg-surface); color: var(--text-2); }
+:root .app.liquid-ui .mp-type.t-mission { color: var(--text); }
+:root .app.liquid-ui .mp-type.t-patrol { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 35%, transparent); }
+:root .app.liquid-ui .mp-type.t-route { color: var(--green); border-color: color-mix(in srgb, var(--green) 35%, transparent); }
+:root .app.liquid-ui .mp-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+:root .app.liquid-ui .mp-row-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+:root .app.liquid-ui .mp-row-title b { font-size: .84rem; font-weight: 620; line-height: 1.35; overflow-wrap: anywhere; }
+:root .app.liquid-ui .mp-row-title .mono { flex: none; font-size: .6rem; color: var(--text-3); }
+:root .app.liquid-ui .mp-row-main small { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: .66rem; line-height: 1.45; color: var(--text-2); }
+:root .app.liquid-ui .mp-row-main small.mp-warn { color: var(--amber); }
+:root .app.liquid-ui .mp-row-main small.mp-turn { color: var(--text); font-weight: 650; }
+:root .app.liquid-ui .mp-row-status { justify-self: end; text-align: right; }
+:root .app.liquid-ui .mp-row-go { color: var(--text-3); transition: transform .12s ease, color .12s ease; }
+:root .app.liquid-ui .mp-progress { display: block; height: 4px; max-width: 320px; margin: 3px 0 1px; border-radius: 2px; background: var(--line); overflow: hidden; }
 :root .app.liquid-ui .mp-progress i { display: block; height: 100%; border-radius: 2px; background: var(--green); }
-:root .app.liquid-ui .mp-card small.mp-warn { color: var(--amber); }
-:root .app.liquid-ui .mp-card small.mp-turn { margin-top: 2px; color: var(--text); font-weight: 650; }
 :root .app.liquid-ui .mp-more { align-self: center; }
-/* The patrol schedules card inside the list column */
-:root .app.liquid-ui .mp-list .card { margin: 0; padding: 4px 2px; border: 0; background: transparent; box-shadow: none; }
-:root .app.liquid-ui .mp-list .patrols li { border-radius: 12px; padding: 8px; }
-:root .app.liquid-ui .mp-list .patrols li.click { cursor: pointer; }
-:root .app.liquid-ui .mp-list .patrols li.is-selected { background: var(--lg-surface-2); box-shadow: inset 0 0 0 1px var(--text-2); }
-:root .app.liquid-ui .mp-list .patrol-form { display: flex; flex-direction: column; gap: 8px; }
+:root .app.liquid-ui .mp-rows .empty { margin: 30px auto; color: var(--text-3); font-size: .78rem; }
+:root .app.liquid-ui .mp-rows > .card { margin: 0; }
+/* "+ New plan": what kind */
+:root .app.liquid-ui .mp-kinds { display: flex; flex-direction: column; gap: 8px; }
+:root .app.liquid-ui .mp-kind-opt { display: grid; grid-template-columns: 22px minmax(0, 1fr) 16px; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; text-align: left; border: 1px solid var(--line); border-radius: 14px; color: var(--text); background: var(--lg-surface-2, var(--bg-2)); cursor: pointer; }
+:root .app.liquid-ui .mp-kind-opt:hover { border-color: var(--text-3); }
+:root .app.liquid-ui .mp-kind-opt:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+:root .app.liquid-ui .mp-kind-opt span { display: flex; flex-direction: column; gap: 3px; }
+:root .app.liquid-ui .mp-kind-opt b { font-size: .86rem; font-weight: 640; }
+:root .app.liquid-ui .mp-kind-opt small { font-size: .7rem; line-height: 1.5; color: var(--text-2); }
+:root .app.liquid-ui .mp-kind-opt > svg:first-child { color: var(--text-2); }
+:root .app.liquid-ui .mp-kind-opt.k-patrol > svg:first-child { color: var(--cyan); }
+:root .app.liquid-ui .mp-kind-opt.k-route > svg:first-child { color: var(--green); }
+:root .app.liquid-ui .mp-kind-opt > svg:last-child { color: var(--text-3); }
 
-/* Centre: steps, map and route numbers */
+/* ---- One plan on the map ---------------------------------------------------------------- */
+:root .app.liquid-ui .mp-maphead { align-items: flex-start; flex-wrap: nowrap; padding: 10px 16px; }
+:root .app.liquid-ui .mp-back { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-top: 2px; white-space: nowrap; }
+:root .app.liquid-ui .mp-maphead-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+:root .app.liquid-ui .mp-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; flex: 1; min-height: 0; }
 :root .app.liquid-ui .mp-stage { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
-:root .app.liquid-ui .mp-stage-head { display: flex; flex-direction: column; gap: 9px; height: auto; flex: none; padding: 12px 16px; border-radius: 19px; }
 :root .app.liquid-ui .mp-stage-title h2 { margin: 2px 0 0; font-size: 1.08rem; font-weight: 640; line-height: 1.3; overflow-wrap: anywhere; }
 :root .app.liquid-ui .mp-stage-title small { display: block; margin-top: 2px; font-size: .66rem; color: var(--text-3); }
 :root .app.liquid-ui .mp-steps { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
@@ -59,7 +78,7 @@
 :root .app.liquid-ui .mp-stats b { color: var(--text); font-size: .86rem; font-weight: 650; font-variant-numeric: tabular-nums; }
 :root .app.liquid-ui .mp-stats-empty { color: var(--text-3); }
 
-/* Right: planning steps and details */
+/* Beside the map: the plan's steps and details */
 :root .app.liquid-ui .mp-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 1px 2px; }
 :root .app.liquid-ui .mp-box { height: auto; flex: none; border-radius: 21px; }
 :root .app.liquid-ui .mp-box .panel-head h2 { font-size: 1rem; line-height: 1.3; overflow-wrap: anywhere; }
@@ -90,8 +109,9 @@
 :root .app.liquid-ui .mp-pick button.on { border-color: var(--text-2); box-shadow: inset 0 0 0 1px var(--text-2); }
 :root .app.liquid-ui .mp-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 30px 22px; text-align: center; color: var(--text-3); }
 :root .app.liquid-ui .mp-empty h3 { margin: 4px 0 0; font-size: .95rem; color: var(--text); }
-:root .app.liquid-ui .mp-empty p { margin: 0; font-size: .74rem; line-height: 1.55; }
+:root .app.liquid-ui .mp-empty p { max-width: 460px; margin: 0; font-size: .74rem; line-height: 1.55; }
 :root .app.liquid-ui .mp-empty button { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; }
+:root .app.liquid-ui .mp-howto { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0 0 0 18px; font-size: .74rem; line-height: 1.5; color: var(--text-2); }
 :root .app.liquid-ui .mp-points { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 300px; overflow-y: auto; }
 :root .app.liquid-ui .mp-points li { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 9px; font-size: .74rem; }
 :root .app.liquid-ui .mp-points li:nth-child(odd) { background: var(--lg-surface-2); }
@@ -104,33 +124,40 @@
 :root .app.liquid-ui .mp-day li.is-selected { box-shadow: inset 0 0 0 1px var(--text-2); }
 :root .app.liquid-ui .mp-day li small { font-size: .62rem; color: var(--text-3); }
 :root .app.liquid-ui .mp .btn-ghost.danger { color: var(--red); }
+/* The patrol form beside the map: one column */
+:root .app.liquid-ui .mp-side .patrol-form { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+:root .app.liquid-ui .mp-side .patrol-form .btn-secondary.small { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; }
 
 @media (max-width: 1599px) {
   :root .app.liquid-ui .mp { padding: 12px; }
-  :root .app.liquid-ui .mp-body { grid-template-columns: 248px minmax(0, 1fr) 318px; gap: 12px; }
+  :root .app.liquid-ui .mp-body { grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; }
 }
-/* Compact: the steps go under the map; the page scrolls. */
-@media (max-width: 1279px) {
-  :root .app.liquid-ui .mp { height: 100%; overflow-x: hidden; overflow-y: auto; }
-  :root .app.liquid-ui .mp-body { grid-template-columns: 236px minmax(0, 1fr); grid-template-rows: auto auto; flex: none; }
-  :root .app.liquid-ui .mp-list { grid-row: 1 / 3; align-self: start; max-height: calc(100vh - 150px); position: sticky; top: 0; }
-  :root .app.liquid-ui .mp-stage { grid-column: 2; }
-  :root .app.liquid-ui .mp-map { flex: none; height: clamp(360px, 52vh, 560px); }
-  :root .app.liquid-ui .mp-side { grid-column: 2; overflow: visible; }
+/* Compact: the plan's steps go under the map; the page scrolls. */
+@media (max-width: 1099px) {
+  :root .app.liquid-ui .mp-mapscreen { overflow-x: hidden; overflow-y: auto; }
+  :root .app.liquid-ui .mp-body { grid-template-columns: minmax(0, 1fr); flex: none; }
+  :root .app.liquid-ui .mp-map { flex: none; height: clamp(340px, 55vh, 560px); }
+  :root .app.liquid-ui .mp-side { overflow: visible; }
 }
-@media (max-width: 900px) {
-  :root .app.liquid-ui .mp-body { grid-template-columns: minmax(0, 1fr); }
-  :root .app.liquid-ui .mp-list { grid-row: auto; max-height: 340px; position: static; }
-  :root .app.liquid-ui .mp-stage, :root .app.liquid-ui .mp-side { grid-column: 1; }
-  :root .app.liquid-ui .mp-map { height: 380px; }
-  :root .app.liquid-ui .mp-tabs { margin-left: 0; width: 100%; display: flex; }
-  :root .app.liquid-ui .mp-tabs button { flex: 1; justify-content: center; }
+@media (max-width: 760px) {
+  /* The page scrolls, not the list box inside it. */
+  :root .app.liquid-ui .mp-listpage { overflow-x: hidden; overflow-y: auto; }
+  :root .app.liquid-ui .mp-plans, :root .app.liquid-ui .mp-rows { flex: none; overflow: visible; }
+  :root .app.liquid-ui .mp-row { grid-template-columns: minmax(0, 1fr) 16px; grid-template-areas: 'type go' 'main go' 'status go'; }
+  :root .app.liquid-ui .mp-type { grid-area: type; }
+  :root .app.liquid-ui .mp-row-main { grid-area: main; }
+  :root .app.liquid-ui .mp-row-status { grid-area: status; justify-self: start; text-align: left; }
+  :root .app.liquid-ui .mp-row-go { grid-area: go; }
+  :root .app.liquid-ui .mp-tools .mp-search { max-width: none; margin: 0; }
+  :root .app.liquid-ui .mp-filter { display: flex; width: 100%; }
+  :root .app.liquid-ui .mp-filter button { flex: 1; justify-content: center; padding: 6px 6px; }
+  :root .app.liquid-ui .mp-maphead { flex-direction: column; gap: 8px; }
 }
 @media (max-width: 600px) {
   :root .app.liquid-ui .mp { padding: 10px; }
   :root .app.liquid-ui .mp-head { padding: 12px 14px; }
-  :root .app.liquid-ui .mp-tabs button { font-size: .62rem; padding: 6px 6px; }
-  :root .app.liquid-ui .mp-tabs small { display: none; }
+  :root .app.liquid-ui .mp-create { margin-left: 0; width: 100%; justify-content: center; }
+  :root .app.liquid-ui .mp-filter small { display: none; }
   :root .app.liquid-ui .mp-map { height: 320px; }
   :root .app.liquid-ui .mp-facts { grid-template-columns: minmax(0, 1fr); }
 }
