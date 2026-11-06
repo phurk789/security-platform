@@ -91,6 +91,16 @@ export interface GwHello {
   adapters: AdapterDeclaration[];
   /** WGS 84 anchor the gateway converts device positions with; the server warns when it differs from the site's. */
   geo?: GeoAnchor;
+  /** This gateway is an AI box: it analyses other devices' video when the server hands it jobs (`ai_jobs`). */
+  aiBox?: AiBoxOffer;
+}
+
+/** What an AI box (a Jetson next to the server, for example) offers the site. */
+export interface AiBoxOffer {
+  /** Most videos it analyses at the same time. */
+  capacity: number;
+  /** What it runs, for people (e.g. "YOLOv8s · TensorRT FP16 · Jetson Orin NX"). */
+  model?: string;
 }
 
 export interface GwTelemetry {
@@ -401,7 +411,27 @@ export interface SrvDrive {
   release?: boolean;
 }
 
-export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera | SrvDrive;
+/**
+ * Work for an AI box: every video it should analyse now. Each message replaces the previous list
+ * (an empty list stops everything). Detections, live boxes and health come back under the job's
+ * device id; the server accepts them from this box only while the job is its own.
+ */
+export interface SrvAiJobs {
+  t: 'ai_jobs';
+  jobs: AiJob[];
+}
+
+export interface AiJob {
+  /** The device (vehicle) whose video to analyse. */
+  deviceId: string;
+  /** e.g. rtsp://read:<token>@media.site:18554/ugv-01 — valid only while this box has the job. */
+  read: string;
+}
+
+/** Most videos one AI box may take on, whatever it offers. */
+export const AI_BOX_MAX_CAPACITY = 16;
+
+export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera | SrvDrive | SrvAiJobs;
 
 // ---------------------------------------------------------------------------
 // Client API

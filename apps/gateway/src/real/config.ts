@@ -10,6 +10,7 @@ import { OnvifCameraAdapter, type OnvifCameraConfig } from './onvifCamera';
 import { RosNav2Adapter, type RosNav2Config } from './rosNav2';
 import { SIYI_DEFAULT } from './siyiProtocol';
 import { VisionCameraAdapter, type VisionCameraConfig } from '../vision/adapter';
+import { aiBoxProblem, type AiBoxConfig } from '../vision/aiBox';
 
 export type DeviceConfig =
   | {
@@ -74,6 +75,8 @@ export interface SiteConfig {
   /** WGS 84 anchor of the site grid. Must match the site registered on the platform. */
   geo: GeoAnchor;
   devices: DeviceConfig[];
+  /** This gateway is an AI box: it analyses the videos the server hands it (AI switched on in the console). */
+  aiBox?: AiBoxConfig;
 }
 
 export class ConfigError extends Error {}
@@ -82,7 +85,13 @@ export function parseSiteConfig(json: unknown): SiteConfig {
   const c = json as SiteConfig;
   if (!c || typeof c !== 'object') throw new ConfigError('Config must be a JSON object.');
   if (!c.geo || !Number.isFinite(c.geo.originLat) || !Number.isFinite(c.geo.originLon)) throw new ConfigError('geo.originLat and geo.originLon are required.');
-  if (!Array.isArray(c.devices) || !c.devices.length) throw new ConfigError('devices must list at least one device.');
+  if (c.aiBox !== undefined) {
+    const problem = aiBoxProblem(c.aiBox);
+    if (problem) throw new ConfigError(problem);
+  }
+  // An AI box may have no devices of its own.
+  if (c.aiBox && c.devices === undefined) c.devices = [];
+  if (!Array.isArray(c.devices) || (!c.devices.length && !c.aiBox)) throw new ConfigError('devices must list at least one device (or the config must have an aiBox section).');
   const ids = new Set<string>();
   for (const d of c.devices) {
     if (d.type === 'simulated') continue;

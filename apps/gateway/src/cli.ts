@@ -16,6 +16,7 @@ import { join, resolve } from 'node:path';
 import { defaultAdapters } from './adapters';
 import { startGateway } from './gateway';
 import { ConfigError, adaptersFromConfig, loadSiteConfig } from './real/config';
+import { describeAiBox } from './vision/aiBox';
 
 const configPath = process.env.GATEWAY_CONFIG;
 let site: ReturnType<typeof loadSiteConfig> | undefined;
@@ -36,10 +37,13 @@ try {
   console.error(`[gw] cannot build adapters from ${configPath}: ${(e as Error).message}`);
   process.exit(2);
 }
-console.log(`[gw] ${site ? `site config ${configPath}` : 'simulated devices'}: ${adapters.map((a) => `${a.declaration.deviceId} (${a.declaration.adapterVersion})`).join(', ')}`);
+console.log(`[gw] ${site ? `site config ${configPath}` : 'simulated devices'}: ${adapters.map((a) => `${a.declaration.deviceId} (${a.declaration.adapterVersion})`).join(', ') || 'no devices of its own'}`);
+// An AI box reads each job's video with the same ffmpeg unless its config names another.
+const aiBox = site?.aiBox ? { ...site.aiBox, ffmpegPath: site.aiBox.ffmpegPath ?? (process.env.FFMPEG_PATH || undefined) } : undefined;
+if (aiBox) console.log(`[gw] ${describeAiBox(aiBox)}: waits for the server to hand it videos (AI switched on in the console)`);
 const dataDir = resolve(process.env.GATEWAY_DATA_DIR || (process.env.DATA_DIR ? join(process.env.DATA_DIR, 'gateway') : './data/gateway'));
 console.log(`[gw] command ledgers in ${join(dataDir, 'ledger')}`);
-const gw = startGateway({ serverUrl, key, gatewayId, adapters, geo: site?.geo, dataDir, ffmpegPath: process.env.FFMPEG_PATH || undefined });
+const gw = startGateway({ serverUrl, key, gatewayId, adapters, geo: site?.geo, dataDir, ffmpegPath: process.env.FFMPEG_PATH || undefined, aiBox });
 
 const statusFile = process.env.GATEWAY_STATUS_FILE;
 const writeStatus = () => {

@@ -600,6 +600,15 @@ export function RemoteProvider({
           },
           () => void session.moveDevice(deviceId, siteId),
         ).then((ok) => ok === true),
+      setAi: (deviceId: string, on: boolean) =>
+        guarded(
+          async () => {
+            // The device update (with the AI state) arrives over the live connection.
+            await api.post<Device>(`/devices/${encodeURIComponent(deviceId)}/ai`, { on });
+            return true;
+          },
+          () => void session.setAi(deviceId, on),
+        ).then((ok) => ok === true),
       startDriving: (deviceId: string) =>
         guarded(
           () => api.post<Device>(`/devices/${encodeURIComponent(deviceId)}/drive`, { action: 'start' }),

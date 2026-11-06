@@ -15,8 +15,9 @@ import { FreshBadge, ModeBadge } from '../components/Badges';
 import { CameraFeed } from '../components/CameraFeed';
 import { MainMap } from '../components/MainMap';
 import { TelemetryPanel } from '../components/TelemetryPanel';
-import { AiBoxes } from '../components/AiBoxes';
+import { AiSwitch } from '../components/AiSwitch';
 import { useLiveTracks } from '../domain/visionTracks';
+import { aiSources, aiWaiting } from '../domain/deviceAi';
 
 export type StageFocus = 'map' | 'cockpit';
 
@@ -46,8 +47,8 @@ export function CockpitStage({ d, m, focus, onFocus, canViewMedia }: { d: Device
   const usable = s.replay.active || f === 'live';
   const cockpit = canViewMedia && focus === 'cockpit';
   const toggleGraphs = () => setGraphs((g) => !g);
-  // The camera AI watching this vehicle's video: devices that follow it, and the vehicle itself if it runs its own.
-  const aiIds = [...(d.analytics ? [d.id] : []), ...Object.values(s.devices).filter((x) => x.follows === d.id).map((x) => x.id)];
+  // The AI watching this vehicle's video: an AI box (switched on here), its own analytics, or camera AIs that follow it.
+  const aiIds = aiSources(d, s.devices);
   return (
     <div className="lg-stage" data-focus={cockpit ? 'cockpit' : 'map'}>
       {/* Fixed order: map, then camera. Only classes change when the views swap. */}
@@ -71,7 +72,6 @@ export function CockpitStage({ d, m, focus, onFocus, canViewMedia }: { d: Device
       {canViewMedia && (
         <div className={`lg-stage-cam${cockpit ? '' : ' is-pip'}`} aria-label={t('Onboard camera')} role="region">
           <CameraFeed scene="ugv" label={t('{id} onboard', { id: d.id })} deviceId={d.id} time={f === 'live' ? s.now : d.lastSeen} freshness={f} replay={s.replay.active} />
-          {aiIds.length > 0 && !s.replay.active && <AiBoxes deviceIds={aiIds} />}
           {!cockpit && (
             <button type="button" className="lg-pip-hit" onClick={() => onFocus('cockpit')} aria-label={t('Open the cockpit')} title={t('Open the cockpit')}>
               <span><Camera size={12} /> {t('Camera')} <Maximize2 size={11} /></span>
@@ -91,7 +91,8 @@ export function CockpitStage({ d, m, focus, onFocus, canViewMedia }: { d: Device
               </span>
             </div>
             <ControlMode d={d} m={m} usable={usable} />
-            {aiIds.length > 0 && <AiChip ids={aiIds} />}
+            {aiIds.length > 0 && <AiChip d={d} ids={aiIds} />}
+            <AiSwitch d={d} hud />
           </div>
           <VTape value={usable ? d.speed : undefined} step={1} label="SPD" unit="m/s" side="left" />
           {d.kind === 'uav' && <VTape value={usable ? d.alt : undefined} step={5} label="ALT" unit="m" side="right" />}
@@ -147,11 +148,13 @@ function ControlMode({ d, m, usable }: { d: Device; m?: Mission; usable: boolean
   );
 }
 
-/** The camera AI at a glance: who it sees now, or that it is watching, or that it gets no pictures. */
-function AiChip({ ids }: { ids: string[] }) {
+/** The AI at a glance: who it sees now, that it is watching, that it gets no pictures, or why it has not started. */
+function AiChip({ d, ids }: { d: Device; ids: string[] }) {
   const { s } = useStore();
   const t = useT();
   const live = useLiveTracks(ids);
+  // Switched on, but no AI box has it yet: say why instead of "no pictures".
+  const waiting = aiWaiting(d);
   const ai = ids.map((id) => s.devices[id]).filter((x): x is Device => !!x);
   // A camera AI reports in every few seconds; it gets frames while its signal is up.
   const watching = ai.some((x) => freshness(s, x) === 'live' && (x.signal ?? 0) > 0 && x.analytics?.running !== false);
@@ -168,7 +171,9 @@ function AiChip({ ids }: { ids: string[] }) {
       ? ['bad', t('Intruders: {n}', { n: intruders })]
       : people > 0
         ? ['warn', t('People in view: {n}', { n: people })]
-        : watching && modelError
+        : waiting
+          ? ['idle', t(waiting)]
+          : watching && modelError
           ? ['idle', t('AI model not answering')]
           : watching
             ? ['ok', t('AI is watching')]

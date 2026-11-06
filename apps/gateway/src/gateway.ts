@@ -7,6 +7,8 @@ import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type GeoA
 import { CommandLedger, ledgerFile, type LedgerOptions } from './ledger';
 import { consoleLogger, type Adapter, type AdapterContext, type Logger } from './sdk';
 import { VideoPusher, type Pusher, type VideoPushOptions } from './videoPush';
+import { AiBox, type AiBoxConfig, type JobContext } from './vision/aiBox';
+import type { FrameSource } from './vision/sources';
 
 /** Messages dropped because the server link was down, by type. */
 export type DroppedCounts = Record<Exclude<GatewayToServer['t'], 'hello'>, number>;
@@ -37,6 +39,10 @@ export interface GatewayOptions {
   ffmpegPath?: string;
   /** Replaces the ffmpeg pusher (tests). */
   createPusher?: (o: VideoPushOptions) => Pusher;
+  /** Make this gateway an AI box: it analyses other devices' video when the server hands it jobs. */
+  aiBox?: AiBoxConfig;
+  /** Replaces the ffmpeg reader of an AI box job's video (tests). */
+  aiBoxSource?: (url: string) => FrameSource;
 }
 
 export interface GatewayHandle {
@@ -75,6 +81,8 @@ export interface GatewayStatus {
     /** UniGCS (or another ground station) relayed through the gateway. */
     relay?: { listen: string; connected: boolean; peer?: string; lastSeenAt?: number; sysid?: number };
   }[];
+  /** AI box mode: how many videos it may take and which it analyses now. */
+  aiBox?: { capacity: number; jobs: string[] };
   dropped: DroppedCounts;
 }
 
@@ -135,9 +143,18 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
       }
       return;
     }
-    if (msg.t !== 'hello' && 'deviceId' in msg && !accepted.has(msg.deviceId)) return;
+    // Only this gateway's devices, and the detections and boxes of the AI box's jobs.
+    if (msg.t !== 'hello' && 'deviceId' in msg && !accepted.has(msg.deviceId) && !((msg.t === 'event' || msg.t === 'tracks') && aiBox?.has(msg.deviceId))) return;
     ws.send(JSON.stringify(msg));
   };
+
+  const jobContext = (deviceId: string): JobContext => ({
+    now,
+    log,
+    event: (e) => send({ t: 'event', deviceId, ...e, at: e.at ?? now() }),
+    tracks: (tr) => send({ t: 'tracks', deviceId, ...tr }),
+  });
+  const aiBox = opts.aiBox ? new AiBox(opts.aiBox, jobContext, opts.aiBoxSource) : undefined;
 
   const reportOutage = () => {
     const lost = (Object.entries(outage) as [keyof DroppedCounts, number][]).filter(([, n]) => n > 0);
@@ -220,6 +237,10 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
         a.onDrive(msg);
         return;
       }
+      case 'ai_jobs':
+        if (!aiBox) return log.warn('the server sent AI jobs, but this gateway is not an AI box (no aiBox in its config); ignored');
+        aiBox.setJobs(Array.isArray(msg.jobs) ? msg.jobs : [], log);
+        return;
       case 'demo': {
         // `*` targets every adapter (used for a full demo reset).
         const targets = msg.deviceId === '*' ? opts.adapters : [byId.get(msg.deviceId)].filter((a): a is Adapter => !!a);
@@ -252,6 +273,7 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
           gatewayId: opts.gatewayId,
           adapters: opts.adapters.map((a) => a.declaration),
           geo: opts.geo,
+          ...(aiBox ? { aiBox: aiBox.offer } : {}),
         } satisfies GatewayToServer),
       );
     });
@@ -303,12 +325,14 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
             ...(relay ? { relay } : {}),
           };
         }),
+        ...(aiBox ? { aiBox: { capacity: aiBox.offer.capacity, jobs: aiBox.active() } } : {}),
         dropped: { ...dropped },
       };
     },
     async stop() {
       stopped = true;
       if (retry) clearTimeout(retry);
+      aiBox?.stopAll();
       for (const p of pushers.values()) p.stop();
       pushers.clear();
       for (const a of opts.adapters) a.stop();

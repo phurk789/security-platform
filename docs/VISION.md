@@ -28,7 +28,7 @@ figures cross to the platform. No video leaves the site for analytics.
 | RTSP through ffmpeg | `vision.frames: "rtsp"` on an ONVIF camera (uses its stream URI and credentials), or `source: { kind: "ffmpeg", input, fps, width }` | Real frame rates (1–10 fps); any input ffmpeg opens (RTSP, RTMP, SRT, file, V4L2); needs `ffmpeg` on the edge PC |
 | MJPEG               | `source: { kind: "mjpeg", url, auth }`                                                                                               | Older or cheap cameras, MediaMTX MJPEG paths                                                                     |
 | Folder              | `source: { kind: "folder", dir, intervalMs }`                                                                                        | Demos, tests, replaying a recorded sequence                                                                      |
-| Follow a vehicle    | `source: { kind: "follow", fps, width }` with `"follows": "<vehicle id>"` on the device                                              | A vehicle's camera, read from the site media server with a pass the server grants (see _Camera AI on a vehicle_) |
+| Follow a vehicle    | `source: { kind: "follow", fps, width }` with `"follows": "<vehicle id>"` on the device                                              | A vehicle's camera, read from the site media server with a pass the server grants (see _AI on a vehicle's video_) |
 
 A `type: "vision"` device is a camera the platform knows only through its pictures (an NVR
 channel, a vendor's RTSP URL); it appears as a CCTV device with the `analytics` capability and no
@@ -88,54 +88,79 @@ for yolov8n on a small industrial PC; CUDA or OpenVINO builds for more).
   consoles allowed to see video; they are never stored (detections are the record). The
   Command Centre's cockpit draws them over the video and shows an **AI** chip in the HUD:
   _intruders n_ (red), _people in view n_ (amber), _watching_ with fps, _no pictures_, or
-  _AI model not answering_ (an http detector's service is down; the error is the tooltip).
+  _AI model not answering_ (an http detector's service is down; the error is the tooltip). With
+  the AI switch on but no box analysing yet it says why: _no AI box connected_, _all AI boxes are
+  busy_ or _no video for the AI_. The boxes are drawn wherever the camera is shown (cockpit,
+  device panel, fleet cards).
 
-## Camera AI on a vehicle
+## AI on a vehicle's video: the AI switch and AI boxes
 
-A vehicle's camera can be watched by its own camera AI: a `vision` device with
-`"follows": "<vehicle id>"`. It reads the vehicle's video from the site media server (the stream
-the vehicle already pushes), so nothing changes on the vehicle, and it works indoors: it needs
-pictures, not GPS. Detections are filed at the vehicle's position when it has a fix, else at the
-camera AI's configured `pos`.
+Any vehicle whose video is on the site media server (the stream it already pushes) can be watched
+by AI, switched on and off from the console. Nothing changes on the vehicle, and it works indoors:
+it needs pictures, not GPS.
 
-The intended home is an **NVIDIA Jetson Orin** on the LAN next to the platform server: the
-gateway on the Jetson runs the camera AI and `deploy/jetson/vision_server.py` runs YOLO on the
-GPU behind the http detector. Step-by-step guide (Thai): `deploy/jetson/README_TH.md`; the
-gateway config is `deploy/jetson/site.camera-ai.example.json`:
+- **AI box.** A gateway that offers to analyse video, typically an **NVIDIA Jetson Orin** on the
+  LAN next to the platform server. Its site config has an `aiBox` section instead of devices; it
+  says hello with `aiBox: { capacity, model }` and needs only its gateway key, no device
+  registration. `deploy/jetson/vision_server.py` runs YOLO on the GPU behind the http detector.
+  Step-by-step guide (Thai): `deploy/jetson/README_TH.md`; config
+  `deploy/jetson/site.ai-box.example.json`.
+- **The switch.** _AI on / AI off_ on the cockpit HUD and under the camera in the device panel
+  (`POST /api/v1/devices/{id}/ai` `{ "on": true }`, needs `camera.control`; audited as `ai.on` /
+  `ai.off`). It is stored on the device (`ai`), so it stays on across restarts until someone
+  switches it off. `GET /api/v1/ai/boxes` lists the boxes connected now and their jobs.
+- **Jobs.** The server matches switched-on vehicles to connected boxes: a job stays with its box
+  while both last, new ones go to the box with the most room, in the order they were switched
+  on. Each box gets its full list (`ai_jobs`) whenever it changes; a box that leaves hands its
+  jobs to the others, or they wait. `device.ai.state` says how it went: `assigned`, `no_box`,
+  `full`, or `no_video` (no pushed video to read), and the console's AI chip says the same.
+- **What a box may say.** Detections, live boxes and health come back under the vehicle's id and
+  are accepted from that box only while the job is its own; telemetry, route events or commands
+  about the vehicle never are. Detections are filed under the vehicle at its position, with the
+  source `<vehicle> AI · <box>`; health shows as the vehicle's analytics (provider `ai-box <box>`)
+  and is cleared when the job ends.
 
 ```json
 {
-  "type": "vision",
-  "deviceId": "UGV-01-AI",
-  "model": "Camera AI · Jetson Orin (YOLOv8s, TensorRT FP16)",
-  "pos": { "x": 0, "y": 0 },
-  "follows": "UGV-01",
-  "vision": {
-    "source": { "kind": "follow", "fps": 8, "width": 960 },
-    "detectors": { "http": { "url": "http://127.0.0.1:8601/detect", "timeoutMs": 1000 } },
-    "zones": [{ "id": "show", "name": "Show area", "kind": "protected", "poly": [[0, 0], [1, 0], [1, 1], [0, 1]] }],
-    "minConfidence": 0.5,
-    "minFrames": 2,
-    "cooldownS": 60
+  "gatewayId": "jetson-ai-01",
+  "serverUrl": "ws://192.168.1.10:8090",
+  "geo": { "originLat": 13.4367374, "originLon": 101.0275798, "rotationDeg": -28.5 },
+  "devices": [],
+  "aiBox": {
+    "capacity": 2,
+    "model": "YOLOv8s · TensorRT FP16 · Jetson Orin NX",
+    "fps": 8,
+    "width": 960,
+    "vision": {
+      "detectors": { "http": { "url": "http://127.0.0.1:8601/detect", "timeoutMs": 1000 } },
+      "zones": [{ "id": "show", "name": "Show area", "kind": "protected", "poly": [[0, 0], [1, 0], [1, 1], [0, 1]] }],
+      "minConfidence": 0.5,
+      "minFrames": 2,
+      "cooldownS": 60
+    }
   }
 }
 ```
 
-**Read pass.** With `source: { kind: "follow" }` the config holds no video address or password.
-When the gateway connects, the server checks that the camera AI is registered, accepted and
-follows a vehicle, and puts a read pass in the welcome: an RTSP URL for that vehicle's path on
-the media server, signed for this organisation, camera AI and gateway, with an expiry. The media
-server's auth hook accepts it only for reads of that one path, and only while that gateway is
-connected and still holds the camera AI. The gateway starts ffmpeg on the pass (default 5 fps,
-640 px wide) and switches to the renewed pass on each reconnect; until the first pass arrives it
-logs _waiting for the server to grant the video of …_. Needs the server's media settings
-(`MEDIA_INGEST_URL`, `MEDIA_PUBLIC_URL`, `MEDIA_SECRET`), the same ones pushed video uses.
+**Read passes.** No config holds a video address or password. For each job the server gives the
+box an RTSP URL for that vehicle's path on the media server, signed for the organisation, the
+vehicle and the box, with a week's expiry (renewed a day early). The media server's auth hook
+accepts it only for reads of that one path, and only while that box is connected and still has
+the job. The box runs ffmpeg on it (`fps`, `width`; defaults 5 fps, 640 px). Needs the server's
+media settings (`MEDIA_INGEST_URL`, `MEDIA_PUBLIC_URL`, `MEDIA_SECRET`), the same ones pushed video
+uses.
 
-Other placements work too: the `onnx` detector on a laptop or the platform server (CPU, 1–3 fps
-for yolov8n), or an explicit `ffmpeg` source with the media server's address. Register
-`UGV-01-AI` (kind CCTV) under Administration first and give its gateway a key. A protected zone
-over the whole frame turns every person into an intrusion (the default rule raises an incident at
-≥ 60 %).
+**Sizing.** On a Jetson Orin NX 16 GB in its 15 W mode, YOLOv8s (TensorRT FP16, 640) takes about
+60 ms a picture including JPEG decoding: about two vehicles at 8 fps. The MAXN power mode takes
+more.
+
+**Fixed alternative: a camera AI that follows one vehicle.** A `vision` device with
+`"follows": "<vehicle id>"` and `source: { kind: "follow" }` gets a read pass for that vehicle in
+the welcome instead (it must be registered, kind CCTV, and its gateway keyed). Its boxes and
+detections are its own device's, drawn on the vehicle's views. Other placements work too: the
+`onnx` detector on a laptop or the platform server (CPU, 1–3 fps for yolov8n), or an explicit
+`ffmpeg` source with the media server's address. A protected zone over the whole frame turns
+every person into an intrusion (the default rule raises an incident at ≥ 60 %).
 
 ## Configuration
 
@@ -155,5 +180,6 @@ until false alarms stop, then shorten `cooldownS` if repeats are missed.
 | Zones, tracking, loitering, crowd, persistence, cooldown, evidence crops             | Done                                                                                                                                        | `vision.test.ts`                                                                                       |
 | Platform: analytics health on the device, detection events and overlay               | Done                                                                                                                                        | `apps/server/test/vision.test.ts`                                                                      |
 | Live boxes (pipeline → gateway → server → cockpit), camera AI that follows a vehicle | Done — end to end on a local server with the motion detector; a real model and vehicle video still to try                                   | `vision.test.ts`, `apps/server/test/vision-tracks.test.ts`, `apps/web/src/domain/visionTracks.test.ts` |
-| http detector and the Jetson AI service (`deploy/jetson/`)                           | Done — end to end locally with `vision_server.py --fake`, including the service going down and back; TensorRT on a real Jetson still to try | `vision.test.ts`                                                                                       |
-| Read pass for a follow source (welcome → media auth → ffmpeg)                        | Done in tests; not yet run against the real media server and a vehicle's stream                                                             | `vision-tracks.test.ts`, `vision.test.ts`                                                              |
+| http detector and the Jetson AI service (`deploy/jetson/`) | Done — locally with `vision_server.py --fake`, including the service going down and back; on the office Jetson Orin NX with YOLOv8s TensorRT FP16 (a sample photo: 4 people and a bus, about 60 ms each) | `vision.test.ts` |
+| Read pass for a follow source (welcome → media auth → ffmpeg) | Done in tests; not yet run against the real media server and a vehicle's stream | `vision-tracks.test.ts`, `vision.test.ts` |
+| AI switch and AI boxes (jobs, read passes per job, what a box may send, console switch) | Done — tests, and locally in the browser with a stand-in vehicle and AI box (switch on, boxes and an incident, off, no box, box back); not yet with the Jetson and a vehicle's real video | `apps/server/test/ai-boxes.test.ts`, `apps/gateway/test/aiBox.test.ts`, `apps/web/src/domain/deviceAi.test.ts` |

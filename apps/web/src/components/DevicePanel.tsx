@@ -26,6 +26,7 @@ import { useStore } from '../store';
 import { VehicleSpecs } from '../views/CommandCenter';
 import { Badge, CommandBadge, FreshBadge, IntegrationBadge, MissionBadge, ModeBadge } from './Badges';
 import { CameraFeed } from './CameraFeed';
+import { AiSwitch } from './AiSwitch';
 import { LiveMission } from './IncidentPanel';
 import { TelemetryPanel } from './TelemetryPanel';
 import { LatLon } from './LatLon';
@@ -163,6 +164,12 @@ function FeedTab({ d }: { d: Device }) {
         </p>
       )}
       {!cams.length && <p className="fine">{t('No camera declared by the adapter; the picture comes from the device model.')}</p>}
+      {(d.stream || cams.some((c) => c.stream)) && (
+        <div className="dp-ai">
+          <AiSwitch d={d} />
+          {d.ai?.on && d.ai.state === 'assigned' && d.ai.box && <span className="fine">{t('AI box {box}', { box: d.ai.box })}</span>}
+        </div>
+      )}
       {d.analytics && (
         <p className={`dp-caption${d.analytics.running ? '' : ' dim'}`}>
           <ScanLine size={12} /> {t('Analytics')} · {d.analytics.provider}

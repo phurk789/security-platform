@@ -1,19 +1,24 @@
 // Edge gateway connections. Commands go out here; telemetry, acks and device events come in.
-import { GATEWAY_PROTOCOL, type GatewayToServer, type ServerToGateway, type SrvCamera, type SrvCommand, type SrvDemo, type SrvDrive } from '@13store/shared';
+import { GATEWAY_PROTOCOL, type AiJob, type GatewayToServer, type ServerToGateway, type SrvCamera, type SrvCommand, type SrvDemo, type SrvDrive } from '@13store/shared';
 import type { WebSocket } from 'ws';
 import type { Accounts } from './accounts';
 import type { GatewayLink, Platform } from './platform';
 
 interface Conn {
+  /** Tells connections of the same gateway apart (a reconnect can arrive before the old close). */
+  n: number;
   ws: WebSocket;
   orgId: string;
   gatewayId: string;
   devices: Set<string>;
+  /** The gateway said hello as an AI box. */
+  aiBox: boolean;
 }
 
 export class GatewayHub implements GatewayLink {
   private byDevice = new Map<string, Conn>();
   private conns = new Set<Conn>();
+  private serial = 0;
 
   constructor(
     private p: Platform,
@@ -27,7 +32,7 @@ export class GatewayHub implements GatewayLink {
       ws.close(4401, 'gateway credential refused');
       return;
     }
-    const conn: Conn = { ws, orgId: auth.actor.orgId, gatewayId: 'unknown', devices: new Set() };
+    const conn: Conn = { n: ++this.serial, ws, orgId: auth.actor.orgId, gatewayId: 'unknown', devices: new Set(), aiBox: false };
     this.conns.add(conn);
     const send = (m: ServerToGateway) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(m));
 
@@ -55,6 +60,11 @@ export class GatewayHub implements GatewayLink {
               this.byDevice.set(id, conn);
             }
             send({ t: 'welcome', serverTime: this.p.now(), accepted, rejected, ...(media.length ? { media } : {}), ...(reads.length ? { reads } : {}) });
+            // After the welcome, so the box knows the server before its jobs arrive.
+            if (msg.aiBox && typeof msg.aiBox === 'object') {
+              conn.aiBox = true;
+              this.p.aiBoxHello(conn.orgId, conn.gatewayId, msg.aiBox, conn.n);
+            }
             return;
           }
           case 'telemetry':
@@ -65,12 +75,14 @@ export class GatewayHub implements GatewayLink {
             return;
           case 'event':
             if (conn.devices.has(msg.deviceId)) this.p.deviceEvent(conn.orgId, msg);
+            // An AI box speaks about the devices it has a job for: detections and health only.
+            else if (conn.aiBox) this.p.aiBoxEvent(conn.orgId, conn.gatewayId, msg);
             return;
           case 'camera_result':
             if (conn.devices.has(msg.deviceId)) this.p.cameraResult(conn.orgId, msg);
             return;
           case 'tracks':
-            if (conn.devices.has(msg.deviceId)) this.p.visionTracks(conn.orgId, msg);
+            if (conn.devices.has(msg.deviceId) || (conn.aiBox && this.p.aiJobBox(conn.orgId, msg.deviceId) === conn.gatewayId)) this.p.visionTracks(conn.orgId, msg);
             return;
         }
       } catch (e) {
@@ -82,6 +94,7 @@ export class GatewayHub implements GatewayLink {
       this.conns.delete(conn);
       for (const id of conn.devices) if (this.byDevice.get(id) === conn) this.byDevice.delete(id);
       try {
+        if (conn.aiBox) this.p.aiBoxGone(conn.orgId, conn.gatewayId, conn.n);
         if (conn.gatewayId !== 'unknown') this.p.gatewayClosed(conn.orgId, conn.gatewayId);
       } catch (e) {
         // During shutdown the database may already be closed.
@@ -94,6 +107,14 @@ export class GatewayHub implements GatewayLink {
     const c = this.byDevice.get(deviceId);
     if (!c || c.orgId !== orgId || c.ws.readyState !== c.ws.OPEN) return false;
     c.ws.send(JSON.stringify(msg));
+    return true;
+  }
+
+  sendAiJobs(orgId: string, gatewayId: string, jobs: AiJob[]): boolean {
+    // The newest connection of that AI box (an old one may linger until its close arrives).
+    const c = [...this.conns].reverse().find((x) => x.orgId === orgId && x.gatewayId === gatewayId && x.aiBox && x.ws.readyState === x.ws.OPEN);
+    if (!c) return false;
+    c.ws.send(JSON.stringify({ t: 'ai_jobs', jobs } satisfies ServerToGateway));
     return true;
   }
 

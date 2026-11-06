@@ -163,11 +163,31 @@ export interface Device {
    * show on that vehicle's cockpit view, and its detections are filed at the vehicle's position.
    */
   follows?: string;
+  /** AI on this device's video by an AI box, switched on and off from the console. */
+  ai?: DeviceAi;
   /** Catalogue model (VEHICLE_CATALOG) and fitted payload modules (PAYLOAD_CATALOG). */
   catalogId?: string;
   payloads?: string[];
   /** Device operating inside a building: which floor it is on and how it is positioned (no GNSS). */
   indoor?: IndoorState;
+}
+
+/**
+ * AI on a device's video. Someone switches it on in the console; the server hands the video to an
+ * AI box with room, and keeps it on (across restarts) until someone switches it off.
+ */
+export interface DeviceAi {
+  on: boolean;
+  /** Who switched it last, and when. */
+  by?: string;
+  at?: number;
+  /**
+   * While on: an AI box has the job (`assigned`), no AI box is connected (`no_box`), every box is
+   * busy (`full`), or the device has no video on the site media server for a box to read (`no_video`).
+   */
+  state?: 'assigned' | 'no_box' | 'full' | 'no_video';
+  /** Gateway id of the AI box doing it. */
+  box?: string;
 }
 
 export interface IndoorState {
