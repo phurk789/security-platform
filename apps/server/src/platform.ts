@@ -44,6 +44,11 @@ import {
   type Freshness,
   type GwCommandUpdate,
   type GwDeviceEvent,
+  type GwTracks,
+  type MediaRead,
+  type VisionBox,
+  DETECTION_TYPES,
+  VISION_MAX_BOXES,
   type GwTelemetry,
   type Incident,
   type IncidentStatus,
@@ -204,6 +209,27 @@ export function sanitizeTeleop(raw: unknown): Device['teleop'] {
   return maxThrottle && maxSteer && deadmanMs ? { maxThrottle, maxSteer, deadmanMs } : undefined;
 }
 
+/** One live box from a gateway, kept only when it makes sense: a known type, a box inside the frame. */
+export function sanitizeVisionBox(raw: unknown): VisionBox | undefined {
+  const b = raw as Partial<VisionBox> | undefined;
+  if (!b || typeof b !== 'object' || !DETECTION_TYPES.includes(b.type as VisionBox['type'])) return undefined;
+  if (!Array.isArray(b.bbox) || b.bbox.length !== 4 || !b.bbox.every((v) => typeof v === 'number' && Number.isFinite(v))) return undefined;
+  const c01 = (v: number) => Math.min(1, Math.max(0, v));
+  // Trim a box that runs off the frame to the part inside it (both edges).
+  const [x, y] = [c01(b.bbox[0]), c01(b.bbox[1])];
+  const [w, h] = [c01(b.bbox[0] + b.bbox[2]) - x, c01(b.bbox[1] + b.bbox[3]) - y];
+  if (w <= 0 || h <= 0) return undefined;
+  const r3 = (v: number) => Math.round(v * 1000) / 1000;
+  return {
+    ...(Number.isInteger(b.id) && (b.id as number) >= 0 ? { id: b.id } : {}),
+    type: b.type as VisionBox['type'],
+    ...(typeof b.label === 'string' && b.label ? { label: b.label.slice(0, 40) } : {}),
+    confidence: typeof b.confidence === 'number' && Number.isFinite(b.confidence) ? Math.round(c01(b.confidence) * 100) / 100 : 1,
+    bbox: [r3(x), r3(y), r3(w), r3(h)],
+    ...(typeof b.zone === 'string' && b.zone ? { zone: b.zone.slice(0, 60) } : {}),
+  };
+}
+
 /** Path of a device's pushed stream on the platform's media server: UGV-01 → ugv-01. */
 export function pushPath(deviceId: string) {
   return deviceId.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
@@ -238,6 +264,8 @@ export class Platform {
   private devices = new Map<string, Device & { orgId: string; siteId: string }>();
   private lastFresh = new Map<string, Freshness>();
   private lastSeq = new Map<string, number>();
+  /** When each device's live boxes were last passed on (they are thinned to 10 per second). */
+  private lastTracks = new Map<string, number>();
   /** Live drive sessions by device id (memory only: a restart ends them). */
   private driving = new Map<string, { userId: string; orgId: string; since: number; seq: number; lastAt: number; ownedBefore: boolean }>();
   /** Geofences per site (loaded on first use; defaults seeded for a new site). */
@@ -1116,6 +1144,36 @@ export class Platform {
     return `${u.protocol}//pub:${this.publishToken(orgId, deviceId, gatewayId, this.now() + MEDIA_PUBLISH_TTL_MS)}@${u.host}/${pushPath(deviceId)}`;
   }
 
+  /** A camera AI's credential to read the video of the vehicle it follows. */
+  private readToken(orgId: string, aiId: string, vehicleId: string, gatewayId: string, exp: number) {
+    const body = Buffer.from(`${aiId}|${vehicleId}|${gatewayId}|${exp}`).toString('base64url');
+    return `r1.${body}.${hmac(this.cfg.mediaSecret, `read|${orgId}|${body}`)}`;
+  }
+
+  /** Where a camera AI reads the vehicle it follows: rtsp://read:<token>@ingest-host:port/<vehicle path>. */
+  private readUrl(orgId: string, aiId: string, vehicleId: string, gatewayId: string) {
+    const u = new URL(this.cfg.mediaIngestUrl!);
+    return `${u.protocol}//read:${this.readToken(orgId, aiId, vehicleId, gatewayId, this.now() + MEDIA_PUBLISH_TTL_MS)}@${u.host}/${pushPath(vehicleId)}`;
+  }
+
+  /**
+   * May this credential read this path? Only the vehicle's own stream, for a camera AI that still
+   * follows it, held by the gateway the pass was given to, while that gateway is connected.
+   */
+  private mayRead(token: string, path: string): boolean {
+    const [ver, body, sig] = token.split('.');
+    if (ver !== 'r1' || !body || !sig) return false;
+    const [aiId, vehicleId, gatewayId, expStr] = Buffer.from(body, 'base64url').toString().split('|');
+    if (!(Number(expStr) > this.now())) return false;
+    const ai = this.devices.get(aiId);
+    if (!ai || !safeEqual(sig, hmac(this.cfg.mediaSecret, `read|${ai.orgId}|${body}`))) return false;
+    if (ai.follows !== vehicleId || path !== pushPath(vehicleId)) return false;
+    const holder = (this.db.prepare('SELECT gateway_id FROM devices WHERE id = ?').get(ai.id) as { gateway_id: string | null } | undefined)?.gateway_id;
+    if (holder !== gatewayId) return false;
+    const live = this.gateways.connected?.(ai.orgId);
+    return !live || live.some((g) => g.gatewayId === gatewayId && g.devices.includes(ai.id));
+  }
+
   /** May this credential publish to this path? Only the gateway that holds the device, while it is connected. */
   private mayPublish(token: string, path: string): boolean {
     const [ver, body, sig] = token.split('.');
@@ -1699,6 +1757,7 @@ export class Platform {
         payloads: Array.isArray(decl.payloads) ? decl.payloads.filter((p) => typeof p === 'string' && PAYLOAD_CATALOG[p]) : d.payloads,
         components: comps?.components ?? d.components,
         teleop: d.kind === 'ugv' ? sanitizeTeleop(decl.teleop) : undefined,
+        follows: typeof decl.follows === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(decl.follows) && decl.follows !== d.id ? decl.follows : undefined,
       });
       d.mode = modeOf(d);
       this.db.prepare('UPDATE devices SET gateway_id = ? WHERE id = ?').run(gatewayId, d.id);
@@ -1727,7 +1786,15 @@ export class Platform {
       'ok',
       `accepted ${accepted.join(', ') || 'none'}${rejected.length ? `; rejected ${rejected.map((r) => r.deviceId).join(', ')}` : ''}${notes.length ? `; ignored ${notes.join(', ')}` : ''}`,
     );
-    return { accepted, rejected, media };
+    // Camera AIs that follow a vehicle get a pass to read its video from the media server.
+    const reads: MediaRead[] = [];
+    if (this.pushEnabled)
+      for (const id of accepted) {
+        const ai = this.devices.get(id);
+        const host = ai?.follows ? this.devices.get(ai.follows) : undefined;
+        if (ai && host && host.orgId === orgId) reads.push({ deviceId: ai.id, follows: host.id, read: this.readUrl(orgId, ai.id, host.id, gatewayId) });
+      }
+    return { accepted, rejected, media, reads };
   }
 
   gatewayClosed(orgId: string, gatewayId: string) {
@@ -2120,14 +2187,43 @@ export class Platform {
     });
   }
 
+  /**
+   * Live boxes from a gateway's vision pipeline: checked, thinned to 10 per second per device and
+   * passed to the consoles that may see video. Never stored; detections are the record.
+   */
+  visionTracks(orgId: string, m: GwTracks) {
+    const d = this.devices.get(m.deviceId);
+    if (!d || d.orgId !== orgId) return;
+    const now = this.now();
+    const boxes = (Array.isArray(m.boxes) ? m.boxes.slice(0, VISION_MAX_BOXES) : []).map(sanitizeVisionBox).filter((b): b is VisionBox => !!b);
+    // An empty list (the last box left) always goes through, so the boxes on screen are cleared.
+    if (boxes.length && now - (this.lastTracks.get(d.id) ?? -Infinity) < 100) return;
+    this.lastTracks.set(d.id, now);
+    const px = (v: unknown) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 16384 ? (v as number) : undefined);
+    this.publish({
+      orgId,
+      siteId: d.siteId,
+      event: { type: 'tracks', deviceId: d.id, at: Number.isFinite(m.at) ? m.at : now, width: px(m.width), height: px(m.height), boxes },
+    });
+  }
+
   deviceEvent(orgId: string, e: GwDeviceEvent) {
     const d = this.devices.get(e.deviceId);
     if (!d || d.orgId !== orgId) return;
     if (e.kind === 'detection') {
       if (!e.detection) return;
       try {
+        // A camera AI that follows a vehicle files what it sees where the vehicle is (when it has a fix).
+        const host = d.follows ? this.devices.get(d.follows) : undefined;
+        const at = host && host.orgId === orgId && !host.noFix ? host.pos : undefined;
         // The camera speaks for itself: a system actor named after the device raises the detection.
-        this.ingestDetection(this.systemActor(orgId, 'system', d.id), { ...e.detection, deviceId: d.id, at: e.at, source: e.detection.source ?? `${d.id} analytics` });
+        this.ingestDetection(this.systemActor(orgId, 'system', d.id), {
+          ...e.detection,
+          deviceId: d.id,
+          at: e.at,
+          source: e.detection.source ?? `${d.id} analytics`,
+          ...(e.detection.pos ? {} : at ? { pos: at } : {}),
+        });
       } catch (err) {
         console.error('[detection]', d.id, err instanceof Error ? err.message : err);
       }
@@ -2736,6 +2832,8 @@ export class Platform {
     if (req.action === 'publish') return this.pushEnabled && this.mayPublish(String(req.password || q.get('token') || ''), String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
     if (req.action !== 'read' && req.action !== 'playback') return false;
     const token = q.get('token') || req.token || req.password || '';
+    // A camera AI reading the vehicle it follows (RTSP basic auth: read / token).
+    if (token.startsWith('r1.')) return req.action === 'read' && this.mayRead(token, String(req.path ?? '').replace(/^\/+|\/+$/g, ''));
     const [b64, sig] = token.split('.');
     if (!b64 || !sig) return false;
     const body = Buffer.from(b64, 'base64url').toString();
@@ -4030,7 +4128,7 @@ export class Platform {
     if (e.type === 'resync') return true;
     if (e.type === 'notice') return a.role !== 'responder' || (!!m.incidentId && this.hasAssignment(a, m.incidentId));
     if (e.type === 'geofence' || e.type === 'site') return true;
-    if (e.type === 'detection') return a.role !== 'responder' && can(a.role as Role, 'media.view');
+    if (e.type === 'detection' || e.type === 'tracks') return a.role !== 'responder' && can(a.role as Role, 'media.view');
     if (e.type === 'patrol') return a.role !== 'responder';
     if (e.type === 'audit') return can(a.role as Role, 'audit.view');
     if (a.role === 'responder') {

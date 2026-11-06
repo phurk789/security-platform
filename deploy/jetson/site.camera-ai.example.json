@@ -1,0 +1,25 @@
+{
+  "gatewayId": "jetson-ai-01",
+  "serverUrl": "ws://192.168.1.10:8090",
+  "key": "<gateway key from Administration: one per gateway>",
+  "geo": { "originLat": 13.4367374, "originLon": 101.0275798, "rotationDeg": -28.5 },
+  "devices": [
+    {
+      "type": "vision",
+      "deviceId": "UGV-01-AI",
+      "model": "Camera AI · Jetson Orin (YOLOv8s, TensorRT FP16)",
+      "pos": { "x": 0, "y": 0 },
+      "follows": "UGV-01",
+      "healthMs": 5000,
+      "vision": {
+        "source": { "kind": "follow", "fps": 8, "width": 960 },
+        "detectors": { "http": { "url": "http://127.0.0.1:8601/detect", "timeoutMs": 1000 } },
+        "zones": [{ "id": "show", "name": "Show area", "kind": "protected", "poly": [[0, 0], [1, 0], [1, 1], [0, 1]] }],
+        "minConfidence": 0.5,
+        "minFrames": 2,
+        "cooldownS": 60,
+        "sourceName": "Camera AI (Jetson)"
+      }
+    }
+  ]
+}

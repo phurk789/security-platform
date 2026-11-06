@@ -158,6 +158,11 @@ export interface Device {
   stats?: DeviceStats;
   /** Analytics watching this camera (edge vision pipeline or camera-side), as last reported. */
   analytics?: DeviceAnalytics;
+  /**
+   * Analytics on another device's video: the vehicle whose camera this AI watches. Its live boxes
+   * show on that vehicle's cockpit view, and its detections are filed at the vehicle's position.
+   */
+  follows?: string;
   /** Catalogue model (VEHICLE_CATALOG) and fitted payload modules (PAYLOAD_CATALOG). */
   catalogId?: string;
   payloads?: string[];

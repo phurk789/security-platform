@@ -46,7 +46,7 @@ export class GatewayHub implements GatewayLink {
               return;
             }
             conn.gatewayId = String(msg.gatewayId).slice(0, 64);
-            const { accepted, rejected, media } = this.p.gatewayHello(conn.orgId, auth.actor.siteIds, conn.gatewayId, msg.adapters ?? [], msg.geo);
+            const { accepted, rejected, media, reads } = this.p.gatewayHello(conn.orgId, auth.actor.siteIds, conn.gatewayId, msg.adapters ?? [], msg.geo);
             for (const id of conn.devices) if (this.byDevice.get(id) === conn) this.byDevice.delete(id);
             conn.devices = new Set(accepted);
             for (const id of accepted) {
@@ -54,7 +54,7 @@ export class GatewayHub implements GatewayLink {
               if (old && old !== conn) old.devices.delete(id);
               this.byDevice.set(id, conn);
             }
-            send({ t: 'welcome', serverTime: this.p.now(), accepted, rejected, ...(media.length ? { media } : {}) });
+            send({ t: 'welcome', serverTime: this.p.now(), accepted, rejected, ...(media.length ? { media } : {}), ...(reads.length ? { reads } : {}) });
             return;
           }
           case 'telemetry':
@@ -68,6 +68,9 @@ export class GatewayHub implements GatewayLink {
             return;
           case 'camera_result':
             if (conn.devices.has(msg.deviceId)) this.p.cameraResult(conn.orgId, msg);
+            return;
+          case 'tracks':
+            if (conn.devices.has(msg.deviceId)) this.p.visionTracks(conn.orgId, msg);
             return;
         }
       } catch (e) {

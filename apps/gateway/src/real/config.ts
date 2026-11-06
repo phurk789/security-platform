@@ -125,10 +125,14 @@ export function parseSiteConfig(json: unknown): SiteConfig {
       if (!d.pos || !Number.isFinite(d.pos.x) || !Number.isFinite(d.pos.y)) throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required.`);
       if (!d.vision || typeof d.vision !== 'object' || !d.vision.source)
         throw new ConfigError(`${d.deviceId}: vision.source (snapshot | mjpeg | ffmpeg | folder) is required for a vision-only camera.`);
-      if (!d.vision.detectors || !Object.values(d.vision.detectors).some(Boolean)) throw new ConfigError(`${d.deviceId}: vision.detectors must enable motion, thermal or onnx.`);
+      if (!d.vision.detectors || !Object.values(d.vision.detectors).some(Boolean)) throw new ConfigError(`${d.deviceId}: vision.detectors must enable motion, thermal, onnx or http.`);
+      if (d.follows !== undefined && (typeof d.follows !== 'string' || !/^[A-Za-z0-9._-]{1,40}$/.test(d.follows)))
+        throw new ConfigError(`${d.deviceId}: follows must be the id of the vehicle whose camera this is, e.g. "UGV-01".`);
+      if (d.vision.source.kind === 'follow' && !d.follows)
+        throw new ConfigError(`${d.deviceId}: vision.source "follow" reads a vehicle's video: set "follows" to that vehicle's id.`);
     }
     if (d.type === 'onvif' && d.vision && (!d.vision.detectors || !Object.values(d.vision.detectors).some(Boolean)))
-      throw new ConfigError(`${d.deviceId}: vision.detectors must enable motion, thermal or onnx.`);
+      throw new ConfigError(`${d.deviceId}: vision.detectors must enable motion, thermal, onnx or http.`);
     if (d.type === 'onvif') {
       if (!d.host || typeof d.host !== 'string') throw new ConfigError(`${d.deviceId}: host (camera IP or name) is required.`);
       if (typeof d.username !== 'string' || typeof d.password !== 'string')

@@ -28,6 +28,7 @@ import { Api, ApiError, saveBlob } from './api';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
 import { StoreCtx, useToastTimer, type CameraResult, type ClipLink, type MediaSession, type Recordings, type RoutePlan, type Session, type UnitSuggestion } from './store';
 import { StepUpDialog } from './components/StepUp';
+import { visionTracks } from './domain/visionTracks';
 import { tr } from './i18n';
 
 const LOCAL: Msg['type'][] = [
@@ -264,6 +265,11 @@ export function RemoteProvider({
       ws.onopen = () => ws!.send(JSON.stringify({ type: 'auth', token: api.token, siteId: siteRef.current }));
       ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data) as ConsoleMessage;
+        // Live AI boxes arrive several times a second: their own store, not the app state.
+        if (m.type === 'tracks') {
+          visionTracks.set(m, Date.now());
+          return;
+        }
         if (m.type === 'hello') {
           delay = 500;
           wsRef.current = ws;

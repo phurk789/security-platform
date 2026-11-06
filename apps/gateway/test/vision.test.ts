@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
   COCO_CLASSES,
   FfmpegSource,
+  HttpDetector,
   JpegSplitter,
   MotionDetector,
   OnnxDetector,
@@ -28,6 +29,7 @@ import {
   paintFrame,
   toGrey,
   type Candidate,
+  type LiveBoxes,
   type Emitted,
 } from '../src/vision';
 import { fakeCtx } from './helpers';
@@ -291,6 +293,46 @@ describe('pipeline', () => {
     expect(st.fps).toBeGreaterThan(0);
   });
 
+  it('reports live boxes for the console: people keep their number, at most 5 a second, one empty list when they leave', async () => {
+    let now = 2_000_000;
+    const script: { cands: Candidate[] } = { cands: [] };
+    const boxes: LiveBoxes[] = [];
+    const p = new VisionPipeline({ detectors: { motion: true }, minFrames: 2, cooldownS: 30 }, { onDetection: () => {}, onBoxes: (b) => boxes.push(b), now: () => now });
+    p.detectors.length = 0;
+    p.use(new ScriptedDetector(() => script.cands));
+    const frame = paintFrame(W, H, BG, []);
+    const step = async (ms: number) => {
+      now += ms;
+      await p.frame({ ...frame, at: now }, now);
+    };
+    // Nothing in view and nothing shown: nothing is sent.
+    await step(300);
+    expect(boxes).toHaveLength(0);
+    // Two people walk in; the first frame is sent at once, with a number for each.
+    script.cands = [person(0.1, 0.5), person(0.6, 0.4)];
+    await step(300);
+    expect(boxes).toHaveLength(1);
+    expect(boxes[0]).toMatchObject({ width: W, height: H });
+    const ids = boxes[0].boxes.map((b) => b.id);
+    expect(ids.every((id) => Number.isInteger(id))).toBe(true);
+    expect(new Set(ids).size).toBe(2);
+    // Frames faster than 200 ms apart are not all sent.
+    await step(50);
+    expect(boxes).toHaveLength(1);
+    // They move a little: same numbers.
+    script.cands = [person(0.11, 0.5), person(0.61, 0.41)];
+    await step(250);
+    expect(boxes).toHaveLength(2);
+    expect(boxes[1].boxes.map((b) => b.id)).toEqual(ids);
+    // They leave: one empty list right away (no throttle), then silence.
+    script.cands = [];
+    await step(10);
+    expect(boxes).toHaveLength(3);
+    expect(boxes[2].boxes).toEqual([]);
+    await step(300);
+    expect(boxes).toHaveLength(3);
+  });
+
   it('takes JPEG bytes from a source and skips frames while busy', async () => {
     const out: Emitted[] = [];
     const p = new VisionPipeline(
@@ -307,6 +349,109 @@ describe('pipeline', () => {
     expect(p.status().source).toBe('push');
     p.stop();
     expect(p.status().running).toBe(false);
+  });
+});
+
+describe('http detector (AI service on a Jetson or GPU box)', () => {
+  /** A fake AI service: records requests, answers with what the test sets. */
+  async function fakeService(answer: (body: Buffer) => { status?: number; delayMs?: number; json?: unknown }) {
+    const got: { type?: string; auth?: string; body: Buffer }[] = [];
+    const server = http.createServer((req, res) => {
+      const parts: Buffer[] = [];
+      req.on('data', (c: Buffer) => parts.push(c));
+      req.on('end', () => {
+        const body = Buffer.concat(parts);
+        got.push({ type: req.headers['content-type'], auth: req.headers.authorization, body });
+        const a = answer(body);
+        setTimeout(() => {
+          res.writeHead(a.status ?? 200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(a.json ?? {}));
+        }, a.delayMs ?? 0);
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    return { url: `http://127.0.0.1:${port}/detect`, got, close: () => new Promise<void>((r) => server.close(() => r())) };
+  }
+
+  it('sends the original JPEG, maps model classes, drops weak, unknown and empty boxes, trims to the frame', async () => {
+    const svc = await fakeService(() => ({
+      json: {
+        model: 'yolov8s.engine (TensorRT FP16)',
+        ms: 6.43,
+        detections: [
+          { label: 'person', confidence: 0.91, box: [0.1, 0.2, 0.1, 0.4] },
+          { label: 'car', confidence: 0.8, bbox: [0.9, 0.5, 0.3, 0.2] },
+          { label: 'person', confidence: 0.2, box: [0.5, 0.5, 0.1, 0.1] },
+          { label: 'dog', confidence: 0.99, box: [0.3, 0.3, 0.1, 0.1] },
+          { label: 'person', confidence: 0.9, box: [0.4, 0.4, 0, 0.1] },
+          { label: 'person', confidence: 0.9, box: [0.4, 0.4, 'x', 0.1] },
+        ],
+      },
+    }));
+    const det = new HttpDetector({ url: svc.url, headers: { authorization: 'Bearer t0k' } });
+    const jpeg = encodeJpeg(paintFrame(W, H, BG, []));
+    const frame = decodeJpeg(jpeg, 1000);
+    const c = await det.detect(frame);
+    expect(svc.got).toHaveLength(1);
+    expect(svc.got[0].type).toBe('image/jpeg');
+    expect(svc.got[0].auth).toBe('Bearer t0k');
+    expect(Buffer.compare(svc.got[0].body, Buffer.from(jpeg))).toBe(0);
+    expect(c).toEqual([
+      { type: 'person', confidence: 0.91, bbox: [0.1, 0.2, 0.1, 0.4], label: 'person', attributes: { label: 'person' } },
+      { type: 'vehicle', confidence: 0.8, bbox: [0.9, 0.5, 0.1, 0.2], label: 'car', attributes: { label: 'car' } },
+    ]);
+    expect(det.info()).toMatchObject({ model: 'yolov8s.engine (TensorRT FP16)', inferenceMs: 6.4, frames: 1 });
+    await svc.close();
+  });
+
+  it('a frame without its JPEG is encoded; a refusal or no answer pauses the service, then it is tried again', async () => {
+    let mode: 'ok' | 'error' | 'slow' = 'error';
+    const svc = await fakeService(() =>
+      mode === 'error' ? { status: 503, json: { error: 'model loading' } } : mode === 'slow' ? { delayMs: 300, json: { detections: [] } } : { json: { detections: [{ label: 'person', confidence: 0.7, box: [0, 0, 0.5, 0.5] }] } },
+    );
+    let now = 10_000;
+    const det = new HttpDetector({ url: svc.url, retryMs: 2000, timeoutMs: 100 }, fetch, () => now);
+    const frame = paintFrame(W, H, BG, []);
+    await expect(det.detect(frame)).rejects.toThrow(/answered 503/);
+    expect(det.info().error).toMatch(/answered 503/);
+    // Paused: no request for 2 s.
+    now += 1000;
+    expect(await det.detect(frame)).toEqual([]);
+    expect(svc.got).toHaveLength(1);
+    // No answer in time.
+    now += 1500;
+    mode = 'slow';
+    await expect(det.detect(frame)).rejects.toThrow(/no answer within 100 ms/);
+    now += 2500;
+    mode = 'ok';
+    expect(await det.detect(frame)).toHaveLength(1);
+    expect(svc.got.at(-1)!.body[0]).toBe(0xff); // encoded on the gateway: still a JPEG
+    expect(det.info().error).toBeUndefined();
+    await svc.close();
+  });
+
+  it('refuses a config without an http URL', () => {
+    expect(() => new HttpDetector({ url: 'jetson:8601' })).toThrow(/must be an http\(s\) URL/);
+  });
+
+  it('in the pipeline: the service sees people, the pipeline numbers them and raises the intrusion', async () => {
+    const svc = await fakeService(() => ({ json: { detections: [{ label: 'person', confidence: 0.88, box: [0.4, 0.3, 0.1, 0.4] }] } }));
+    const boxes: LiveBoxes[] = [];
+    const out: Emitted[] = [];
+    const p = new VisionPipeline(
+      { detectors: { http: { url: svc.url } }, zones: [{ id: 'all', name: 'Yard', kind: 'protected', poly: [[0, 0], [1, 0], [1, 1], [0, 1]] }], minFrames: 2 },
+      { onDetection: (d) => out.push(d), onBoxes: (b) => boxes.push(b) },
+    );
+    const jpeg = encodeJpeg(paintFrame(W, H, BG, []));
+    await p.frameBytes(jpeg, 1000);
+    await p.frameBytes(jpeg, 1300);
+    expect(boxes[0].boxes[0]).toMatchObject({ type: 'intrusion', label: 'person', confidence: 0.88 });
+    expect(boxes[0].boxes[0].id).toBe(boxes[1].boxes[0].id);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ type: 'intrusion', attributes: { label: 'person' } });
+    expect(p.status().detectors.http).toMatchObject({ frames: 2 });
+    await svc.close();
   });
 });
 
@@ -410,5 +555,46 @@ describe('adapter', () => {
     expect(health.analytics).toMatchObject({ provider: 'edge-vision', source: 'folder' });
     expect(health.analytics!.frames).toBeGreaterThan(2);
     expect(got.telemetry.length).toBeGreaterThan(0);
+    // Motion was seen, so live boxes went out for the console too.
+    expect(got.tracks.length).toBeGreaterThan(0);
+    expect(got.tracks.some((t) => t.boxes.some((b) => b.type === 'motion'))).toBe(true);
+  });
+
+  it('a camera AI with a follow source waits for the read pass, reads it, and switches when it is renewed', async () => {
+    const { ctx, got } = fakeCtx();
+    const sources: { url: string; src: PushSource }[] = [];
+    const a = new VisionCameraAdapter(
+      { deviceId: 'UGV-01-AI', pos: { x: 0, y: 0 }, follows: 'UGV-01', vision: { source: { kind: 'follow', fps: 4 }, detectors: { thermal: { minC: 0, maxC: 100, thresholdC: 60 } }, snapshot: false } },
+      (url, s) => {
+        expect(s).toEqual({ kind: 'follow', fps: 4 });
+        const src = new PushSource();
+        sources.push({ url, src });
+        return src;
+      },
+    );
+    a.start(ctx);
+    expect(sources).toHaveLength(0);
+    a.onMediaRead('rtsp://read:r1.aaa@media:18554/ugv-01');
+    a.onMediaRead('rtsp://read:r1.aaa@media:18554/ugv-01'); // the same pass again: nothing to do
+    expect(sources.map((s) => s.url)).toEqual(['rtsp://read:r1.aaa@media:18554/ugv-01']);
+    const hot = encodeJpeg(paintFrame(W, H, [60, 60, 60], [{ x: 150, y: 100, w: 20, h: 20, rgb: [200, 200, 200] }]));
+    sources[0].src.push(hot, Date.now());
+    await vi.waitFor(() => expect(got.events.some((e) => e.kind === 'detection')).toBe(true));
+    expect(got.tracks.at(-1)!.boxes[0]).toMatchObject({ type: 'thermal_hotspot' });
+    // A reconnect brings a renewed pass: the old reader stops, a new one starts.
+    a.onMediaRead('rtsp://read:r1.bbb@media:18554/ugv-01');
+    expect(sources).toHaveLength(2);
+    expect(sources[1].url).toContain('r1.bbb');
+    a.stop();
+  });
+
+  it('a camera AI on the video of a vehicle declares the vehicle it follows', () => {
+    const a = new VisionCameraAdapter({
+      deviceId: 'UGV-01-AI',
+      pos: { x: 0, y: 0 },
+      follows: 'UGV-01',
+      vision: { source: { kind: 'folder', dir }, detectors: { motion: true } },
+    });
+    expect(a.declaration).toMatchObject({ deviceId: 'UGV-01-AI', follows: 'UGV-01', capabilities: ['video', 'analytics'] });
   });
 });

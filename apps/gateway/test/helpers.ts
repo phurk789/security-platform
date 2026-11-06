@@ -1,4 +1,4 @@
-import type { GwTelemetry, SrvCommand } from '@13store/shared';
+import type { GwTelemetry, GwTracks, SrvCommand } from '@13store/shared';
 import { CommandLedger, silentLogger, type AdapterContext, type CommandReport, type EventReport } from '../src/sdk';
 
 export interface Captured {
@@ -6,11 +6,12 @@ export interface Captured {
   updates: CommandReport[];
   events: EventReport[];
   camera: Parameters<AdapterContext['cameraResult']>[0][];
+  tracks: Omit<GwTracks, 't' | 'deviceId'>[];
 }
 
 /** Context that records everything an adapter sends. Uses Date.now (faked by vi timers). In-memory ledger unless one is given. */
 export function fakeCtx(ledger = new CommandLedger({ now: () => Date.now() })): { ctx: AdapterContext; got: Captured } {
-  const got: Captured = { telemetry: [], updates: [], events: [], camera: [] };
+  const got: Captured = { telemetry: [], updates: [], events: [], camera: [], tracks: [] };
   const ctx: AdapterContext = {
     now: () => Date.now(),
     ledger,
@@ -19,6 +20,7 @@ export function fakeCtx(ledger = new CommandLedger({ now: () => Date.now() })): 
     commandUpdate: (u) => got.updates.push(u),
     event: (e) => got.events.push(e),
     cameraResult: (r) => got.camera.push(r),
+    tracks: (t) => got.tracks.push(t),
   };
   return { ctx, got };
 }

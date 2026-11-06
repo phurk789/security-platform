@@ -1629,4 +1629,10 @@ export const TH: Record<string, string> = {
   stop: 'หยุด',
   'Routine task created': 'สร้างงานตรวจตราแล้ว',
   'Choose an incident, or name the routine task (up to 60 characters).': 'เลือกเหตุ หรือตั้งชื่องานตรวจตรา (ไม่เกิน 60 ตัวอักษร)',
+  // Camera AI on the cockpit view.
+  'Intruders: {n}': 'ผู้บุกรุก {n}',
+  'People in view: {n}': 'เห็นคน {n}',
+  'AI is watching': 'AI เฝ้าดูอยู่',
+  'AI gets no pictures': 'AI ไม่ได้รับภาพ',
+  'AI model not answering': 'โมเดล AI ไม่ตอบ',
 };

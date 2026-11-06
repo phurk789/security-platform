@@ -57,6 +57,8 @@ export interface AdapterDeclaration {
   view?: Device['view'];
   /** Live video published through the site media server. */
   stream?: StreamInfo;
+  /** Vision on another device's video: that device's id (see Device.follows). */
+  follows?: string;
   /** Gimbal camera mounting (bearing of yaw zero, height, field of view). */
   mount?: CameraMount;
   /** Catalogue vehicle model and fitted payload modules. */
@@ -289,7 +291,40 @@ export const DEFAULT_DETECTION_RULES: DetectionRule[] = [
   { id: 'motion', name: 'Plain motion (ignored)', enabled: true, types: ['motion'], minConfidence: 0, action: 'ignore', severity: 'low', cooldownS: 0 },
 ];
 
-export type GatewayToServer = GwHello | GwTelemetry | GwCommandUpdate | GwDeviceEvent | GwCameraResult;
+/** What the vision pipeline sees in the latest frame: one box per object, people with a track id. */
+export interface VisionBox {
+  /** Same id while the same person is followed from frame to frame. */
+  id?: number;
+  type: DetectionType;
+  /** Model class name, e.g. "person", "car". */
+  label?: string;
+  /** 0–1. */
+  confidence: number;
+  /** Normalised box in the frame: x, y, width, height (0–1). */
+  bbox: [number, number, number, number];
+  /** Image zone it is in, by name. */
+  zone?: string;
+}
+
+/**
+ * Live boxes from a vision pipeline, a few times a second while objects are in view (an empty list
+ * when the last one left). Not stored: the console draws them over the video and forgets them.
+ */
+export interface GwTracks {
+  t: 'tracks';
+  deviceId: string;
+  /** When the frame was taken. */
+  at: number;
+  /** Frame size in pixels, to place the boxes on video shown with a different aspect. */
+  width?: number;
+  height?: number;
+  boxes: VisionBox[];
+}
+
+/** Most boxes one tracks message may carry. */
+export const VISION_MAX_BOXES = 30;
+
+export type GatewayToServer = GwHello | GwTelemetry | GwCommandUpdate | GwDeviceEvent | GwCameraResult | GwTracks;
 
 // ---------------------------------------------------------------------------
 // Server → gateway
@@ -327,6 +362,18 @@ export interface SrvWelcome {
    * (RTSP URL with a publish credential). Missing when the server has no media server for pushes.
    */
   media?: MediaPublish[];
+  /** Camera AIs that follow a vehicle: where each may read that vehicle's video on the media server. */
+  reads?: MediaRead[];
+}
+
+/** A camera AI's pass to read the video of the vehicle it follows (see Device.follows). */
+export interface MediaRead {
+  /** The camera AI on this gateway. */
+  deviceId: string;
+  /** The vehicle whose video it reads. */
+  follows: string;
+  /** e.g. rtsp://read:<token>@media.site:18554/ugv-01 — valid only while this gateway holds the camera AI. */
+  read: string;
 }
 
 export interface MediaPublish {
@@ -524,6 +571,8 @@ export type ConsoleEvent =
   | { type: 'geofence'; geofence: Geofence; deleted?: boolean }
   | { type: 'site'; site: SiteInfo }
   | { type: 'detection'; detection: Detection }
+  /** Live boxes from a vision pipeline (see GwTracks); not stored. */
+  | { type: 'tracks'; deviceId: string; at: number; width?: number; height?: number; boxes: VisionBox[] }
   | { type: 'patrol'; patrol: Patrol; deleted?: boolean }
   | { type: 'timeline'; event: TimelineEvent }
   | { type: 'evidence'; evidence: Evidence }
