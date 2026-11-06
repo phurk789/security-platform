@@ -5,12 +5,12 @@
 // Approvals, checks and commands use the original components, so the server's rules (two-person
 // approval, route checks, operating area) apply unchanged.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CalendarClock, Camera, Check, ChevronRight, CircleAlert, FolderOpen, Gamepad2, Hourglass, ListChecks, MapPinned, Pause, Pencil, Play, Plus, Route as RouteIcon, Search, Siren, Trash2, X } from 'lucide-react';
-import { ROUTINE_TASK_TYPE, TASK_NAME_MAX, fmtDate, type AppState, type Mission, type Patrol, type Point, type RoutePoint, type SavedRoute } from '@13store/shared';
+import { ArrowLeft, CalendarClock, Camera, Check, ChevronRight, CircleAlert, FolderOpen, Gamepad2, Hourglass, ListChecks, MapPinned, MousePointerClick, Pause, Pencil, Play, Plus, Route as RouteIcon, Search, Siren, Trash2, X } from 'lucide-react';
+import { ROUTINE_TASK_TYPE, TASK_NAME_MAX, fmtDate, operatingAreas, type AppState, type Mission, type Patrol, type Point, type RoutePoint, type SavedRoute } from '@13store/shared';
 import { can, currentUser, fmtTime, userName } from '../domain/policy';
 import { mapFocus } from '../domain/mapFocus';
 import { ENDED, PLANNING, PLAN_GROUPS, RUNNING, STEPS, missionPurpose, planCounts, planList, routeNumbers, stepIndex, upcomingRuns, type PlanFilter, type PlanRow, type RouteNumbers } from '../domain/missionPlanning';
-import { routeDraft, useRouteDraft, type DraftPurpose, type LibraryMeta } from '../domain/routeDraft';
+import { routeDraft, routeDraftDock, useRouteDraft, type DraftPurpose, type LibraryMeta } from '../domain/routeDraft';
 import { savedRoutes, useSavedRoutes } from '../domain/savedRoutes';
 import { useT, type T } from '../i18n';
 import { useStore } from '../store';
@@ -19,6 +19,7 @@ import { Dialog } from '../components/Dialog';
 import { LiveMission, Planner, PrepareMission, fmtEta } from '../components/IncidentPanel';
 import { MainMap } from '../components/MainMap';
 import { DAYS, PatrolForm, PatrolsOffline } from '../components/Patrols';
+import { RouteEditorDock } from '../components/RouteEditorDock';
 import './mission-planning.css';
 
 /** A new mission being set up: for an alert or a routine task, maybe starting from a saved route. */
@@ -408,6 +409,24 @@ function PlanScreen({ screen, go, libMsg, setLibMsg }: { screen: Exclude<Screen,
     go({ kind: 'new-mission', c: { source: openIncidents(s).length ? 'incident' : 'task', task: '', ...extra } });
   };
 
+  // Routes are drawn with the editor beside the map, so nothing floats over the map here.
+  useEffect(() => routeDraftDock.add(), []);
+  // A drawing starts: frame its checkpoints, or the site's operating area for a new route.
+  const drawKey = drawing ? `${drawing.purpose}:${drawing.missionId ?? ''}:${(drawing.meta as LibraryMeta | undefined)?.id ?? ''}:${drawing.initial.length}` : '';
+  useEffect(() => {
+    if (!drawing) return;
+    const kind = s.devices[drawing.deviceId]?.kind === 'uav' ? 'uav' : 'ugv';
+    const d = s.devices[drawing.deviceId];
+    // The operating area, else where the site's vehicles are.
+    const area = operatingAreas(s.geofences, kind).flatMap((f) => f.poly);
+    const fleet = Object.values(s.devices)
+      .filter((v) => (v.kind === 'ugv' || v.kind === 'uav') && !v.noFix && !v.indoor)
+      .map((v) => v.pos);
+    const pts = drawing.points.length ? [...drawing.points, ...(d && !d.noFix ? [d.pos] : [])] : area.length ? area : fleet;
+    if (pts.length) mapFocus.fit(pts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawKey]);
+
   // The draft just sent: open it as soon as it arrives.
   useEffect(() => {
     if (screen.kind !== 'saving-mission') return;
@@ -440,19 +459,16 @@ function PlanScreen({ screen, go, libMsg, setLibMsg }: { screen: Exclude<Screen,
   useEffect(() => () => mapFocus.setPreview(null), []);
 
   // What the route adds up to: the one being drawn, else the plan's.
-  const numbers: RouteNumbers | undefined = drawing
-    ? drawing.points.length
-      ? routeNumbers(drawing.points, s.devices[drawing.deviceId])
-      : undefined
-    : m
-      ? routeNumbers(RUNNING.includes(m.status) ? m.checkpoints.slice(m.nextCp) : m.checkpoints, s.devices[m.deviceId])
-      : route
-        ? routeNumbers(route.points)
-        : patrol
-          ? routeNumbers(patrol.route, s.devices[patrol.deviceId])
-          : screen.kind === 'new-patrol' && patrolLoop?.length
-            ? routeNumbers(patrolLoop)
-            : undefined;
+  // What the plan's route adds up to (a route being drawn shows its numbers in the editor).
+  const numbers: RouteNumbers | undefined = m
+    ? routeNumbers(RUNNING.includes(m.status) ? m.checkpoints.slice(m.nextCp) : m.checkpoints, s.devices[m.deviceId])
+    : route
+      ? routeNumbers(route.points)
+      : patrol
+        ? routeNumbers(patrol.route, s.devices[patrol.deviceId])
+        : screen.kind === 'new-patrol' && patrolLoop?.length
+          ? routeNumbers(patrolLoop)
+          : undefined;
 
   let head: React.ReactNode;
   let side: React.ReactNode;
@@ -529,13 +545,23 @@ function PlanScreen({ screen, go, libMsg, setLibMsg }: { screen: Exclude<Screen,
       </header>
       <div className="mp-body">
         <section className="mp-stage" aria-label={t('Route on the map')}>
-          <div className="panel mp-map">
+          <div className={`panel mp-map${drawing ? ' is-drawing' : ''}`}>
             <MainMap />
+            {drawing && (
+              <div className="mp-map-hint" aria-hidden="true">
+                <MousePointerClick size={15} /> {drawing.points.length ? t('Click to add the next checkpoint') : t('Click the map to place the first checkpoint')}
+              </div>
+            )}
           </div>
-          <StageStats n={numbers} left={!drawing && !!m && RUNNING.includes(m.status)} noVehicle={drawing ? !drawing.deviceId : screen.kind === 'route'} />
+          {/* The numbers of a route being drawn are in the editor beside the map. */}
+          {!drawing && numbers && <StageStats n={numbers} left={!!m && RUNNING.includes(m.status)} noVehicle={screen.kind === 'route'} />}
         </section>
         <aside className="mp-side" aria-label={t('Planning steps')}>
-          {side}
+          {drawing && <RouteEditorDock d={drawing} msg={drawing.purpose === 'library' ? libMsg : null} />}
+          {/* Kept mounted while drawing so the forms keep what was filled in. */}
+          <div className="mp-side-rest" hidden={!!drawing}>
+            {side}
+          </div>
         </aside>
       </div>
     </div>
@@ -590,9 +616,8 @@ function StepBar({ m }: { m?: Mission }) {
   );
 }
 
-function StageStats({ n, left, noVehicle }: { n?: RouteNumbers; left?: boolean; noVehicle?: boolean }) {
+function StageStats({ n, left, noVehicle }: { n: RouteNumbers; left?: boolean; noVehicle?: boolean }) {
   const t = useT();
-  if (!n) return <div className="panel mp-stats mp-stats-empty">{t('Distance and time show here once the route has checkpoints.')}</div>;
   return (
     <div className="panel mp-stats">
       <span>
@@ -910,12 +935,14 @@ function NewMission({ c, setC, onDone }: { c: Creating; setC: (c: Creating) => v
 // Saved routes
 // ---------------------------------------------------------------------------
 
-/** A new saved route: drawing starts at once; the name can be changed while drawing. */
+/**
+ * A new saved route: drawing starts at once, in the editor beside the map (name, checkpoints,
+ * Save). This box shows only while the route is being saved, or if the drawing was left.
+ */
 function NewRoute({ defaultName, msg, onCancel }: { defaultName: string; msg: Msg | null; onCancel: () => void }) {
   const t = useT();
   const draft = useRouteDraft();
-  const mine = draft?.purpose === 'library' && !(draft.meta as LibraryMeta | undefined)?.id ? draft : null;
-  const meta = (mine?.meta as LibraryMeta | undefined) ?? { name: '' };
+  const saving = draft?.purpose === 'library' && draft.state === 'done';
   useEffect(() => {
     const d = routeDraft.get();
     if (d?.purpose === 'library' && !(d.meta as LibraryMeta | undefined)?.id) return;
@@ -923,34 +950,20 @@ function NewRoute({ defaultName, msg, onCancel }: { defaultName: string; msg: Ms
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <section className="panel mp-box">
-      <div className="panel-head">
-        <div>
-          <span className="lg-eyebrow">NEW ROUTE</span>
-          <h2>{t('New route')}</h2>
+    <section className="panel mp-box mp-empty">
+      {saving ? <Hourglass size={30} /> : <MapPinned size={30} />}
+      <h3>{saving ? t('Saving the route…') : t('New route')}</h3>
+      {msg && <p className={msg.ok ? 'fine' : 'mp-bad'}>{msg.text}</p>}
+      {!saving && (
+        <div className="row gap-s">
+          <button type="button" className="btn-secondary" onClick={onCancel}>
+            {t('Cancel')}
+          </button>
+          <button type="button" className="btn-primary" onClick={() => routeDraft.start({ purpose: 'library', deviceId: '', points: [], meta: { name: defaultName } satisfies LibraryMeta })}>
+            <MapPinned size={15} /> {t('Draw on the map')}
+          </button>
         </div>
-        <button type="button" className="btn-ghost small" onClick={onCancel} aria-label={t('Close')} title={t('Close')}>
-          <X size={16} />
-        </button>
-      </div>
-      <div className="step">
-        <label className="field">
-          <span>{t('Route name')}</span>
-          <input
-            value={meta.name}
-            maxLength={60}
-            placeholder={t('Route name, e.g. Night loop')}
-            disabled={mine?.state !== 'drawing'}
-            onChange={(e) => routeDraft.setMeta({ ...meta, name: e.target.value } satisfies LibraryMeta)}
-          />
-        </label>
-        <ol className="mp-howto">
-          <li>{t('Click the map to add checkpoints, in the order the vehicle drives them.')}</li>
-          <li>{t('Click a checkpoint to name it and set its speed, a wait, or a photo there.')}</li>
-          <li>{t('Press “Save route” in the map panel.')}</li>
-        </ol>
-        {msg && <p className={msg.ok ? 'fine' : 'mp-bad'}>{msg.text}</p>}
-      </div>
+      )}
     </section>
   );
 }

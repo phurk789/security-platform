@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDownUp, Camera, Check, Eraser, FolderOpen, Hourglass, MapPinned, Repeat, Save, Trash2, Undo2, X } from 'lucide-react';
 import { ROUTE_LIMITS, routeSpeedOf, routeTimeS, type RoutePoint } from '@13store/shared';
-import { MIN_ZONE_POINTS, checkDraft, closeLoop, isLoop, maxPoints, removePoint, reverseRoute, routeDraft, setPointSettings, useRouteDraft, type LibraryMeta } from '../domain/routeDraft';
+import { MIN_ZONE_POINTS, checkDraft, closeLoop, isLoop, isZonePurpose, maxPoints, removePoint, reverseRoute, routeDraft, setPointSettings, useDraftDocked, useRouteDraft, type LibraryMeta, type RouteDraft } from '../domain/routeDraft';
 import { savedRoutes, useSavedRoutes } from '../domain/savedRoutes';
 import { useStore } from '../store';
 import { useT } from '../i18n';
@@ -22,34 +22,14 @@ export function fmtDuration(sec: number) {
   return m ? `${m} min ${String(s).padStart(2, '0')} s` : `${s} s`;
 }
 
-export function RouteDraftPanel() {
+/**
+ * What the route editor needs, wherever it is shown (floating on the map, or docked beside it):
+ * the checks, the speed, the title, and what Use / Cancel do.
+ */
+export function useDraftActions(d: RouteDraft) {
   const { s, dispatch } = useStore();
   const t = useT();
-  const d = useRouteDraft();
-  const keys = useRef<{ done: () => void; cancel: () => void } | null>(null);
-  // Esc cancels, Backspace undoes, Enter uses the route (the zone editor has its own keys).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const k = keys.current;
-      if (!k || typing(e.target)) return;
-      if (e.key === 'Escape') k.cancel();
-      else if (e.key === 'Enter') k.done();
-      else if (e.key === 'Backspace' || e.key === 'Delete') routeDraft.undo();
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-  if (!d || d.state !== 'drawing') {
-    keys.current = null;
-    return null;
-  }
-  if (d.purpose === 'geofence') {
-    keys.current = null;
-    return <ZoneEditor d={d} />;
-  }
-  const zone = d.purpose === 'zone';
+  const zone = isZonePurpose(d.purpose);
   const dev = zone ? undefined : s.devices[d.deviceId];
   const from = dev && !dev.noFix ? dev.pos : undefined;
   const c = checkDraft(d.points, from, s.geofences, dev?.kind === 'uav' ? 'uav' : 'ugv', d.purpose);
@@ -62,10 +42,10 @@ export function RouteDraftPanel() {
         ? t('Saved route “{name}”', { name: library.name })
         : t('New saved route “{name}”', { name: library.name })
       : d.purpose === 'mission-edit'
-      ? t('Edit the route of {id}', { id: d.missionId ?? '' })
-      : d.purpose === 'patrol'
-        ? t('Patrol route for {id}', { id: d.deviceId })
-        : t('Mission route for {id}', { id: d.deviceId });
+        ? t('Edit the route of {id}', { id: d.missionId ?? '' })
+        : d.purpose === 'patrol'
+          ? t('Patrol route for {id}', { id: d.deviceId })
+          : t('Mission route for {id}', { id: d.deviceId });
   const back = () => d.returnTo && dispatch({ type: 'setView', view: d.returnTo });
   const done = () => {
     if (!c.ok) return;
@@ -81,6 +61,51 @@ export function RouteDraftPanel() {
     else routeDraft.cancel();
     back();
   };
+  return { zone, dev, from, c, speed, library, title, done, cancel };
+}
+
+/** Esc cancels, Backspace undoes, Enter uses the route (not while typing in a field). */
+export function useDraftKeys(keys: { current: { done: () => void; cancel: () => void } | null }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const k = keys.current;
+      if (!k || typing(e.target)) return;
+      if (e.key === 'Escape') k.cancel();
+      else if (e.key === 'Enter') k.done();
+      else if (e.key === 'Backspace' || e.key === 'Delete') routeDraft.undo();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [keys]);
+}
+
+export function RouteDraftPanel() {
+  const d = useRouteDraft();
+  const docked = useDraftDocked();
+  const keys = useRef<{ done: () => void; cancel: () => void } | null>(null);
+  // The zone editor has its own keys.
+  useDraftKeys(keys);
+  if (!d || d.state !== 'drawing') {
+    keys.current = null;
+    return null;
+  }
+  if (d.purpose === 'geofence') {
+    keys.current = null;
+    return <ZoneEditor d={d} />;
+  }
+  // A page shows the route editor beside the map: nothing floats over it.
+  if (docked && d.purpose !== 'zone') {
+    keys.current = null;
+    return null;
+  }
+  return <FloatingPanel d={d} keys={keys} />;
+}
+
+function FloatingPanel({ d, keys }: { d: RouteDraft; keys: { current: { done: () => void; cancel: () => void } | null } }) {
+  const t = useT();
+  const { zone, from, c, speed, library, title, done, cancel } = useDraftActions(d);
   keys.current = { done, cancel };
 
   return (
@@ -162,7 +187,7 @@ function Checkpoints({ points, selected, speed }: { points: RoutePoint[]; select
 }
 
 /** Name, leg speed, wait and capture for one checkpoint. */
-function PointEditor({ i, p, speed }: { i: number; p: RoutePoint; speed: number }) {
+export function PointEditor({ i, p, speed }: { i: number; p: RoutePoint; speed: number }) {
   const t = useT();
   const set = (patch: Partial<Omit<RoutePoint, 'x' | 'y'>>) => {
     const d = routeDraft.get();
@@ -220,7 +245,7 @@ function PointEditor({ i, p, speed }: { i: number; p: RoutePoint; speed: number 
 
 /** Reverse, close the loop, and the site's route library (load one, keep this one). */
 /** `canSave`: offer to keep the route in the library (a saved route being drawn is saved when it is used). */
-function RouteTools({ points, max, canSave = true }: { points: RoutePoint[]; max: number; canSave?: boolean }) {
+export function RouteTools({ points, max, canSave = true }: { points: RoutePoint[]; max: number; canSave?: boolean }) {
   const { s, session } = useStore();
   const t = useT();
   const library = useSavedRoutes(session?.api, s.site?.id);

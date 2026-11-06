@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Geofence } from '@13store/shared';
-import { MAX_CHECKPOINTS, MAX_ZONE_POINTS, addPoint, checkDraft, closeLoop, finishedDraft, insertPoint, isLoop, maxPoints, movePoint, northUpRect, removePoint, reverseRoute, routeDraft, setPointSettings } from './routeDraft';
+import { MAX_CHECKPOINTS, MAX_ZONE_POINTS, addPoint, checkDraft, closeLoop, finishedDraft, insertPoint, isLoop, maxPoints, movePoint, northUpRect, removePoint, reverseRoute, routeDraft, routeDraftDock, setPointSettings } from './routeDraft';
 
 const keepOut: Geofence = {
   id: 'GF-X',
@@ -139,5 +139,30 @@ describe('route planner: checkpoint settings', () => {
     routeDraft.setPoints(removePoint(routeDraft.get()!.points, 2));
     expect(routeDraft.get()!.selected).toBeUndefined();
     routeDraft.clear();
+  });
+});
+
+describe('the route editor beside the map', () => {
+  afterEach(() => routeDraft.clear());
+
+  it('tells a cancelled drawing from a finished one', () => {
+    routeDraft.start({ purpose: 'library', deviceId: '', points: [{ x: 1, y: 1 }], meta: { name: 'Yard' } });
+    routeDraft.setPoints([{ x: 1, y: 1 }, { x: 5, y: 5 }]);
+    routeDraft.cancel();
+    expect(routeDraft.get()).toMatchObject({ state: 'done', cancelled: true, points: [{ x: 1, y: 1 }] });
+    routeDraft.start({ purpose: 'library', deviceId: '', points: [{ x: 1, y: 1 }], meta: { name: 'Yard' } });
+    expect(routeDraft.get()?.cancelled).toBeUndefined();
+    routeDraft.finish();
+    expect(routeDraft.get()).toMatchObject({ state: 'done', cancelled: undefined });
+  });
+
+  it('keeps the floating panel away while a page docks the editor', () => {
+    expect(routeDraftDock.get()).toBe(false);
+    const a = routeDraftDock.add();
+    const b = routeDraftDock.add();
+    a();
+    expect(routeDraftDock.get()).toBe(true);
+    b();
+    expect(routeDraftDock.get()).toBe(false);
   });
 });

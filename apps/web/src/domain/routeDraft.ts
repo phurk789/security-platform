@@ -234,6 +234,28 @@ export function useRouteDraft() {
   return useSyncExternalStore(routeDraft.subscribe, routeDraft.get, routeDraft.get);
 }
 
+// ---- docked editor -----------------------------------------------------------------------
+// A page that shows the route editor beside the map (the mission planning page) docks it: the
+// floating panel on the map then stays out of the way. Zones keep their own editor on the map.
+
+let docked = 0;
+const isDocked = () => docked > 0;
+
+export const routeDraftDock = {
+  /** Dock the editor while the caller is shown; returns the undock function. */
+  add() {
+    docked++;
+    emit();
+    return () => {
+      docked--;
+      emit();
+    };
+  },
+  get: isDocked,
+};
+
+export const useDraftDocked = () => useSyncExternalStore(routeDraft.subscribe, isDocked, isDocked);
+
 /** A finished drawing with points for this purpose and vehicle, if there is one. */
 export function finishedDraft(d: RouteDraft | null, purpose: DraftPurpose, deviceId: string) {
   return d && d.state === 'done' && d.points.length > 0 && d.purpose === purpose && d.deviceId === deviceId ? d : null;
