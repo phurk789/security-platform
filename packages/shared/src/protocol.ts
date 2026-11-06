@@ -70,6 +70,19 @@ export interface AdapterDeclaration {
   components?: DeviceComponent[];
   /** The device can be driven live from the console (ground vehicles); limits applied by the adapter. */
   teleop?: TeleopLimits;
+  /** Arm, disarm, mode and gear from the console (MAVLink vehicles; see SrvVehicleControl). */
+  vehicleControl?: VehicleControlInfo;
+}
+
+/**
+ * What the console may do to a vehicle besides missions and driving. Every MAVLink vehicle can be disarmed and held.
+ * A vehicle run without a hand-held remote (`noRemote`: a computer on the vehicle is its remote) can also be armed,
+ * put in MANUAL and given a gear from the console.
+ */
+export interface VehicleControlInfo {
+  noRemote: boolean;
+  /** Gears the console can choose from (0: none). Gear 1 is the slowest and is set at every arm. */
+  gears: number;
 }
 
 /** Live driving from the console: the adapter's own caps (fractions of full stick, 0–1). */
@@ -336,7 +349,16 @@ export interface GwTracks {
 /** Most boxes one tracks message may carry. */
 export const VISION_MAX_BOXES = 30;
 
-export type GatewayToServer = GwHello | GwTelemetry | GwCommandUpdate | GwDeviceEvent | GwCameraResult | GwTracks;
+/** Gateway → server: how a vehicle control request ended. `ok` only when the vehicle accepted it. */
+export interface GwVehicleControlResult {
+  t: 'vehicle_control_result';
+  requestId: string;
+  deviceId: string;
+  ok: boolean;
+  detail?: string;
+}
+
+export type GatewayToServer = GwHello | GwTelemetry | GwCommandUpdate | GwDeviceEvent | GwCameraResult | GwTracks | GwVehicleControlResult;
 
 // ---------------------------------------------------------------------------
 // Server → gateway
@@ -433,7 +455,17 @@ export interface AiJob {
 /** Most videos one AI box may take on, whatever it offers. */
 export const AI_BOX_MAX_CAPACITY = 16;
 
-export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera | SrvDrive | SrvAiJobs;
+/** Arm, disarm, MANUAL/HOLD and gear for one vehicle (see VehicleControlInfo for what each vehicle allows). */
+export type VehicleControlAction = { kind: 'arm' } | { kind: 'disarm' } | { kind: 'mode'; mode: 'manual' | 'hold' } | { kind: 'gear'; gear: number };
+
+export interface SrvVehicleControl {
+  t: 'vehicle_control';
+  requestId: string;
+  deviceId: string;
+  action: VehicleControlAction;
+}
+
+export type ServerToGateway = SrvCommand | SrvDemo | SrvWelcome | SrvCamera | SrvDrive | SrvAiJobs | SrvVehicleControl;
 
 // ---------------------------------------------------------------------------
 // Client API
