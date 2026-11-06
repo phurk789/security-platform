@@ -12,7 +12,6 @@ export const TH: Record<string, string> = {
   'Mission workspace': 'พื้นที่ปฏิบัติการ',
   'Last received {age}. Displayed values are not current.': 'ได้รับข้อมูลล่าสุด {age} ค่าที่แสดงไม่ใช่ค่าปัจจุบัน',
   'No telemetry received. Values are unknown.': 'ยังไม่ได้รับข้อมูลสถานะจากยาน ไม่ทราบค่าปัจจุบัน',
-  'Operational view': 'มุมมองปฏิบัติการ',
   'Primary view': 'มุมมองหลัก',
   'Map first': 'แผนที่หลัก',
   'Camera first': 'กล้องหลัก',
@@ -1678,4 +1677,13 @@ export const TH: Record<string, string> = {
   Days: 'วัน',
   Times: 'เวลา',
   'Only a supervisor or an administrator can set up a patrol schedule.': 'เฉพาะหัวหน้าเวรหรือผู้ดูแลระบบที่ตั้งตารางลาดตระเวนได้',
+  // Console driving, as the gateway reports it (the Drive panel).
+  Idle: 'ว่าง',
+  'No stick input from the console: stopped': 'ไม่มีสัญญาณคันบังคับจากคอนโซล หยุดรถแล้ว',
+  'Stopped: centre the sticks to drive': 'หยุดอยู่ ปล่อยคันบังคับกลับตรงกลางก่อนจึงขับต่อได้',
+  'No heartbeat from the flight controller': 'ไม่ได้รับ heartbeat จากบอร์ดควบคุม',
+  'The vehicle is disarmed: the pilot arms it on the remote': 'รถยังไม่ได้ arm นักบินต้อง arm ที่รีโมต',
+  'gateway stopping': 'gateway กำลังปิด',
+  'released by the console': 'คอนโซลปล่อยการควบคุมแล้ว',
+  'a route started': 'เริ่มวิ่งตามเส้นทางแล้ว',
 };

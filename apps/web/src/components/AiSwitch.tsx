@@ -31,10 +31,26 @@ export function AiSwitch({ d, hud }: { d: Device; hud?: boolean }) {
   const title = !allowed
     ? t('Your role cannot switch the AI.')
     : `${on ? t('Switch AI off for {id}', { id: d.id }) : t('Switch AI on for {id}', { id: d.id })}${d.ai?.by ? ` · ${t('Last switched by {name}', { name: d.ai.by })}` : ''}`;
+  // On the cockpit HUD it is the knob at the end of the AI row, which already says what the AI is doing.
+  if (hud)
+    return (
+      <button
+        type="button"
+        className={`ai-switch is-hud${on ? ' on' : ''}${waiting ? ' waiting' : ''}`}
+        role="switch"
+        aria-checked={on}
+        aria-label={`AI · ${d.id}`}
+        disabled={!allowed || busy}
+        onClick={() => void flip()}
+        title={title}
+      >
+        <span className="ai-switch-knob" aria-hidden="true" />
+      </button>
+    );
   return (
     <button
       type="button"
-      className={`ai-switch${on ? ' on' : ''}${waiting ? ' waiting' : ''}${hud ? ' lg-hud-glass' : ''}`}
+      className={`ai-switch${on ? ' on' : ''}${waiting ? ' waiting' : ''}`}
       role="switch"
       aria-checked={on}
       disabled={!allowed || busy}
@@ -44,7 +60,7 @@ export function AiSwitch({ d, hud }: { d: Device; hud?: boolean }) {
       <ScanEye size={14} aria-hidden="true" />
       <span className="ai-switch-text">{on ? t('AI on') : t('AI off')}</span>
       <span className="ai-switch-knob" aria-hidden="true" />
-      {waiting && !hud && <small>{t(waiting)}</small>}
+      {waiting && <small>{t(waiting)}</small>}
     </button>
   );
 }
