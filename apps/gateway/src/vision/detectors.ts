@@ -1,12 +1,13 @@
-// Detectors that turn a frame into candidate detections. Three kinds:
+// Detectors that turn a frame into candidate detections. Four kinds:
 //  - motion: background subtraction, no model, any camera (the classic "something moved here");
 //  - thermal: temperature from a thermal camera's grey level against a configured span, hotspots
 //    above a threshold (fire, overheating equipment);
 //  - onnx: an object-detection model (YOLOv8 / YOLO11 / YOLOv5 export) run with onnxruntime-node,
-//    which the edge PC installs separately (`npm i onnxruntime-node`) along with the model file.
+//    which the edge PC installs separately (`npm i onnxruntime-node`) along with the model file;
+//  - http: an AI service next to the gateway (TensorRT on a Jetson) that takes a JPEG and answers boxes.
 import { createRequire } from 'node:module';
 import type { DetectionType } from '@13store/shared';
-import { boxIoU, components, letterbox, toGrey, type Box, type Frame, type GreyFrame } from './frames';
+import { boxIoU, components, encodeJpeg, letterbox, toGrey, type Box, type Frame, type GreyFrame } from './frames';
 
 export interface Candidate {
   type: DetectionType;
@@ -317,6 +318,110 @@ export class OnnxDetector implements Detector {
   }
   info() {
     return { model: this.cfg.model, frames: this.frames, inferenceMs: this.lastMs, error: this.error, classes: [...this.include] };
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+// HTTP: an AI service next to the gateway (TensorRT on a Jetson, a GPU box): JPEG in, boxes out
+
+export interface HttpDetectorConfig {
+  /** The service's detect URL, e.g. "http://127.0.0.1:8601/detect" (deploy/jetson/vision_server.py). */
+  url: string;
+  /** Give up on a frame after this long (ms). Default 1500. */
+  timeoutMs?: number;
+  /** Only these classes are reported (model names). Default: those in classMap. */
+  include?: string[];
+  /** Model class → detection type. Default DEFAULT_CLASS_MAP. */
+  classMap?: Record<string, DetectionType>;
+  /** Below this the service's boxes are dropped. Default 0.35. */
+  minConfidence?: number;
+  /** Extra request headers, e.g. { "authorization": "Bearer …" } when the service has a token. */
+  headers?: Record<string, string>;
+  /** After a failed request, wait this long before trying again (ms). Default 2000. */
+  retryMs?: number;
+}
+
+/** What the AI service answers: boxes in frame fractions (x, y = top left), the model, and its own time. */
+interface HttpAnswer {
+  model?: unknown;
+  ms?: unknown;
+  detections?: { label?: unknown; confidence?: unknown; box?: unknown; bbox?: unknown }[];
+}
+
+/**
+ * Sends each frame (its original JPEG when there is one) to an AI service and turns the answer
+ * into candidates. The service does the heavy work on its GPU; zones, tracking, live boxes and
+ * reports stay in the pipeline. While the service is down, frames are skipped for `retryMs`.
+ */
+export class HttpDetector implements Detector {
+  readonly name = 'http';
+  private frames = 0;
+  private lastMs = 0;
+  private roundTripMs = 0;
+  private model?: string;
+  private error?: string;
+  private pausedUntil = 0;
+  readonly classMap: Record<string, DetectionType>;
+  readonly include: Set<string>;
+
+  constructor(
+    private readonly cfg: HttpDetectorConfig,
+    private readonly fetchFn: typeof fetch = fetch,
+    private readonly now: () => number = Date.now,
+  ) {
+    if (!/^https?:\/\/\S+$/.test(cfg.url ?? '')) throw new Error('vision.detectors.http.url must be an http(s) URL, e.g. http://127.0.0.1:8601/detect.');
+    this.classMap = cfg.classMap ?? DEFAULT_CLASS_MAP;
+    this.include = new Set(cfg.include ?? Object.keys(this.classMap));
+  }
+
+  async detect(frame: Frame): Promise<Candidate[]> {
+    if (this.now() < this.pausedUntil) return [];
+    const body = frame.jpeg ?? encodeJpeg(frame, 80);
+    const t0 = this.now();
+    let answer: HttpAnswer;
+    try {
+      const res = await this.fetchFn(this.cfg.url, {
+        method: 'POST',
+        headers: { 'content-type': 'image/jpeg', ...this.cfg.headers },
+        // Node's fetch sends a Buffer or Uint8Array as the raw body.
+        body: body as unknown as BodyInit,
+        signal: AbortSignal.timeout(this.cfg.timeoutMs ?? 1500),
+      });
+      if (!res.ok) throw new Error(`AI service answered ${res.status}`);
+      answer = (await res.json()) as HttpAnswer;
+      if (!answer || !Array.isArray(answer.detections)) throw new Error('AI service answer has no detections list');
+    } catch (e) {
+      this.pausedUntil = this.now() + (this.cfg.retryMs ?? 2000);
+      const why = e instanceof Error ? (e.name === 'TimeoutError' ? `no answer within ${this.cfg.timeoutMs ?? 1500} ms` : e.message) : String(e);
+      this.error = `${this.cfg.url}: ${why}`;
+      throw new Error(this.error);
+    }
+    this.error = undefined;
+    this.frames++;
+    this.roundTripMs = this.now() - t0;
+    if (typeof answer.ms === 'number' && Number.isFinite(answer.ms)) this.lastMs = Math.round(answer.ms * 10) / 10;
+    if (typeof answer.model === 'string') this.model = answer.model.slice(0, 80);
+    const min = this.cfg.minConfidence ?? 0.35;
+    const out: Candidate[] = [];
+    for (const d of answer.detections) {
+      const label = typeof d.label === 'string' ? d.label : '';
+      const conf = typeof d.confidence === 'number' ? d.confidence : NaN;
+      const b = (Array.isArray(d.box) ? d.box : d.bbox) as unknown[] | undefined;
+      if (!label || !this.include.has(label) || !(conf >= min && conf <= 1) || !Array.isArray(b) || b.length !== 4 || !b.every((v) => typeof v === 'number' && Number.isFinite(v))) continue;
+      const [x, y, w, h] = b as number[];
+      const x0 = Math.max(0, x);
+      const y0 = Math.max(0, y);
+      const x1 = Math.min(1, x + w);
+      const y1 = Math.min(1, y + h);
+      if (x1 <= x0 || y1 <= y0) continue;
+      const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+      out.push({ type: this.classMap[label] ?? 'other', confidence: Math.round(conf * 1000) / 1000, bbox: [r4(x0), r4(y0), r4(x1 - x0), r4(y1 - y0)], label, attributes: { label } });
+    }
+    return out;
+  }
+
+  info() {
+    return { url: this.cfg.url, model: this.model, frames: this.frames, inferenceMs: this.lastMs, roundTripMs: this.roundTripMs, error: this.error, classes: [...this.include] };
   }
 }
 

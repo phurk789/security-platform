@@ -9,6 +9,8 @@ export interface Frame {
   rgba: Uint8Array;
   /** When the frame was captured (ms). */
   at: number;
+  /** The JPEG it was decoded from, when there was one (sent as is to an AI service). */
+  jpeg?: Uint8Array;
 }
 
 export interface GreyFrame {
@@ -24,7 +26,7 @@ export type Box = [number, number, number, number];
 export function decodeJpeg(bytes: Uint8Array, at: number, maxPixels = 4_000_000): Frame {
   const d = jpegDecode(bytes, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 256, maxResolutionInMP: Math.max(1, Math.ceil(maxPixels / 1e6)) });
   if (d.width * d.height > maxPixels) throw new Error(`Frame too large (${d.width}×${d.height}).`);
-  return { width: d.width, height: d.height, rgba: d.data, at };
+  return { width: d.width, height: d.height, rgba: d.data, at, jpeg: bytes };
 }
 
 /** Luma plane, optionally scaled down to `width` pixels wide (box filter). */

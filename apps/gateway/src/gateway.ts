@@ -10,7 +10,7 @@ import { VideoPusher, type Pusher, type VideoPushOptions } from './videoPush';
 
 /** Messages dropped because the server link was down, by type. */
 export type DroppedCounts = Record<Exclude<GatewayToServer['t'], 'hello'>, number>;
-const noDrops = (): DroppedCounts => ({ telemetry: 0, cmd: 0, event: 0, camera_result: 0 });
+const noDrops = (): DroppedCounts => ({ telemetry: 0, cmd: 0, event: 0, camera_result: 0, tracks: 0 });
 
 export interface GatewayOptions {
   /** ws:// or wss:// base URL of the platform server, e.g. ws://localhost:8080 */
@@ -146,7 +146,8 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
     const when = everConnected ? `during ${((now() - offlineSince) / 1000).toFixed(1)} s offline` : 'before the first connection';
     const line = `dropped ${when} (not buffered): ${lost.map(([t, n]) => `${n} ${t}`).join(', ')}`;
     // Lost command updates and events mean the server shows timed out / misses an event: worth a warning.
-    if (lost.some(([t]) => t !== 'telemetry')) log.warn(line);
+    // Live boxes, like telemetry, are only worth anything at the moment they are sent.
+    if (lost.some(([t]) => t !== 'telemetry' && t !== 'tracks')) log.warn(line);
     else log.info(line);
   };
 
@@ -166,6 +167,7 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
       },
       event: (e) => send({ t: 'event', deviceId, ...e, at: e.at ?? now() }),
       cameraResult: (r) => send({ t: 'camera_result', deviceId, ...r }),
+      tracks: (tr) => send({ t: 'tracks', deviceId, ...tr }),
     };
   };
 
@@ -188,6 +190,11 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
         }
         log.info(`registered ${msg.accepted.length} device(s)`);
         updatePushes(msg.accepted, msg.media ?? []);
+        for (const r of msg.reads ?? []) {
+          const a = byId.get(r.deviceId);
+          if (a?.onMediaRead && msg.accepted.includes(r.deviceId)) a.onMediaRead(r.read);
+          else log.warn(`server sent a video read address for ${r.deviceId}, which reads no video here; ignored`);
+        }
         return;
       case 'command': {
         const a = byId.get(msg.deviceId);

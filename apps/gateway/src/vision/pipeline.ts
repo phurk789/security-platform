@@ -1,9 +1,9 @@
 // The vision pipeline for one camera: frames → detectors → image zones → tracking → rate control
 // → detections for the platform (with a JPEG crop as evidence). Also keeps the health figures
 // the console shows (fps, last frame, detector state).
-import type { DetectionInput, DetectionType } from '@13store/shared';
+import { VISION_MAX_BOXES, type DetectionInput, type DetectionType, type VisionBox } from '@13store/shared';
 import { boxIoU, cropJpeg, decodeJpeg, inPolygon, type Box, type Frame } from './frames';
-import { MotionDetector, OnnxDetector, ThermalDetector, type Candidate, type Detector, type MotionConfig, type OnnxConfig, type ThermalConfig } from './detectors';
+import { HttpDetector, MotionDetector, OnnxDetector, ThermalDetector, type Candidate, type Detector, type HttpDetectorConfig, type MotionConfig, type OnnxConfig, type ThermalConfig } from './detectors';
 import { FfmpegSource, FolderSource, MjpegSource, SnapshotSource, type FrameSource, type HttpAuth } from './sources';
 
 export type ZoneKind = 'protected' | 'ignore' | 'count';
@@ -26,12 +26,14 @@ export type SourceConfig =
   | { kind: 'snapshot'; url: string; intervalMs?: number; auth?: HttpAuth }
   | { kind: 'mjpeg'; url: string; auth?: HttpAuth }
   | { kind: 'ffmpeg'; input: string; fps?: number; width?: number; ffmpegPath?: string; extraArgs?: string[] }
-  | { kind: 'folder'; dir: string; intervalMs?: number };
+  | { kind: 'folder'; dir: string; intervalMs?: number }
+  /** A camera AI that follows a vehicle: the vehicle's video on the site media server, at the address the server grants. */
+  | { kind: 'follow'; fps?: number; width?: number; ffmpegPath?: string };
 
 export interface VisionConfig {
   /** Where frames come from. Omitted when the owning adapter supplies frames itself. */
   source?: SourceConfig;
-  detectors: { motion?: MotionConfig | true; thermal?: ThermalConfig; onnx?: OnnxConfig };
+  detectors: { motion?: MotionConfig | true; thermal?: ThermalConfig; onnx?: OnnxConfig; http?: HttpDetectorConfig };
   zones?: ImageZone[];
   /** Below this confidence a candidate is dropped. Default 0.5. */
   minConfidence?: number;
@@ -49,6 +51,16 @@ export interface VisionConfig {
   zone?: string;
   place?: string;
   pos?: { x: number; y: number };
+  /** Shortest time between two live-box reports (ms). Default 200 (5 per second). */
+  liveBoxesMs?: number;
+}
+
+/** The live boxes of one frame, for the console to draw over the video. */
+export interface LiveBoxes {
+  at: number;
+  width: number;
+  height: number;
+  boxes: VisionBox[];
 }
 
 export interface VisionHealth {
@@ -91,16 +103,26 @@ export class VisionPipeline {
   private frameTimes: number[] = [];
   private busy = false;
   private seq = 0;
+  private lastBoxesAt = -Infinity;
+  private hadBoxes = false;
 
   constructor(
     private readonly cfg: VisionConfig,
-    private readonly out: { onDetection: (d: Emitted) => void; onError?: (e: Error) => void; now?: () => number; log?: (m: string) => void },
+    private readonly out: {
+      onDetection: (d: Emitted) => void;
+      /** Live boxes after each frame (throttled; one empty list once the last box is gone). */
+      onBoxes?: (b: LiveBoxes) => void;
+      onError?: (e: Error) => void;
+      now?: () => number;
+      log?: (m: string) => void;
+    },
   ) {
     const d = cfg.detectors;
     if (d.motion) this.detectors.push(new MotionDetector(d.motion === true ? {} : d.motion));
     if (d.thermal) this.detectors.push(new ThermalDetector(d.thermal));
     if (d.onnx) this.detectors.push(new OnnxDetector(d.onnx));
-    if (!this.detectors.length) throw new Error('vision.detectors must enable motion, thermal or onnx.');
+    if (d.http) this.detectors.push(new HttpDetector(d.http));
+    if (!this.detectors.length) throw new Error('vision.detectors must enable motion, thermal, onnx or http.');
   }
 
   /** Adds a detector built elsewhere (tests, vendor analytics). */
@@ -113,6 +135,7 @@ export class VisionPipeline {
     if (s.kind === 'snapshot') return SnapshotSource.url(s.url, s.intervalMs ?? 1000, s.auth, now);
     if (s.kind === 'mjpeg') return new MjpegSource(s.url, s.auth, now);
     if (s.kind === 'ffmpeg') return new FfmpegSource({ input: s.input, fps: s.fps, width: s.width, ffmpegPath: s.ffmpegPath, extraArgs: s.extraArgs }, now);
+    if (s.kind === 'follow') throw new Error('A "follow" source starts when the server grants the video of the vehicle (camera AI only).');
     return new FolderSource(s.dir, s.intervalMs ?? 1000, now);
   }
 
@@ -173,6 +196,7 @@ export class VisionPipeline {
     const minConf = this.cfg.minConfidence ?? 0.5;
     const zoned = this.applyZones(cands.filter((c) => c.confidence >= minConf));
     this.track(zoned, at);
+    this.liveBoxes(zoned, frame, at);
     const all = [...zoned, ...this.crowds(zoned), ...this.loitering(at)];
     // Persistence: a key (type + image zone) must be seen in consecutive frames; absent keys reset.
     const present = new Set(all.map((c) => this.keyOf(c)));
@@ -231,6 +255,31 @@ export class VisionPipeline {
       }
     }
     this.tracks = this.tracks.filter((t) => at - t.lastSeen < 5000);
+  }
+
+  /** What this frame shows, for the console: people keep their track id from frame to frame. */
+  private liveBoxes(cands: (Candidate & { zone?: ImageZone })[], frame: Frame, at: number) {
+    if (!this.out.onBoxes) return;
+    const any = cands.length > 0;
+    // Nothing to show and nothing shown: say nothing. A last empty list clears the boxes on screen.
+    if (!any && !this.hadBoxes) return;
+    if (any && at - this.lastBoxesAt < (this.cfg.liveBoxesMs ?? 200)) return;
+    const r3 = (v: number) => Math.round(v * 1000) / 1000;
+    const boxes: VisionBox[] = cands.slice(0, VISION_MAX_BOXES).map((c) => {
+      // track() keeps the candidate's own bbox array on the track it matched.
+      const t = c.type === 'person' || c.type === 'intrusion' ? this.tracks.find((x) => x.bbox === c.bbox) : undefined;
+      return {
+        ...(t ? { id: t.id } : {}),
+        type: c.type,
+        ...(c.label ? { label: c.label } : {}),
+        confidence: Math.round(c.confidence * 100) / 100,
+        bbox: c.bbox.map(r3) as VisionBox['bbox'],
+        ...(c.zone ? { zone: c.zone.name } : {}),
+      };
+    });
+    this.lastBoxesAt = at;
+    this.hadBoxes = any;
+    this.out.onBoxes({ at, width: frame.width, height: frame.height, boxes });
   }
 
   private crowds(cands: (Candidate & { zone?: ImageZone })[]): (Candidate & { zone?: ImageZone })[] {

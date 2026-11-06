@@ -54,7 +54,8 @@ systemctl enable 13store-edge >/dev/null
 # GPIO 14/15 (pins 8 and 10) carry the flight controller's TELEM1 as /dev/ttyAMA0 on Pi 3, 4 and 5:
 #  • Pi 3/4: that UART normally serves Bluetooth; disable-bt gives it back to the pins (Bluetooth is not used here).
 #  • Pi 5: UART0 is off until dtparam=uart0=on (/dev/serial0 is the 3-pin debug header there, not the pins).
-#  • The Linux console must not use the port, or the board receives boot messages and a login prompt.
+#  • The Linux console must not use the port, or the board receives boot messages and a login prompt. On a Pi 5 the
+#    console sits on the 3-pin UART connector (/dev/ttyAMA10, serial0): taking it off frees that connector for TELEM1 too.
 if grep -qi 'raspberry pi' <<<"$MODEL"; then
   echo "--- UART บนขา GPIO14/15 สำหรับ TELEM1"
   BOOT=/boot/firmware

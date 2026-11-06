@@ -40,6 +40,9 @@ describe('Pair an edge remote (Admin card)', () => {
     const usb = edgeDevices('pi', { ...REMOTE_DEFAULTS, piPort: 'usb' });
     expect(() => parseSiteConfig({ geo: GEO, devices: usb })).not.toThrow();
     expect(usb[0]).toMatchObject({ link: { mode: 'serial', path: '/dev/ttyACM0' } });
+    const pi5 = edgeDevices('pi', { ...REMOTE_DEFAULTS, piPort: 'pi5' });
+    expect(() => parseSiteConfig({ geo: GEO, devices: pi5 })).not.toThrow();
+    expect(pi5[0]).toMatchObject({ link: { mode: 'serial', path: '/dev/ttyAMA10', baud: 115200 }, radio: 'Raspberry Pi on the vehicle (TELEM1, Pi 5 UART connector)' });
     expect(edgeDevices('remote', REMOTE_DEFAULTS)).toEqual(remoteDevices(REMOTE_DEFAULTS));
     expect(TARGET_DEFAULTS.pi.gatewayId).toBe('edge-pi-ugv-01');
   });

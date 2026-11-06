@@ -11,7 +11,7 @@
 //  - On link loss the device must reach a safe state on its own. Nothing received or queued
 //    during the outage may run after the link comes back.
 
-import type { AdapterDeclaration, CameraAction, GwCameraResult, GwCommandUpdate, GwDeviceEvent, GwTelemetry, SrvCommand, SrvDemo, SrvDrive } from '@13store/shared';
+import type { AdapterDeclaration, CameraAction, GwCameraResult, GwCommandUpdate, GwDeviceEvent, GwTelemetry, GwTracks, SrvCommand, SrvDemo, SrvDrive } from '@13store/shared';
 import type { CommandLedger } from './ledger';
 import type { PushState } from './videoPush';
 
@@ -59,6 +59,8 @@ export interface AdapterContext {
   event(e: EventReport): void;
   /** Result of a camera control request (gimbal, zoom, photo, record). */
   cameraResult(r: Omit<GwCameraResult, 't' | 'deviceId'>): void;
+  /** Live boxes from a vision pipeline (optional: test contexts may leave it out). */
+  tracks?(t: Omit<GwTracks, 't' | 'deviceId'>): void;
   /**
    * This device's command ledger. Use it (with admitCommand) instead of your own `new CommandLedger()`:
    * the gateway keeps it in `<dataDir>/ledger/<deviceId>.json` so dedupe survives a restart.
@@ -84,6 +86,11 @@ export interface Adapter {
    * media server and reports how it goes here, e.g. to show it on the device's camera component.
    */
   onMediaState?(state: PushState): void;
+  /**
+   * Camera AI that follows a vehicle: where to read that vehicle's video (an RTSP URL with a read
+   * credential from the server, refreshed on each reconnect). Keep it out of logs.
+   */
+  onMediaRead?(url: string): void;
   /**
    * Live driving (adapters that declare `teleop`): one stick sample. The adapter applies its caps,
    * stops the vehicle when samples stop arriving for `teleop.deadmanMs`, and on `release` hands

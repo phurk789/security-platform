@@ -384,6 +384,17 @@
 :root .app.liquid-ui .lg-hud-fc { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: .62rem; color: var(--hud-dim); }
 :root .app.liquid-ui .lg-hud-fc em { font-style: normal; font-weight: 700; letter-spacing: .04em; }
 :root .app.liquid-ui .lg-hud-fc em.armed { color: var(--hud-bad); }
+/* Camera AI chip: who the AI sees now (live boxes are drawn on the video by AiBoxes). */
+:root .app.liquid-ui .lg-hud-ai { display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 9px; font-size: .72rem; border-left: 3px solid var(--hud-dim); }
+:root .app.liquid-ui .lg-hud-ai > b { font-size: .74rem; letter-spacing: .08em; }
+:root .app.liquid-ui .lg-hud-ai > small { font-size: .6rem; color: var(--hud-dim); }
+:root .app.liquid-ui .lg-hud-ai.tone-ok { border-left-color: var(--hud-ok); }
+:root .app.liquid-ui .lg-hud-ai.tone-ok > svg { color: var(--hud-ok); }
+:root .app.liquid-ui .lg-hud-ai.tone-warn { border-left-color: var(--hud-warn); }
+:root .app.liquid-ui .lg-hud-ai.tone-warn > svg, :root .app.liquid-ui .lg-hud-ai.tone-warn > span { color: var(--hud-warn); }
+:root .app.liquid-ui .lg-hud-ai.tone-bad { border-left-color: var(--hud-bad); background: rgba(60,16,14,.72); }
+:root .app.liquid-ui .lg-hud-ai.tone-bad > svg, :root .app.liquid-ui .lg-hud-ai.tone-bad > span { color: var(--hud-bad); }
+:root .app.liquid-ui .lg-hud-ai.tone-idle > span { color: var(--hud-dim); }
 /* Tapes */
 :root .app.liquid-ui :is(.lg-tape-h,.lg-tape-v) svg { display: block; width: 100%; height: auto; overflow: visible; }
 :root .app.liquid-ui .lg-hud-glass .t-tick { stroke: #e6e6ec; stroke-width: 1.4; vector-effect: non-scaling-stroke; }

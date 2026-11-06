@@ -468,6 +468,7 @@ export const TH: Record<string, string> = {
   'Raspberry Pi on the vehicle': 'Raspberry Pi บนรถ',
   'Flight controller cable': 'สายต่อบอร์ดควบคุม',
   'TELEM1 to the Pi pins (/dev/ttyAMA0)': 'TELEM1 เข้าขา Pi (/dev/ttyAMA0)',
+  'TELEM1 to the Pi 5 UART connector (/dev/ttyAMA10)': 'TELEM1 เข้าช่อง UART 3 ขาของ Pi 5 (/dev/ttyAMA10)',
   'USB cable (/dev/ttyACM0)': 'สาย USB (/dev/ttyACM0)',
   'Pairing code': 'รหัสจับคู่',
   'Server address on the remote:': 'ที่อยู่เซิร์ฟเวอร์ที่ใส่ในรีโมต:',
@@ -1628,4 +1629,10 @@ export const TH: Record<string, string> = {
   stop: 'หยุด',
   'Routine task created': 'สร้างงานตรวจตราแล้ว',
   'Choose an incident, or name the routine task (up to 60 characters).': 'เลือกเหตุ หรือตั้งชื่องานตรวจตรา (ไม่เกิน 60 ตัวอักษร)',
+  // Camera AI on the cockpit view.
+  'Intruders: {n}': 'ผู้บุกรุก {n}',
+  'People in view: {n}': 'เห็นคน {n}',
+  'AI is watching': 'AI เฝ้าดูอยู่',
+  'AI gets no pictures': 'AI ไม่ได้รับภาพ',
+  'AI model not answering': 'โมเดล AI ไม่ตอบ',
 };

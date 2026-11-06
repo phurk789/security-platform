@@ -6,13 +6,24 @@ import { pairingLink } from '@13store/shared';
 /** Where the gateway runs: the edge app on the SIYI remote, or a Raspberry Pi on the vehicle (deploy/pi). */
 export type EdgeTarget = 'remote' | 'pi';
 
-/** How a Pi reaches the flight controller: TELEM1 wired to its GPIO UART, or a USB cable. */
-export type PiPort = 'uart' | 'usb';
+/**
+ * How a Pi reaches the flight controller: TELEM1 wired to the GPIO UART (pins 8/10), TELEM1 on the Pi 5's own 3-pin
+ * UART connector (JST-SH, locks better on a shaking vehicle), or a USB cable.
+ */
+export type PiPort = 'uart' | 'pi5' | 'usb';
 
 /** Serial settings per cable. TELEM1 runs at SERIAL1_BAUD = 115 (deploy/pi/README_TH.md); USB ignores the speed. */
 export const PI_PORTS: Record<PiPort, { path: string; baud: number }> = {
   uart: { path: '/dev/ttyAMA0', baud: 115200 },
+  pi5: { path: '/dev/ttyAMA10', baud: 115200 },
   usb: { path: '/dev/ttyACM0', baud: 115200 },
+};
+
+/** Equipment tab text for each cable. */
+const PI_RADIO: Record<PiPort, string> = {
+  uart: 'Raspberry Pi on the vehicle (TELEM1)',
+  pi5: 'Raspberry Pi on the vehicle (TELEM1, Pi 5 UART connector)',
+  usb: 'Raspberry Pi on the vehicle (USB)',
 };
 
 /** The SIYI UniRC 7 Pro setup: vehicle on the remote's datalink, camera pushed to the platform. */
@@ -82,7 +93,7 @@ export function piDevices(f: RemoteForm): Record<string, unknown>[] {
       kind: 'ugv',
       profile: 'ardupilot-rover',
       model: f.model.trim() || REMOTE_DEFAULTS.model,
-      radio: port === 'usb' ? 'Raspberry Pi on the vehicle (USB)' : 'Raspberry Pi on the vehicle (TELEM1)',
+      radio: PI_RADIO[port],
       link: { mode: 'serial', ...PI_PORTS[port] },
       allowRemoteArm: false,
       teleop: true,

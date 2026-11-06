@@ -141,10 +141,11 @@ export function listPorts(dev = '/dev'): { path: string; target: string; note: s
     }
     out.push({ path, target, note });
   };
-  // After install.sh, GPIO 14/15 is ttyAMA0 on Pi 3, 4 and 5. serial0 is only an alias: on a Pi 5 it is the debug header.
+  // After install.sh, GPIO 14/15 is ttyAMA0 on Pi 3, 4 and 5, and the Pi 5's 3-pin UART connector is ttyAMA10 (no
+  // console on it any more). serial0 is only an alias: on a Pi 5 it points at the 3-pin connector.
   const uarts: Record<string, string> = {
     ttyAMA0: 'UART ขา GPIO14/15: ต่อ TELEM1 ที่นี่',
-    ttyAMA10: 'ช่อง debug 3 ขาของ Pi 5 (ไม่ใช่ขา GPIO)',
+    ttyAMA10: 'ช่อง UART 3 ขาของ Pi 5 (หัว JST-SH): ต่อ TELEM1 ที่นี่ได้ ขา 1 RX, 2 GND, 3 TX',
     ttyS0: 'mini UART (Pi 3/4 ที่ยังเปิด Bluetooth)',
     serial0: 'ชื่อแทนของ UART หลัก',
     serial1: 'ชื่อแทนของ UART ตัวที่สอง',

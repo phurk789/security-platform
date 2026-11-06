@@ -5,8 +5,8 @@
 //    already has the frames or the camera's snapshot/RTSP URIs.
 import type { AdapterDeclaration, DeviceAnalytics, StreamInfo } from '@13store/shared';
 import type { Adapter, AdapterContext } from '../sdk';
-import { VisionPipeline, type VisionConfig } from './pipeline';
-import type { FrameSource } from './sources';
+import { VisionPipeline, type SourceConfig, type VisionConfig } from './pipeline';
+import { FfmpegSource, type FrameSource } from './sources';
 
 export interface VisionCameraConfig {
   deviceId: string;
@@ -18,6 +18,11 @@ export interface VisionCameraConfig {
   vision: VisionConfig;
   /** Health report interval (ms). Default 15 000. */
   healthMs?: number;
+  /**
+   * The vehicle whose camera this is (its video read from the site media server, for example):
+   * the console draws the live boxes on that vehicle's cockpit view.
+   */
+  follows?: string;
 }
 
 export const VISION_VERSION = 'edge-vision 1.0';
@@ -63,6 +68,7 @@ export function attachVision(ctx: AdapterContext, cfg: VisionConfig, opts: { sou
           detection: { ...rest, bbox },
         });
       },
+      onBoxes: (b) => ctx.tracks?.(b),
       onError: (e) => ctx.log.warn(`${opts.label ?? 'vision'}: ${e.message}`),
     });
   } catch (e) {
@@ -90,13 +96,24 @@ export function attachVision(ctx: AdapterContext, cfg: VisionConfig, opts: { sou
   };
 }
 
+type FollowSource = Extract<SourceConfig, { kind: 'follow' }>;
+
+/** Frames of the followed vehicle's video at the address the server granted (ffmpeg, 5 fps, 640 px wide). */
+const followSource = (url: string, s: FollowSource): FrameSource => new FfmpegSource({ input: url, fps: s.fps ?? 5, width: s.width ?? 640, ffmpegPath: s.ffmpegPath });
+
 export class VisionCameraAdapter implements Adapter {
   readonly declaration: AdapterDeclaration;
   private handle?: ReturnType<typeof attachVision>;
   private timer?: NodeJS.Timeout;
   private seq = 0;
+  private ctx?: AdapterContext;
+  /** The read address in use (camera AI that follows a vehicle). */
+  private readUrl?: string;
 
-  constructor(private readonly cfg: VisionCameraConfig) {
+  constructor(
+    private readonly cfg: VisionCameraConfig,
+    private readonly sourceFor: (url: string, s: FollowSource) => FrameSource = followSource,
+  ) {
     const det = Object.keys(cfg.vision.detectors).filter((k) => (cfg.vision.detectors as Record<string, unknown>)[k]);
     this.declaration = {
       deviceId: cfg.deviceId,
@@ -113,12 +130,16 @@ export class VisionCameraAdapter implements Adapter {
       limitations: `Analytics only (${det.join(', ')}); no PTZ or recording control from the platform.`,
       linkLossBehavior: 'The camera keeps recording to its NVR; detections resume when the gateway reconnects.',
       stream: cfg.stream,
+      ...(cfg.follows ? { follows: cfg.follows } : {}),
       components: [{ id: 'vision', name: 'Edge vision', kind: 'computer', status: 'pending', detail: det.join(', ') }],
     } as AdapterDeclaration;
   }
 
   start(ctx: AdapterContext) {
-    this.handle = attachVision(ctx, this.cfg.vision, { healthMs: this.cfg.healthMs, label: this.cfg.deviceId });
+    this.ctx = ctx;
+    // A camera AI that follows a vehicle starts once the server grants the vehicle's video (onMediaRead).
+    if (this.cfg.vision.source?.kind === 'follow') ctx.log.info(`${this.cfg.deviceId}: waiting for the server to grant the video of ${this.cfg.follows ?? 'the vehicle'}`);
+    else this.handle = attachVision(ctx, this.cfg.vision, { healthMs: this.cfg.healthMs, label: this.cfg.deviceId });
     const beat = () => {
       const h = this.handle?.pipeline.status();
       const fresh = !!h?.lastFrameAt && ctx.now() - h.lastFrameAt < 30_000;
@@ -141,6 +162,15 @@ export class VisionCameraAdapter implements Adapter {
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.handle?.stop();
+  }
+
+  /** The followed vehicle's video, granted (again) by the server: start reading it, or switch to the new pass. */
+  onMediaRead(url: string) {
+    const s = this.cfg.vision.source;
+    if (!this.ctx || s?.kind !== 'follow' || url === this.readUrl) return;
+    this.readUrl = url;
+    this.handle?.stop();
+    this.handle = attachVision(this.ctx, this.cfg.vision, { source: this.sourceFor(url, s), healthMs: this.cfg.healthMs, label: this.cfg.deviceId });
   }
 
   onCommand() {

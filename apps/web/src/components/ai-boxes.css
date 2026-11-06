@@ -1,0 +1,35 @@
+/* Live AI boxes over a camera view (AiBoxes.tsx). Dark-edged colours so they read on any video. */
+.ai-boxes { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+.ai-box {
+  position: absolute;
+  border: 2px solid #f2c477;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  transition: left 0.18s linear, top 0.18s linear, width 0.18s linear, height 0.18s linear;
+}
+.ai-box > span {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  margin-bottom: 3px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+  font: 650 0.66rem/1.5 var(--font, system-ui);
+  color: #1b1408;
+  background: #f2c477;
+}
+/* Near the top edge the label goes inside the box instead of off the picture. */
+.ai-box[style*='top: 0px'] > span { bottom: auto; top: 2px; left: 2px; }
+.ai-box.k-intrusion, .ai-box.k-fire, .ai-box.k-smoke, .ai-box.k-thermal_hotspot { border-color: #ff8f84; }
+.ai-box.k-intrusion > span, .ai-box.k-fire > span, .ai-box.k-smoke > span, .ai-box.k-thermal_hotspot > span { color: #2a0b08; background: #ff8f84; }
+.ai-box.k-vehicle, .ai-box.k-lpr { border-color: #8fd3ff; }
+.ai-box.k-vehicle > span, .ai-box.k-lpr > span { color: #06202e; background: #8fd3ff; }
+.ai-box.k-motion { border-style: dashed; border-color: #e6e6ec; }
+.ai-box.k-motion > span { color: #16161a; background: #e6e6ec; }
+/* In a small inset view the boxes stay, the labels go. */
+.is-pip .ai-box > span { display: none; }
+.is-pip .ai-box { border-width: 1.5px; }
+@media (prefers-reduced-motion: reduce) {
+  .ai-box { transition: none; }
+}
