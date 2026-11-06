@@ -71,8 +71,11 @@ class Yolo:
         return self.detect_image(img)
 
     def detect_image(self, img):
+        # `half` only when asked for (.pt/.onnx): an engine keeps its own precision, and newer
+        # Ultralytics warns on every call that passes it.
+        extra = {"half": True} if self.half else {}
         with self.lock:
-            r = self.model.predict(img, imgsz=self.imgsz, conf=self.conf, classes=self.classes, device=self.device, half=self.half, verbose=False)[0]
+            r = self.model.predict(img, imgsz=self.imgsz, conf=self.conf, classes=self.classes, device=self.device, verbose=False, **extra)[0]
         out = []
         for (x0, y0, x1, y1), c, k in zip(r.boxes.xyxyn.tolist(), r.boxes.conf.tolist(), r.boxes.cls.tolist()):
             out.append({"label": r.names[int(k)], "confidence": round(float(c), 3), "box": [round(x0, 4), round(y0, 4), round(x1 - x0, 4), round(y1 - y0, 4)]})

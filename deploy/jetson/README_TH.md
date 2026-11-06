@@ -73,7 +73,7 @@ docker run --rm --name 13store-export --runtime nvidia --ipc=host --network none
 รันบริการ ให้เริ่มเองทุกครั้งที่เปิดเครื่อง แล้วลองกับรูปตัวอย่างที่มีคน:
 
 ```bash
-docker run -d --name 13store-vision --restart unless-stopped --runtime nvidia --ipc=host \
+docker run -d --name 13store-vision --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --runtime nvidia --ipc=host \
   -p 127.0.0.1:8601:8601 -v $HOME/13store/vision:/work -w /work \
   -e YOLO_OFFLINE=true -e YOLO_AUTOINSTALL=false -e YOLO_CONFIG_DIR=/work/.config \
   13store/ultralytics:jp6 python3 vision_server.py --host 0.0.0.0 --model /work/yolov8s.engine
