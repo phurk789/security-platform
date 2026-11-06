@@ -393,6 +393,8 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   });
   app.get('/api/v1/devices/:id/telemetry', async (req: Req) => p.telemetryHistory(A(req), req.params.id, num(req.query.from, p.now() - 3600_000)!, num(req.query.to, p.now())!));
   app.post('/api/v1/devices/:id/camera', async (req: Req) => p.cameraControl(A(req), req.params.id, body(req)));
+  // Arm, disarm, MANUAL/HOLD and gear: { "action": { "kind": "arm" }, "confirmClear": true }.
+  app.post('/api/v1/devices/:id/vehicle-control', async (req: Req) => p.vehicleControl(A(req), req.params.id, body(req)));
   app.post('/api/v1/devices/:id/aim', async (req: Req) => p.aimCamera(A(req), req.params.id, body(req)));
   // AI on a device's video by an AI box: { "on": true | false }.
   app.post('/api/v1/devices/:id/ai', async (req: Req) => p.setAi(A(req), req.params.id, body(req).on));

@@ -21,6 +21,7 @@ import {
   type PiPort,
   type RemoteForm,
 } from '../domain/pairing';
+import type { RemoteChoice } from '../domain/vehicleControl';
 
 const STATUS_TONE: Record<PairingCodeView['status'], string> = { waiting: 'badge-amber', paired: 'badge-green', expired: 'badge-grey', cancelled: 'badge-grey' };
 const STATUS_LABEL: Record<PairingCodeView['status'], string> = { waiting: 'Waiting', paired: 'Paired', expired: 'Expired', cancelled: 'Cancelled' };
@@ -220,6 +221,19 @@ export function EdgePairingCard({
                 <option value="uart">{t('TELEM1 to the Pi pins (/dev/ttyAMA0)')}</option>
                 <option value="pi5">{t('TELEM1 to the Pi 5 UART connector (/dev/ttyAMA10)')}</option>
                 <option value="usb">{t('USB cable (/dev/ttyACM0)')}</option>
+              </select>
+            )}
+            {target === 'pi' && (
+              <select
+                id="pair-remote"
+                value={form.remote ?? 'remote'}
+                onChange={(e) => setForm({ ...form, remote: e.target.value as RemoteChoice })}
+                aria-label={t('Hand-held remote')}
+                title={t('Hand-held remote')}
+              >
+                <option value="remote">{t('SIYI remote still used to drive by hand')}</option>
+                <option value="none-rcu">{t('No remote · RCU-ND motor board (gears on channel 11)')}</option>
+                <option value="none">{t('No remote · no gears')}</option>
               </select>
             )}
           </>

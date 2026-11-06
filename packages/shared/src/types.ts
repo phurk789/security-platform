@@ -113,6 +113,8 @@ export interface Device {
   noFix?: boolean;
   /** Can be driven live from the console, with these adapter limits (declared by the gateway). */
   teleop?: { maxThrottle: number; maxSteer: number; deadmanMs: number };
+  /** Arm, disarm, MANUAL/HOLD and gear from the console (declared by the gateway; see VehicleControlInfo). */
+  vehicleControl?: VehicleControlInfo;
   /** User driving it live right now (drive session), if any. */
   drivenBy?: string;
   /** Altitude in metres above site datum (UAV only). */
@@ -483,4 +485,15 @@ export interface AppState {
   toasts: Toast[];
   presentation: boolean;
   seq: number;
+}
+
+/**
+ * What the console may do to a vehicle besides missions and driving. Every MAVLink vehicle can be disarmed and held.
+ * A vehicle run without a hand-held remote (`noRemote`: a computer on the vehicle is its remote) can also be armed,
+ * put in MANUAL and given a gear from the console.
+ */
+export interface VehicleControlInfo {
+  noRemote: boolean;
+  /** Gears the console can choose from (0: none). Gear 1 is the slowest and is set at every arm. */
+  gears: number;
 }

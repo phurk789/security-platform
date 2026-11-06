@@ -23,10 +23,11 @@ import {
   type SiteRef,
   type Snapshot,
   type TelemetrySample,
+  type VehicleControlAction,
 } from '@13store/shared';
 import { Api, ApiError, saveBlob } from './api';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
-import { StoreCtx, useToastTimer, type CameraResult, type ClipLink, type MediaSession, type Recordings, type RoutePlan, type Session, type UnitSuggestion } from './store';
+import { StoreCtx, useToastTimer, type CameraResult, type ClipLink, type MediaSession, type Recordings, type RoutePlan, type Session, type UnitSuggestion, type VehicleControlResult } from './store';
 import { StepUpDialog } from './components/StepUp';
 import { visionTracks } from './domain/visionTracks';
 import { tr } from './i18n';
@@ -228,6 +229,8 @@ export function RemoteProvider({
               gimbal: m.gimbal ?? d.gimbal,
               stats: m.stats ?? d.stats,
               noFix: m.noFix || undefined,
+              armed: m.armed ?? d.armed,
+              flightMode: m.flightMode ?? d.flightMode,
               components: m.components ?? d.components,
             };
             // No fix: the device is alive but its position unknown, so it adds nothing to the trail.
@@ -650,6 +653,15 @@ export function RemoteProvider({
           toast('warn', e instanceof Error ? e.message : String(e));
         }
       },
+      vehicleControl: (deviceId: string, action: VehicleControlAction, confirmClear?: boolean) =>
+        guarded(
+          async () => {
+            const r = await api.post<VehicleControlResult>(`/devices/${encodeURIComponent(deviceId)}/vehicle-control`, { action, confirmClear });
+            toast(r.ok ? 'ok' : 'warn', r.detail);
+            return r;
+          },
+          () => void session.vehicleControl(deviceId, action, confirmClear),
+        ),
       driveSample(deviceId: string, seq: number, throttle: number, steer: number) {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) return false;

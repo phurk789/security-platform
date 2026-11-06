@@ -2,8 +2,11 @@
 // Left: searchable unit roster. Centre: one stage, map first or the cockpit (camera in front
 // with a driving HUD), the other view inset. Right: original mission, driving, readiness and
 // camera controls. Command authorization and lifecycle remain in the original components.
-import { useMemo, useState } from 'react';
-import { Activity, ArrowRight, Battery, Camera, ChevronRight, Crosshair, Drone, Gauge, History, ListChecks, MapPinned, Navigation, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, Signal, Gamepad2, Truck } from 'lucide-react';
+// In the cockpit the stage takes the room: the roster steps aside and the right column becomes a
+// slim drive dock (the Drive panel and a running mission); the other boxes wait behind one button,
+// and the full-screen button also hides the app's top bar and menu.
+import { useEffect, useMemo, useState } from 'react';
+import { Activity, ArrowRight, Battery, Camera, ChevronDown, ChevronRight, ChevronUp, Crosshair, Drone, Gauge, History, LayoutGrid, ListChecks, MapPinned, Maximize2, Minimize2, Navigation, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, Signal, Gamepad2, Truck } from 'lucide-react';
 import { PAYLOAD_CATALOG, VEHICLE_CATALOG, routeSpeedOf, runtimeLeftMin, type Device, type Mission } from '@13store/shared';
 import { can, currentUser, fmtTime, freshness, userName } from '../domain/policy';
 import { isTerminal } from '../domain/reducer';
@@ -12,20 +15,26 @@ import { useStore } from '../store';
 import { CommandBadge, FreshBadge, IntegrationBadge, MissionBadge, ModeBadge } from '../components/Badges';
 import { CameraControls } from '../components/CameraControls';
 import { DrivePanel } from '../components/DrivePanel';
+import { VehicleControls } from '../components/VehicleControls';
 import { useVehicleThumb } from '../components/Hud';
 import { LiveMission } from '../components/IncidentPanel';
 import { UgvHardwareReadiness } from '../components/UgvHardwareReadiness';
 import { showsReadiness } from '../domain/readiness';
 import { CockpitStage, fmtDuration, remaining, type StageFocus } from './CockpitStage';
 import { displayNumber, matchesUnit } from '../domain/liquidPresentation';
+import { setCockpitFull, useCockpitFull } from '../domain/cockpitFull';
 
 import './command-center.css';
 
 const OPEN_MISSION = ['draft', 'pending_approval', 'approved', 'assigned', 'executing', 'paused'];
+/** A mission the vehicle is on: its pause / stop controls stay beside the cockpit. */
+const LIVE_MISSION = ['assigned', 'executing', 'paused'];
 /** Folded or open unit list, per browser. */
 const RAIL_KEY = 'ps.cc.rail';
 /** Map first or the cockpit, per browser. */
 const VIEW_KEY = 'ps.cc.view';
+/** The cockpit dock's other boxes shown or tucked away, per browser. */
+const MORE_KEY = 'ps.cc.more';
 
 /** Liquid Glass workspace. Business actions below continue to use the original components.
  * Map and camera stay mounted while the stage swaps which one is in front.
@@ -81,9 +90,37 @@ export function CommandCenter() {
   const canViewMedia = can(currentUser(s).role, 'media.view');
   // Render-time safety: a role change cannot leave an inaccessible video as the primary pane.
   const visibleFocus = canViewMedia ? focus : 'map';
+  const cockpit = !!d && visibleFocus === 'cockpit';
+  const full = useCockpitFull();
+  // Full screen belongs to the cockpit: leaving it (map view, another page) brings the menu back.
+  useEffect(() => {
+    if (!cockpit) setCockpitFull(false);
+  }, [cockpit]);
+  useEffect(() => () => setCockpitFull(false), []);
+  const [moreOpen, setMoreOpen] = useState(() => {
+    try {
+      return localStorage.getItem(MORE_KEY) === 'open';
+    } catch {
+      return false;
+    }
+  });
+  const toggleMore = () =>
+    setMoreOpen((open) => {
+      try {
+        localStorage.setItem(MORE_KEY, open ? 'closed' : 'open');
+      } catch {
+        /* this page only */
+      }
+      return !open;
+    });
+  const missionLive = !!m && LIVE_MISSION.includes(m.status);
+  const hasCamera = !!d && ['gimbal', 'spotlight', 'beacon', 'speaker'].some((c) => d.capabilities.includes(c));
+  const hasSpecs = !!d?.catalogId && !!VEHICLE_CATALOG[d.catalogId];
+  // Boxes behind "Other panels" in the cockpit: mission (unless running), readiness, camera, specs, activity.
+  const tucked = [!missionLive, !!d && showsReadiness(d), hasCamera, hasSpecs, true].filter(Boolean).length;
 
   return (
-    <div className={`cc cc-liquid${railOpen ? '' : ' rail-folded'}`}>
+    <div className={`cc cc-liquid${railOpen ? '' : ' rail-folded'}${cockpit ? ' is-cockpit' : ''}`}>
       <aside className={`panel cc-rail${railOpen ? '' : ' is-folded'}`} aria-label={t('Units')}>
         <div className="panel-head lg-roster-head">
           {railOpen && (
@@ -153,6 +190,12 @@ export function CommandCenter() {
                 <button type="button" disabled={!canViewMedia} aria-pressed={visibleFocus === 'cockpit'} className={visibleFocus === 'cockpit' ? 'on' : ''} onClick={() => setFocus('cockpit')}
                   title={canViewMedia ? t('Camera in front with a driving HUD') : t('Your role cannot view video. Ask a supervisor if you need access.')}><Gamepad2 size={14} /> {t('Cockpit')}</button>
               </div>
+              {cockpit && (
+                <button type="button" className="lg-full-btn" aria-pressed={full} onClick={() => setCockpitFull(!full)}
+                  aria-label={full ? t('Leave full screen') : t('Full screen')} title={full ? t('Leave full screen') : t('Full screen')}>
+                  {full ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </button>
+              )}
             </div>
             {s.replay.active && (
               <div className="lg-data-notice" role="status"><History size={16} /><b>REPLAY · {fmtTime(s.replay.at, true)}</b><span>{t('You are viewing past data. Device control is off.')}</span></div>
@@ -160,24 +203,37 @@ export function CommandCenter() {
             <CockpitStage d={d} m={m} focus={visibleFocus} onFocus={setFocus} canViewMedia={canViewMedia} />
           </section>
 
-          <aside className="cc-side" aria-label={t('Mission control')}>
+          {/* In the cockpit this column is the drive dock: the Drive panel and a running mission stay,
+              the rest is tucked behind "Other panels". Only classes change, so nothing remounts. */}
+          <aside className={`cc-side${cockpit ? ' is-dock' : ''}${moreOpen ? ' more-open' : ''}`} aria-label={t('Mission control')}>
             {/* Keep driving controls mounted and visible. Never key this subtree by focus/theme. */}
+            {mode === 'remote' && d.vehicleControl && <VehicleControls d={d} />}
             {mode === 'remote' && d.kind === 'ugv' && d.teleop && <DrivePanel d={d} />}
-            <section className="panel cc-box lg-mission-box">
+            <section className={`panel cc-box lg-mission-box${missionLive ? ' is-live' : ''}`}>
               <div className="panel-head"><div><span className="lg-eyebrow">MISSION CONTROL</span><h2><ListChecks size={17} />{t('Mission control')}</h2></div>{m && <MissionBadge status={m.status} />}</div>
               <div className="cc-box-body">{m && <MissionStrip d={d} m={m} />}<MissionControl d={d} m={m} /></div>
             </section>
-            {showsReadiness(d) && <UgvHardwareReadiness device={d} />}
-            {['gimbal', 'spotlight', 'beacon', 'speaker'].some((c) => d.capabilities.includes(c)) && (
-              <section className="panel cc-box">
-                <div className="panel-head"><h2><Camera size={17} />{d.payloads?.length ? t('Camera & 4-in-1 module') : t('Camera')}</h2></div>
-                <div className="cc-box-body"><CameraControls device={d} aimAt={m ? { incidentId: m.incidentId } : undefined} /></div>
-              </section>
+            {cockpit && (
+              <button type="button" className="cc-more-toggle" aria-expanded={moreOpen} aria-controls="cc-more" onClick={toggleMore}>
+                <LayoutGrid size={15} aria-hidden="true" />
+                {moreOpen ? t('Hide other panels') : t('Other panels')}
+                <span className="cc-more-n">{tucked}</span>
+                {moreOpen ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+              </button>
             )}
-            {d.catalogId && VEHICLE_CATALOG[d.catalogId] && (
-              <details className="panel cc-box lg-disclosure"><summary>{t('Vehicle specifications')}<ChevronRight size={16} /></summary><div className="cc-box-body"><VehicleSpecs d={d} /></div></details>
-            )}
-            <section className="panel cc-box cc-log-box"><div className="panel-head"><h2><History size={17} />{t('Activity')}</h2></div><ActivityLog d={d} /></section>
+            <div className="cc-more" id="cc-more">
+              {showsReadiness(d) && <UgvHardwareReadiness device={d} />}
+              {hasCamera && (
+                <section className="panel cc-box">
+                  <div className="panel-head"><h2><Camera size={17} />{d.payloads?.length ? t('Camera & 4-in-1 module') : t('Camera')}</h2></div>
+                  <div className="cc-box-body"><CameraControls device={d} aimAt={m ? { incidentId: m.incidentId } : undefined} /></div>
+                </section>
+              )}
+              {hasSpecs && (
+                <details className="panel cc-box lg-disclosure"><summary>{t('Vehicle specifications')}<ChevronRight size={16} /></summary><div className="cc-box-body"><VehicleSpecs d={d} /></div></details>
+              )}
+              <section className="panel cc-box cc-log-box"><div className="panel-head"><h2><History size={17} />{t('Activity')}</h2></div><ActivityLog d={d} /></section>
+            </div>
           </aside>
         </>
       ) : (

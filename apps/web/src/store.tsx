@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react';
-import type { AppState, CameraAction, Geofence, Meta, OperationalMode, Patrol, Point, SessionUser } from '@13store/shared';
+import type { AppState, CameraAction, Geofence, Meta, OperationalMode, Patrol, Point, SessionUser, VehicleControlAction } from '@13store/shared';
 import { makeInitialState, reducer, type Msg } from './domain/reducer';
 import type { Api } from './api';
 
@@ -56,6 +56,11 @@ export interface Session {
   startDriving(deviceId: string): Promise<boolean>;
   /** End this console's drive session; the vehicle stops and the remote gets its sticks back. */
   stopDriving(deviceId: string): Promise<void>;
+  /**
+   * Arm, disarm, MANUAL/HOLD or gear. The vehicle's answer is shown as a toast; arming asks for the password again
+   * when the last check is old. Resolves with the answer, or undefined when the request was refused or postponed.
+   */
+  vehicleControl(deviceId: string, action: VehicleControlAction, confirmClear?: boolean): Promise<VehicleControlResult | undefined>;
   /** One stick sample (−1…1) over the live connection. False while the connection is down. */
   driveSample(deviceId: string, seq: number, throttle: number, steer: number): boolean;
   /** Change a device's operating mode (supervisors promote, with a reason and a password check). */
@@ -98,6 +103,12 @@ export interface MediaSession {
   hls?: string;
   whepSub?: string;
   hlsSub?: string;
+}
+
+/** The vehicle's answer to an arm, disarm, mode or gear request: `ok` only when it accepted. */
+export interface VehicleControlResult {
+  ok: boolean;
+  detail: string;
 }
 
 export interface CameraResult {

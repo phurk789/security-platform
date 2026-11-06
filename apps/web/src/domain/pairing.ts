@@ -2,6 +2,7 @@
 // the device list again (apps/server/src/pairing.ts); these helpers only build and display it.
 import qrcode from 'qrcode-generator';
 import { pairingLink } from '@13store/shared';
+import { noRemoteFor, type RemoteChoice } from './vehicleControl';
 
 /** Where the gateway runs: the edge app on the SIYI remote, or a Raspberry Pi on the vehicle (deploy/pi). */
 export type EdgeTarget = 'remote' | 'pi';
@@ -37,6 +38,8 @@ export interface RemoteForm {
   cameraRtsp: string;
   /** Raspberry Pi only. */
   piPort?: PiPort;
+  /** Raspberry Pi only: still driven with the SIYI remote, or not (the Pi is then its remote). */
+  remote?: RemoteChoice;
 }
 
 export const REMOTE_DEFAULTS: RemoteForm = {
@@ -97,6 +100,7 @@ export function piDevices(f: RemoteForm): Record<string, unknown>[] {
       link: { mode: 'serial', ...PI_PORTS[port] },
       allowRemoteArm: false,
       teleop: true,
+      ...noRemoteFor(f.remote ?? 'remote'),
       ...(camera ? { stream: { rtsp: camera, push: true } } : {}),
     },
   ];

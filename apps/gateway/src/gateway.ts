@@ -12,7 +12,7 @@ import type { FrameSource } from './vision/sources';
 
 /** Messages dropped because the server link was down, by type. */
 export type DroppedCounts = Record<Exclude<GatewayToServer['t'], 'hello'>, number>;
-const noDrops = (): DroppedCounts => ({ telemetry: 0, cmd: 0, event: 0, camera_result: 0, tracks: 0 });
+const noDrops = (): DroppedCounts => ({ telemetry: 0, cmd: 0, event: 0, camera_result: 0, tracks: 0, vehicle_control_result: 0 });
 
 export interface GatewayOptions {
   /** ws:// or wss:// base URL of the platform server, e.g. ws://localhost:8080 */
@@ -185,6 +185,8 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
       event: (e) => send({ t: 'event', deviceId, ...e, at: e.at ?? now() }),
       cameraResult: (r) => send({ t: 'camera_result', deviceId, ...r }),
       tracks: (tr) => send({ t: 'tracks', deviceId, ...tr }),
+      vehicleControlResult: (r) => send({ t: 'vehicle_control_result', deviceId, ...r }),
+      serverConnected: () => ws?.readyState === WebSocket.OPEN && accepted.has(deviceId),
     };
   };
 
@@ -228,6 +230,16 @@ export function startGateway(opts: GatewayOptions): GatewayHandle {
           return;
         }
         a.onCamera(requestId, action as Parameters<NonNullable<Adapter['onCamera']>>[1]);
+        return;
+      }
+      case 'vehicle_control': {
+        const a = byId.get(msg.deviceId);
+        if (!a || !accepted.has(msg.deviceId)) return log.warn(`vehicle control for unregistered device ${msg.deviceId} ignored`);
+        if (!a.onVehicleControl) {
+          send({ t: 'vehicle_control_result', deviceId: msg.deviceId, requestId: msg.requestId, ok: false, detail: 'This device cannot be armed, disarmed or switched from the console.' });
+          return;
+        }
+        a.onVehicleControl(msg.requestId, msg.action);
         return;
       }
       case 'drive': {

@@ -4,7 +4,8 @@ import { PAYLOAD_CATALOG, VEHICLE_CATALOG, type CameraMount, type GeoAnchor, typ
 import { defaultAdapters } from '../adapters';
 import type { Adapter } from '../sdk';
 import { linkProblem, type LinkConfig } from './mavlinkLink';
-import { MavlinkVehicleAdapter, UNIRC7_DATALINK, teleopProblem, type TeleopConfig, type VehicleProfile } from './mavlinkVehicle';
+import { MavlinkVehicleAdapter, TELEOP_DEFAULTS, UNIRC7_DATALINK, teleopProblem, type TeleopConfig, type VehicleProfile } from './mavlinkVehicle';
+import { noRemoteProblem, type NoRemoteConfig } from './virtualRemote';
 import { SiyiCameraAdapter } from './siyiCamera';
 import { OnvifCameraAdapter, type OnvifCameraConfig } from './onvifCamera';
 import { RosNav2Adapter, type RosNav2Config } from './rosNav2';
@@ -46,6 +47,11 @@ export type DeviceConfig =
       fixCameraCodec?: boolean;
       /** Let UniGCS on the same machine run alongside: it connects to 127.0.0.1:19857 (or host/port) through the gateway. */
       gcsRelay?: boolean | { host?: string; port?: number };
+      /**
+       * No hand-held remote (a Raspberry Pi on the vehicle is its remote; ArduPilot Rover UGVs only). UGV-01:
+       * { "gearChannel": 11, "gears": [1100, 1500, 1900] } keeps its motor board on. See virtualRemote.ts.
+       */
+      noRemote?: true | NoRemoteConfig;
     }
   | ({ type: 'ros2-nav2' } & RosNav2Config)
   | {
@@ -119,6 +125,12 @@ export function parseSiteConfig(json: unknown): SiteConfig {
       const problem = teleopProblem(d.teleop);
       if (problem) throw new ConfigError(`${d.deviceId}: ${problem}`);
     }
+    if (d.type === 'mavlink' && d.noRemote !== undefined && (d.noRemote as unknown) !== false) {
+      if (d.kind !== 'ugv' || d.profile !== 'ardupilot-rover') throw new ConfigError(`${d.deviceId}: noRemote is for ArduPilot Rover ground vehicles only.`);
+      const t = { ...TELEOP_DEFAULTS, ...(d.teleop && d.teleop !== true ? d.teleop : {}) };
+      const problem = noRemoteProblem(d.noRemote, [t.steerChannel, t.throttleChannel]);
+      if (problem) throw new ConfigError(`${d.deviceId}: ${problem}`);
+    }
     if (d.type === 'mavlink' && d.gcsRelay !== undefined && typeof d.gcsRelay !== 'boolean') {
       const r = d.gcsRelay as { host?: unknown; port?: unknown };
       if (!r || typeof r !== 'object') throw new ConfigError(`${d.deviceId}: gcsRelay must be true, false or { host, port }.`);
@@ -183,6 +195,7 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           teleop: d.teleop,
           fixCameraCodec: d.fixCameraCodec,
           gcsRelay: d.gcsRelay,
+          noRemote: d.noRemote || undefined,
         }),
       );
     else if (d.type === 'ros2-nav2') out.push(new RosNav2Adapter(d));
