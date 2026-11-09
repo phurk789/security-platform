@@ -9,6 +9,7 @@ import {
   COCO_CLASSES,
   FfmpegSource,
   HttpDetector,
+  floorSamples,
   JpegSplitter,
   MotionDetector,
   OnnxDetector,
@@ -451,6 +452,24 @@ describe('http detector (AI service on a Jetson or GPU box)', () => {
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ type: 'intrusion', attributes: { label: 'person' } });
     expect(p.status().detectors.http).toMatchObject({ frames: 2 });
+    await svc.close();
+  });
+
+  it('with a depth model: each box keeps its depth value and the floor samples go out with the live boxes', async () => {
+    const floor = [[0.1, 0.55, 1.4], [0.5, 0.97, 7.25], [1.2, 0.6, 2], [0.5, 0.6, 'x'], [0.3, 0.7]];
+    const svc = await fakeService(() => ({
+      json: { model: 'yolov8s.engine', depthModel: 'model.onnx', depthMs: 31.27, detections: [{ label: 'person', confidence: 0.88, box: [0.4, 0.3, 0.1, 0.4], depth: 1.83 }], floor },
+    }));
+    const boxes: LiveBoxes[] = [];
+    const p = new VisionPipeline({ detectors: { http: { url: svc.url } }, minFrames: 2 }, { onDetection: () => {}, onBoxes: (b) => boxes.push(b) });
+    await p.frameBytes(encodeJpeg(paintFrame(W, H, BG, [])), 1000);
+    // Only well-formed samples inside the frame are kept.
+    expect(boxes[0].floor).toEqual([[0.1, 0.55, 1.4], [0.5, 0.97, 7.25]]);
+    expect(boxes[0].boxes[0]).toMatchObject({ type: 'person', depthRel: 1.83 });
+    expect(p.status().detectors.http).toMatchObject({ depthModel: 'model.onnx', depthMs: 31.3 });
+    // Without a depth model nothing extra is sent.
+    expect(floorSamples(undefined)).toBeUndefined();
+    expect(floorSamples([[2, 2, 2]])).toBeUndefined();
     await svc.close();
   });
 });

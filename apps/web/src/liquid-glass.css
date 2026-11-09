@@ -25,7 +25,15 @@
   --lg-amber: #95621a;
   --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Noto Sans Thai', system-ui, sans-serif;
   color-scheme: light;
-  font-size: 16px;
+  /* Fluid UI scale. 16px on a 1536×864 laptop (1920×1080 at 125 %), 15px on 1280×720, about 17px
+     on 1920×1080 and 19px on 2560×1440 and larger. The smaller of the width and height terms wins,
+     so an ultrawide grows only as far as its height allows. Text and the panels sized in rem below
+     follow it, so every screen keeps the same proportions. The px parts keep browser zoom working. */
+  font-size: clamp(15px, min(0.3vw + 11.4px, 0.52vh + 11.5px), 19px);
+}
+/* Tablets and phones keep their own layouts at a fixed size. */
+@media (max-width: 1279px) {
+  :root, :root[data-theme='light'] { font-size: 16px; }
 }
 :root[data-theme='dark'] {
   --lg-bg: #151517;
@@ -62,7 +70,7 @@
   --cyan: var(--lg-accent); --cyan-d: var(--lg-accent); --violet: var(--lg-text-2);
   --red: var(--lg-red); --green: var(--lg-green); --amber: var(--lg-amber);
   --hud-font: var(--font); --hud-glow: none;
-  grid-template-rows: 78px minmax(0, 1fr) 28px;
+  grid-template-rows: 4.875rem minmax(0, 1fr) 1.75rem;
   min-height: 680px;
   color: var(--text);
   background:
@@ -81,7 +89,7 @@
 :root .app.liquid-ui button:disabled { opacity: .48; cursor: not-allowed; }
 :root .app.liquid-ui :is(input,textarea,select) { accent-color: var(--lg-accent); }
 :root .app.liquid-ui ::selection { color: var(--lg-on-accent); background: var(--lg-accent); }
-:root .app.liquid-ui .main { grid-template-columns: 144px minmax(0,1fr); gap: 0; min-width: 0; }
+:root .app.liquid-ui .main { grid-template-columns: 9rem minmax(0,1fr); gap: 0; min-width: 0; }
 :root .app.liquid-ui .panel, :root .app.liquid-ui .timeline {
   border: 1px solid var(--lg-edge);
   border-radius: 22px;
@@ -93,7 +101,7 @@
 :root .app.liquid-ui .panel::before, :root .app.liquid-ui .timeline::before,
 :root .app.liquid-ui .topbar::after, :root .app.liquid-ui .panel-head h2::before,
 :root .app.liquid-ui .tl-head h2::before { content: none; }
-:root .app.liquid-ui .panel-head { padding: 18px 18px 13px; gap: 10px; }
+:root .app.liquid-ui .panel-head { padding: 1.125rem 1.125rem .8125rem; gap: .625rem; }
 :root .app.liquid-ui .panel-head h2, :root .app.liquid-ui .tl-head h2 {
   display: flex; align-items: center; gap: 8px; color: var(--text); font-family: var(--font);
   font-size: .91rem; font-weight: 650; letter-spacing: 0; text-transform: none; text-shadow: none;
@@ -101,48 +109,49 @@
 :root .app.liquid-ui .lg-eyebrow { display: block; color: var(--text-3); font-size: .59rem; font-weight: 650; letter-spacing: .15em; margin-bottom: 6px; }
 /* Shell */
 :root .app.liquid-ui .topbar {
-  margin: 8px 14px 4px; padding: 0 20px; gap: 16px; border: 1px solid var(--lg-edge);
+  margin: .5rem .875rem .25rem; padding: 0 1.25rem; gap: 1rem; border: 1px solid var(--lg-edge);
   border-radius: 21px; background: var(--lg-surface); box-shadow: var(--lg-inset), var(--lg-shadow);
   backdrop-filter: blur(var(--lg-blur)); -webkit-backdrop-filter: blur(var(--lg-blur)); z-index: 30;
 }
 :root .app.liquid-ui .product { color: var(--text); text-shadow: none; font-family: var(--font); letter-spacing: .14em; font-weight: 650; font-size: .82rem; }
-:root .app.liquid-ui .brand { gap: 13px; }
+:root .app.liquid-ui .brand { gap: .8125rem; }
+:root .app.liquid-ui .topbar .brand-mark { width: auto; height: 2.125rem; }
 :root .app.liquid-ui .divider { height: 28px; background: var(--line-2); }
 :root .app.liquid-ui .top-mid { gap: 9px; }
 :root .app.liquid-ui .top-right { gap: 9px; }
 :root .app.liquid-ui .clock { color: var(--text-2); font-family: var(--font); letter-spacing: 0; font-size: .76rem; }
-:root .app.liquid-ui .mode { font-family: var(--font); font-size: .66rem; letter-spacing: .04em; border-radius: 12px; padding: 8px 11px; box-shadow: none; }
+:root .app.liquid-ui .mode { font-family: var(--font); font-size: .66rem; letter-spacing: .04em; border-radius: 12px; padding: .5rem .6875rem; box-shadow: none; }
 :root .app.liquid-ui .mode-live { color: var(--green); background: color-mix(in srgb, var(--green) 8%, transparent); border: 1px solid color-mix(in srgb, var(--green) 22%, transparent); }
 :root .app.liquid-ui .mode-sim { color: var(--text); background: var(--lg-surface-2); border: 1px solid var(--line); }
 :root .app.liquid-ui .mode-replay { color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent); }
 :root .app.liquid-ui .site-select { min-width: 0; border-radius: 12px; background: var(--lg-surface-2); border-color: var(--line); }
 :root .app.liquid-ui .appearance-toggle, :root .app.liquid-ui .sound-toggle, :root .app.liquid-ui .lg-glass-toggle {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; min-width: 36px;
-  border: 1px solid var(--line); border-radius: 12px; color: var(--text-2); background: var(--lg-surface); padding: 7px 9px; font-size: .71rem; box-shadow: var(--lg-inset);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 2.25rem; min-width: 2.25rem;
+  border: 1px solid var(--line); border-radius: 12px; color: var(--text-2); background: var(--lg-surface); padding: .4375rem .5625rem; font-size: .71rem; box-shadow: var(--lg-inset);
 }
 :root .app.liquid-ui .lg-glass-toggle[aria-pressed='true'] { color: var(--text); }
 :root .app.liquid-ui .user-btn { gap: 8px; }
-:root .app.liquid-ui .avatar { background: linear-gradient(145deg,#5b5b63,#313136); color: #fff; border: 1px solid rgba(255,255,255,.45); box-shadow: inset 0 1px 3px rgba(255,255,255,.2); width: 34px; height: 34px; }
+:root .app.liquid-ui .avatar { background: linear-gradient(145deg,#5b5b63,#313136); color: #fff; border: 1px solid rgba(255,255,255,.45); box-shadow: inset 0 1px 3px rgba(255,255,255,.2); width: 2.125rem; height: 2.125rem; }
 :root .app.liquid-ui .user-txt b { font-size: .78rem; }
 :root .app.liquid-ui .user-txt small { font-size: .66rem; }
 :root .app.liquid-ui .pop { background: var(--lg-surface-solid); border: 1px solid var(--lg-line-2); border-radius: 16px; box-shadow: var(--lg-shadow); color: var(--text); }
 :root .app.liquid-ui .lic-chip { border-radius: 10px; }
 :root .app.liquid-ui .sidenav {
   display: flex; flex-direction: column;
-  margin: 12px 0 14px 14px; padding: 12px 8px; gap: 7px; width: auto; overflow-y: auto; min-height: 0;
+  margin: .75rem 0 .875rem .875rem; padding: .75rem .5rem; gap: .4375rem; width: auto; overflow-y: auto; min-height: 0;
   border: 1px solid rgba(255,255,255,.35); border-radius: 24px;
   background: linear-gradient(150deg,rgba(76,76,84,.92),rgba(32,32,37,.94));
   box-shadow: inset 0 1px 1px rgba(255,255,255,.32), 0 10px 30px rgba(0,0,0,.09);
   backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
 }
 :root .app.liquid-ui .sidenav button {
-  display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px;
-  padding: 13px 10px; border: 1px solid transparent; border-radius: 16px;
-  background: transparent; color: #d8d8df; min-height: 54px; width: 100%;
+  display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: .625rem;
+  padding: .8125rem .625rem; border: 1px solid transparent; border-radius: 16px;
+  background: transparent; color: #d8d8df; min-height: 3.375rem; width: 100%;
   font: 500 .76rem var(--font); letter-spacing: 0; text-shadow: none; line-height: 1.4;
 }
 :root .app.liquid-ui .sidenav button .ico { display: flex; flex: none; }
-:root .app.liquid-ui .sidenav button .ico svg { width: 21px; height: 21px; stroke-width: 1.7; }
+:root .app.liquid-ui .sidenav button .ico svg { width: 1.3125rem; height: 1.3125rem; stroke-width: 1.7; }
 :root .app.liquid-ui .sidenav button::before, :root .app.liquid-ui .sidenav button::after { content: none; }
 :root .app.liquid-ui .sidenav button.on { color: #fff; border: 1px solid rgba(255,255,255,.44); background: linear-gradient(135deg,rgba(255,255,255,.22),rgba(255,255,255,.07)); box-shadow: inset 0 1px 1px rgba(255,255,255,.25),0 4px 12px rgba(0,0,0,.10); }
 :root .app.liquid-ui .sidenav button:hover:not(.on) { background: rgba(255,255,255,.07); color: #fff; }
@@ -150,7 +159,9 @@
 :root .app.liquid-ui .nav-short { display: none; }
 :root .app.liquid-ui .nav-long { display: inline; }
 :root .app.liquid-ui .sidenav button:last-child { margin-top: auto; }
-:root .app.liquid-ui .footer { background: transparent; border: 0; color: var(--text-3); font-size: .66rem; padding: 0 22px; }
+:root .app.liquid-ui .footer { background: transparent; border: 0; color: var(--text-3); font-size: .66rem; padding: 0 1.375rem; }
+/* The footer's demo button fits its row (the general 38px button height made the page scroll ~5px). */
+:root .app.liquid-ui .footer .btn-ghost { min-height: 0; padding-block: 2px; }
 /* Controls: all non-semantic cyan becomes graphite / silver. */
 :root .app.liquid-ui .seg { border: 1px solid var(--line); border-radius: 12px; padding: 3px; background: var(--lg-surface-2); gap: 3px; }
 :root .app.liquid-ui .seg button { border: 0; border-radius: 9px; background: transparent; color: var(--text-2); box-shadow: none; min-height: 30px; font-weight: 550; }
@@ -167,31 +178,31 @@
 :root .app.liquid-ui :is(.badge-green,.badge-green.solid) { color: var(--green); background: color-mix(in srgb,var(--green) 10%, transparent); border: 1px solid color-mix(in srgb,var(--green) 19%, transparent); }
 :root .app.liquid-ui :is(.badge-amber,.badge-amber.solid) { color: var(--amber); background: color-mix(in srgb,var(--amber) 10%, transparent); border: 1px solid color-mix(in srgb,var(--amber) 22%, transparent); }
 /* Workspace */
-:root .app.liquid-ui .cc { grid-template-columns: 240px minmax(0,1fr) 328px; gap: 16px; padding: 12px 18px 14px 16px; min-width: 0; }
+:root .app.liquid-ui .cc { grid-template-columns: 15rem minmax(0,1fr) 20.5rem; gap: 1rem; padding: .75rem 1.125rem .875rem 1rem; min-width: 0; }
 :root .app.liquid-ui .cc-rail { display: flex; flex-direction: column; min-width: 0; }
 :root .app.liquid-ui .lg-roster-head { align-items: center; }
 :root .app.liquid-ui .lg-count { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 11px; background: var(--lg-surface-2); border: 1px solid var(--line); font-weight: 600; font-size: .84rem; }
-:root .app.liquid-ui .lg-fleet-counts { display: grid; grid-template-columns: repeat(3,1fr); margin: 0 14px 14px; padding: 10px 0; border-radius: 14px; border: 1px solid var(--line); background: var(--lg-surface-2); }
+:root .app.liquid-ui .lg-fleet-counts { display: grid; grid-template-columns: repeat(3,1fr); margin: 0 .875rem .875rem; padding: .625rem 0; border-radius: 14px; border: 1px solid var(--line); background: var(--lg-surface-2); }
 :root .app.liquid-ui .lg-fleet-counts > div { display: flex; flex-direction: column; align-items: center; gap: 4px; border-right: 1px solid var(--line); }
 :root .app.liquid-ui .lg-fleet-counts > div:last-child { border: 0; }
 :root .app.liquid-ui .lg-fleet-counts b { font-size: 1.22rem; font-weight: 650; line-height: 1.2; }
 :root .app.liquid-ui .lg-fleet-counts small { font-size: .65rem; color: var(--text-2); }
-:root .app.liquid-ui .lg-search { display: flex; align-items: center; gap: 7px; margin: 0 14px 12px; padding: 0 10px; min-height: 38px; border: 1px solid var(--line); border-radius: 12px; background: var(--lg-surface-2); color: var(--text-2); }
+:root .app.liquid-ui .lg-search { display: flex; align-items: center; gap: 7px; margin: 0 .875rem .75rem; padding: 0 .625rem; min-height: 2.375rem; border: 1px solid var(--line); border-radius: 12px; background: var(--lg-surface-2); color: var(--text-2); }
 :root .app.liquid-ui .lg-search svg { flex: none; }
 :root .app.liquid-ui .lg-search input { min-width: 0; width: 100%; background: none; border: 0; border-radius: 8px; padding: 8px 0; font-size: .72rem; }
 :root .app.liquid-ui .lg-search:focus-within { outline: 2px solid var(--text); outline-offset: 2px; }
 :root .app.liquid-ui .lg-search input:focus-visible { outline: none; }
-:root .app.liquid-ui .cc-filter { margin: 0 14px 14px; flex: none; }
+:root .app.liquid-ui .cc-filter { margin: 0 .875rem .875rem; flex: none; }
 :root .app.liquid-ui .cc-filter button { font-size: .64rem; padding: 5px; gap: 4px; min-width: 0; }
-:root .app.liquid-ui .cc-units { padding: 1px 12px 14px; gap: 10px; overflow-x: hidden; flex: 1; }
-:root .app.liquid-ui .lg-unit { display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 16px; padding: 12px; background: var(--lg-surface); color: var(--text); flex: none; transition: background .16s,border-color .16s; }
+:root .app.liquid-ui .cc-units { padding: 1px .75rem .875rem; gap: .625rem; overflow-x: hidden; flex: 1; }
+:root .app.liquid-ui .lg-unit { display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 16px; padding: .75rem; background: var(--lg-surface); color: var(--text); flex: none; transition: background .16s,border-color .16s; }
 :root .app.liquid-ui .lg-unit.is-selected { background: linear-gradient(135deg,rgba(128,128,140,.12),rgba(128,128,140,.035)),var(--lg-surface); border-color: color-mix(in srgb,var(--text) 38%, transparent); box-shadow: var(--lg-inset),0 4px 10px rgba(0,0,0,.035); }
 :root .app.liquid-ui .lg-unit:hover { border-color: var(--text-3); }
 :root .app.liquid-ui .lg-unit-top { display: flex; gap: 8px; align-items: center; }
 :root .app.liquid-ui .lg-unit-top > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 :root .app.liquid-ui .lg-unit-top b { font-size: .94rem; }
 :root .app.liquid-ui .lg-unit-top small { font-size: .57rem; color: var(--text-3); letter-spacing: .02em; overflow-wrap: anywhere; }
-:root .app.liquid-ui .lg-unit .lg-portrait { width: 47px; height: 46px; border-radius: 11px; }
+:root .app.liquid-ui .lg-unit .lg-portrait { width: 2.9375rem; height: 2.875rem; border-radius: 11px; }
 :root .app.liquid-ui .lg-unit-status { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
 :root .app.liquid-ui .lg-unit-model { display: block; font-size: .65rem; color: var(--text-2); line-height: 1.55; margin: 10px 0; overflow-wrap: anywhere; }
 :root .app.liquid-ui .lg-unit-numbers { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 7px; padding-top: 10px; border-top: 1px solid var(--line); }
@@ -199,12 +210,12 @@
 :root .app.liquid-ui .lg-roster-foot { display: flex; align-items: flex-start; gap: 9px; margin: auto 16px 0; padding: 17px 0; border-top: 1px solid var(--line); color: var(--text-3); font-size: .66rem; line-height: 1.6; }
 :root .app.liquid-ui .lg-roster-foot svg { flex: none; margin-top: 2px; }
 :root .app.liquid-ui .lg-roster-foot small { display: block; margin-top: 6px; font-size: .52rem; letter-spacing: .13em; }
-:root .app.liquid-ui .cc-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow: auto; padding: 0 1px 1px; }
+:root .app.liquid-ui .cc-main { display: flex; flex-direction: column; gap: .75rem; min-width: 0; min-height: 0; overflow: auto; padding: 0 1px 1px; }
 /* Workspace header: one slim bar with the unit, its badges and the view switch. */
-:root .app.liquid-ui .lg-device-header { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; min-height: 0; height: auto; flex: none; gap: 8px 12px; padding: 8px 10px; border-radius: 18px; }
+:root .app.liquid-ui .lg-device-header { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; min-height: 0; height: auto; flex: none; gap: .5rem .75rem; padding: .5rem .625rem; border-radius: 18px; }
 :root .app.liquid-ui .lg-portrait { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 64px; height: 62px; border-radius: 17px; color: var(--text-2); background: radial-gradient(ellipse at 50% 75%, rgba(99,99,111,.22),transparent 70%),var(--lg-surface-2); }
 :root .app.liquid-ui .lg-portrait img { width: 100%; height: 100%; object-fit: contain; }
-:root .app.liquid-ui .lg-device-header .lg-portrait { width: 44px; height: 44px; border-radius: 12px; }
+:root .app.liquid-ui .lg-device-header .lg-portrait { width: 2.75rem; height: 2.75rem; border-radius: 12px; }
 :root .app.liquid-ui .lg-device-title { flex: 1 1 140px; min-width: 0; }
 :root .app.liquid-ui .lg-device-title h1 { margin: 0; font-weight: 650; font-size: 1.2rem; line-height: 1.2; letter-spacing: -.02em; }
 :root .app.liquid-ui .lg-device-title p { margin: 2px 0 0; color: var(--text-3); font-size: .66rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -225,9 +236,9 @@
 :root .app.liquid-ui .tlm-stats dt { font-size: .58rem; }
 :root .app.liquid-ui .tlm-value { font-size: .9rem; }
 /* Operational panels. Their original command logic and lifecycle are unchanged. */
-:root .app.liquid-ui .cc-side { min-width: 0; gap: 13px; overflow-x: hidden; padding: 0 1px 2px; }
+:root .app.liquid-ui .cc-side { min-width: 0; gap: .8125rem; overflow-x: hidden; padding: 0 1px 2px; }
 :root .app.liquid-ui .cc .cc-box { border-radius: 21px; height: auto; }
-:root .app.liquid-ui .cc-box-body { padding: 0 16px 16px; font-size: .8rem; overflow-wrap: anywhere; }
+:root .app.liquid-ui .cc-box-body { padding: 0 1rem 1rem; font-size: .8rem; overflow-wrap: anywhere; }
 :root .app.liquid-ui .cc-box-body p { line-height: 1.55; }
 :root .app.liquid-ui .cc-side :is(.btn-primary,.btn-secondary) { font-size: .78rem; }
 :root .app.liquid-ui .lg-mission-box .cc-next { padding: 17px; border-radius: 14px; background: linear-gradient(140deg,#53535b,#2a2a30); color: #fff; --text: #fff; --text-2: #dedee5; --text-3: #c0c0ca; gap: 16px; border: 1px solid rgba(255,255,255,.2); box-shadow: inset 0 1px 0 rgba(255,255,255,.16); }
@@ -278,16 +289,22 @@
 :root .app.liquid-ui :is(.cc-units,.cc-side,.cc-main,.lg-graphs,.sidenav) { scrollbar-width: thin; scrollbar-color: var(--lg-line-2) transparent; }
 /* Preserve keyboard access to all commands on compact screens. */
 @media (max-width: 1599px) {
-  :root .app.liquid-ui .main { grid-template-columns: 102px minmax(0,1fr); }
-  :root .app.liquid-ui .sidenav { margin-left: 12px; padding: 10px 6px; }
-  :root .app.liquid-ui .sidenav button { flex-direction: column; justify-content: center; text-align: center; gap: 7px; padding: 12px 5px; font-size: .63rem; min-height: 66px; }
-  :root .app.liquid-ui .cc { grid-template-columns: 212px minmax(0,1fr) 292px; gap: 12px; padding: 12px; }
+  :root .app.liquid-ui .main { grid-template-columns: 6.375rem minmax(0,1fr); }
+  :root .app.liquid-ui .sidenav { margin-left: .75rem; padding: .625rem .375rem; }
+  :root .app.liquid-ui .sidenav button { flex-direction: column; justify-content: center; text-align: center; gap: .4375rem; padding: .75rem .3125rem; font-size: .63rem; min-height: 4.125rem; }
+  :root .app.liquid-ui .cc { grid-template-columns: 13.25rem minmax(0,1fr) 18.25rem; gap: .75rem; padding: .75rem; }
   :root .app.liquid-ui .product { font-size: .73rem; letter-spacing: .09em; }
-  :root .app.liquid-ui .topbar { padding: 0 15px; gap: 10px; }
+  :root .app.liquid-ui .topbar { padding: 0 .9375rem; gap: .625rem; }
   :root .app.liquid-ui .top-right { gap: 7px; }
   :root .app.liquid-ui .clock { font-size: .68rem; }
   :root .app.liquid-ui .lg-unit { padding: 10px; }
   :root .app.liquid-ui .lg-unit-numbers { gap: 7px 5px; }
+}
+/* A short window (a laptop at 125–150 %): the eight stacked nav buttons need about 45.5rem of height,
+   so below that they get shorter instead of scrolling the nav and cutting off the first one. */
+@media (max-width: 1599px) and (max-height: 760px) {
+  :root .app.liquid-ui .sidenav { gap: .25rem; padding-block: .5rem; }
+  :root .app.liquid-ui .sidenav button { min-height: 3.5rem; padding-block: .5rem; gap: .3125rem; }
 }
 @media (max-width: 1279px) {
   :root .app.liquid-ui .product { max-width: 175px; white-space: normal; line-height: 1.5; font-size: .67rem; }
@@ -345,9 +362,14 @@
 /* Command Centre stage: map first, or the cockpit (camera in front with a driving HUD). The other
    view sits inset. Both views stay mounted; only these classes move them. HUD text sits on dark
    glass so it stays readable over bright video and imagery in either theme. */
-:root .app.liquid-ui .lg-stage { position: relative; flex: 1; min-height: 380px; border-radius: 19px; overflow: hidden; isolation: isolate; background: #18181b; box-shadow: 0 6px 24px rgba(0,0,0,.12); --pip-w: clamp(150px, 27%, 270px); --hud-fg: #f5f5f7; --hud-dim: #b9b9c3; --hud-warn: #f2c477; --hud-bad: #ff9c92; --hud-ok: #97d9b0; --hud-manual: #9cc0ff; }
+:root .app.liquid-ui .lg-stage { position: relative; flex: 1; min-height: 380px; border-radius: 19px; overflow: hidden; isolation: isolate; background: #18181b; box-shadow: 0 6px 24px rgba(0,0,0,.12); container: stage / size; --pip-w: clamp(150px, 27%, 16.875rem); --hud-fg: #f5f5f7; --hud-dim: #b9b9c3; --hud-warn: #f2c477; --hud-bad: #ff9c92; --hud-ok: #97d9b0; --hud-manual: #9cc0ff; }
 :root .app.liquid-ui :is(.lg-stage-map,.lg-stage-cam) { position: absolute; inset: 0; z-index: 0; overflow: hidden; background: #18181b; }
 :root .app.liquid-ui .lg-stage-cam .feed { position: absolute; inset: 0; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; }
+/* Ultrawide: the camera in front is at most twice as wide as it is tall, centred. Wider than that,
+   filling the stage would cut off the top and bottom of a 16:9 driving picture (the ground right in
+   front of the vehicle); the HUD still spans the whole stage, over the dark sides. The AI boxes are
+   inside the camera layer, so they stay on the picture. */
+:root .app.liquid-ui .lg-stage[data-focus='cockpit'] .lg-stage-cam:not(.is-pip) { width: min(100%, 200cqh); margin-inline: auto; }
 /* Inset view: tap (or Enter) to swap it in front. */
 :root .app.liquid-ui .lg-stage .is-pip { inset: auto; z-index: 6; width: var(--pip-w); aspect-ratio: 16 / 10; border-radius: 14px; border: 1px solid rgba(255,255,255,.42); box-shadow: 0 12px 30px rgba(0,0,0,.4); }
 :root .app.liquid-ui .lg-stage-map.is-pip { top: 46px; right: 12px; }
@@ -380,9 +402,9 @@
    right (the map inset's room, then the altitude tape). Rows: top, free middle, a row kept clear
    for the camera's time line, then the number bar. The side columns are as wide as the map inset
    (27% of the stage, like --pip-w; cqw is the HUD's width, which is the stage's). */
-:root .app.liquid-ui .lg-ck { --ck-side: clamp(150px, 27cqw, 270px); position: absolute; inset: 0; display: grid; grid-template-columns: var(--ck-side) minmax(0,1fr) var(--ck-side); grid-template-rows: auto minmax(0,1fr) 22px auto; grid-template-areas: "left top right" "left . right" ". . ." "bar bar bar"; gap: 10px; padding: 12px; }
+:root .app.liquid-ui .lg-ck { --ck-side: clamp(150px, 27cqw, 16.875rem); position: absolute; inset: 0; display: grid; grid-template-columns: var(--ck-side) minmax(0,1fr) var(--ck-side); grid-template-rows: auto minmax(0,1fr) 22px auto; grid-template-areas: "left top right" "left . right" ". . ." "bar bar bar"; gap: 10px; padding: 12px; }
 :root .app.liquid-ui .lg-ck-left { grid-area: left; display: grid; grid-template-rows: auto minmax(0,1fr); gap: 10px; justify-items: start; min-height: 0; }
-:root .app.liquid-ui .lg-ck-cards { display: flex; flex-direction: column; gap: 6px; width: min(100%, 230px); }
+:root .app.liquid-ui .lg-ck-cards { display: flex; flex-direction: column; gap: 6px; width: min(100%, 14.375rem); }
 :root .app.liquid-ui .lg-ck-top { grid-area: top; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
 /* The map inset starts 46px down the stage (34px into the grid) and is 16:10. */
 :root .app.liquid-ui .lg-ck-right { grid-area: right; display: grid; justify-items: end; min-height: 0; padding-top: calc(44px + var(--ck-side) * .625); }
@@ -421,12 +443,12 @@
 :root .app.liquid-ui .lg-hud-glass .t-val.big { font-size: 17px; }
 :root .app.liquid-ui .lg-hud-glass .t-sm { font-size: 10px; font-weight: 700; letter-spacing: .06em; fill: var(--hud-dim); }
 :root .app.liquid-ui .lg-hud.is-nodata .t-box { stroke: var(--hud-warn); }
-:root .app.liquid-ui .lg-tape-h { width: min(260px, 100%); padding-top: 2px; }
+:root .app.liquid-ui .lg-tape-h { width: min(16.25rem, 100%); padding-top: 2px; }
 /* The vertical tapes keep their shape and shrink to the height left in their column. */
-:root .app.liquid-ui .lg-tape-v { align-self: center; height: min(100%, 214px); width: auto; aspect-ratio: 88 / 252; padding: 0; }
+:root .app.liquid-ui .lg-tape-v { align-self: center; height: min(100%, 13.375rem); width: auto; aspect-ratio: 88 / 252; padding: 0; }
 :root .app.liquid-ui .lg-tape-v svg { height: 100%; }
 /* Map first: the no-data banner, top centre. (In the cockpit it is in the grid's top centre.) */
-:root .app.liquid-ui .lg-stage-top { position: absolute; top: 66px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 8px; width: min(540px, calc(100% - 140px)); pointer-events: none; }
+:root .app.liquid-ui .lg-stage-top { position: absolute; top: 66px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 8px; width: min(33.75rem, calc(100% - 140px)); pointer-events: none; }
 :root .app.liquid-ui .lg-stage-top:empty { display: none; }
 :root .app.liquid-ui .lg-nodata { display: flex; align-items: center; gap: 12px; max-width: 100%; padding: 11px 16px; border-radius: 14px; border: 1.5px solid var(--hud-warn); color: #fff; background: rgba(36,27,12,.84); box-shadow: 0 8px 26px rgba(0,0,0,.3); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 :root .app.liquid-ui .lg-nodata svg { flex: none; color: var(--hud-warn); }
@@ -480,8 +502,8 @@
   :root .app.liquid-ui .lg-tape-v { height: min(100%, 170px); }
 }
 /* Last 60 s graphs: a drawer over the stage, clear of the inset view. */
-:root .app.liquid-ui .lg-graphs { position: absolute; left: 12px; bottom: 66px; z-index: 7; width: min(520px, calc(100% - 24px)); max-height: calc(100% - 130px); overflow: auto; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 16px; color: var(--text); background: var(--lg-surface-solid); box-shadow: 0 16px 40px rgba(0,0,0,.32); }
-:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-graphs { width: min(520px, calc(100% - var(--pip-w) - 48px)); }
+:root .app.liquid-ui .lg-graphs { position: absolute; left: 12px; bottom: 66px; z-index: 7; width: min(32.5rem, calc(100% - 24px)); max-height: calc(100% - 130px); overflow: auto; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 16px; color: var(--text); background: var(--lg-surface-solid); box-shadow: 0 16px 40px rgba(0,0,0,.32); }
+:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-graphs { width: min(32.5rem, calc(100% - var(--pip-w) - 48px)); }
 :root .app.liquid-ui .lg-stage[data-focus='cockpit'] .lg-graphs { left: auto; right: 12px; }
 :root .app.liquid-ui .lg-graphs-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 :root .app.liquid-ui .lg-graphs-head b { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; }
@@ -551,26 +573,26 @@
 
 /* Folded unit list: a slim rail of unit icons, so the workspace gets the room. */
 :root .app.liquid-ui .cc { transition: grid-template-columns .22s ease; }
-:root .app.liquid-ui .cc.rail-folded { grid-template-columns: 76px minmax(0,1fr) 328px; }
-:root .app.liquid-ui .lg-rail-toggle { flex: none; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 11px; background: var(--lg-surface-2); color: var(--text-2); }
+:root .app.liquid-ui .cc.rail-folded { grid-template-columns: 4.75rem minmax(0,1fr) 20.5rem; }
+:root .app.liquid-ui .lg-rail-toggle { flex: none; display: grid; place-items: center; width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--line); border-radius: 11px; background: var(--lg-surface-2); color: var(--text-2); }
 :root .app.liquid-ui .lg-rail-toggle:hover { color: var(--text); border-color: var(--text-3); }
 :root .app.liquid-ui .cc-rail.is-folded .lg-roster-head { justify-content: center; padding: 12px 0 10px; }
 :root .app.liquid-ui .lg-rail-mini { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 8px; padding: 4px 6px 12px; overflow-x: hidden; overflow-y: auto; }
-:root .app.liquid-ui .lg-mini { display: flex; flex: none; flex-direction: column; align-items: center; gap: 4px; width: 62px; padding: 6px 2px; border: 1px solid transparent; border-radius: 14px; background: none; color: var(--text-2); }
+:root .app.liquid-ui .lg-mini { display: flex; flex: none; flex-direction: column; align-items: center; gap: 4px; width: 3.875rem; padding: 6px 2px; border: 1px solid transparent; border-radius: 14px; background: none; color: var(--text-2); }
 :root .app.liquid-ui .lg-mini:hover { border-color: var(--line); background: var(--lg-surface-2); }
 :root .app.liquid-ui .lg-mini.is-selected { border-color: color-mix(in srgb,var(--text) 38%, transparent); background: var(--lg-surface); color: var(--text); }
 :root .app.liquid-ui .lg-mini-pic { position: relative; display: block; }
-:root .app.liquid-ui .lg-mini .lg-portrait { width: 40px; height: 40px; border-radius: 11px; }
+:root .app.liquid-ui .lg-mini .lg-portrait { width: 2.5rem; height: 2.5rem; border-radius: 11px; }
 :root .app.liquid-ui .lg-mini small { font-size: .56rem; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
 :root .app.liquid-ui .lg-mini-dot { position: absolute; right: -3px; bottom: -3px; width: 11px; height: 11px; border: 2px solid var(--lg-surface-solid); border-radius: 50%; background: var(--text-3); }
 :root .app.liquid-ui .lg-mini-dot.f-live { background: var(--green); }
 :root .app.liquid-ui .lg-mini-dot.f-stale { background: var(--amber); }
 :root .app.liquid-ui .lg-mini-dot.f-replay { background: var(--text-2); }
 @media (max-width: 1599px) {
-  :root .app.liquid-ui .cc.rail-folded { grid-template-columns: 76px minmax(0,1fr) 292px; }
+  :root .app.liquid-ui .cc.rail-folded { grid-template-columns: 4.75rem minmax(0,1fr) 18.25rem; }
 }
 @media (max-width: 1279px) {
-  :root .app.liquid-ui .cc.rail-folded { grid-template-columns: 76px minmax(0,1fr); }
+  :root .app.liquid-ui .cc.rail-folded { grid-template-columns: 4.75rem minmax(0,1fr); }
 }
 @media (max-width: 900px) {
   :root .app.liquid-ui .cc.rail-folded { grid-template-columns: minmax(0,1fr); }
@@ -585,17 +607,17 @@
    drive dock: the Drive panel and a running mission first, then the "Other panels" button, and
    the other boxes (shown only when that button is open). Only classes change, so the Drive panel
    never remounts when the view switches. */
-:root .app.liquid-ui .cc.is-cockpit { grid-template-columns: minmax(0,1fr) clamp(280px, 21vw, 330px); }
+:root .app.liquid-ui .cc.is-cockpit { grid-template-columns: minmax(0,1fr) clamp(17.5rem, 21vw, 20.625rem); }
 :root .app.liquid-ui .cc.is-cockpit > .cc-rail { display: none; }
 :root .app.liquid-ui .cc-more { display: contents; }
 :root .app.liquid-ui .cc-side.is-dock > *, :root .app.liquid-ui .cc-side.is-dock > .cc-more > * { order: 2; }
 :root .app.liquid-ui .cc-side.is-dock > :is(.drive, .lg-mission-box.is-live) { order: 0; }
 :root .app.liquid-ui .cc-side.is-dock > .cc-more-toggle { order: 1; }
 :root .app.liquid-ui .cc-side.is-dock:not(.more-open) > :is(.cc-more, .lg-mission-box:not(.is-live)) { display: none; }
-:root .app.liquid-ui .cc-more-toggle { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 9px 14px; border: 1px solid var(--line-2); border-radius: 14px; color: var(--text-2); background: var(--lg-surface); box-shadow: var(--lg-inset); font: 600 .76rem var(--font); text-align: left; cursor: pointer; }
+:root .app.liquid-ui .cc-more-toggle { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; min-height: 2.625rem; padding: .5625rem .875rem; border: 1px solid var(--line-2); border-radius: 14px; color: var(--text-2); background: var(--lg-surface); box-shadow: var(--lg-inset); font: 600 .76rem var(--font); text-align: left; cursor: pointer; }
 :root .app.liquid-ui .cc-more-toggle:hover { color: var(--text); border-color: var(--text-3); }
 :root .app.liquid-ui .cc-more-n { margin-left: auto; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--lg-surface-2); color: var(--text-2); font-size: .66rem; text-align: center; }
-:root .app.liquid-ui .lg-full-btn { flex: none; display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--text-2); background: var(--lg-surface-2); cursor: pointer; }
+:root .app.liquid-ui .lg-full-btn { flex: none; display: grid; place-items: center; width: 2.375rem; height: 2.375rem; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--text-2); background: var(--lg-surface-2); cursor: pointer; }
 :root .app.liquid-ui .lg-full-btn:is(:hover,[aria-pressed='true']) { color: var(--text); border-color: var(--text-3); }
 @media (max-width: 1279px) {
   /* Narrow: the dock goes under the stage, two boxes a row; the Drive panel and the button span it. */

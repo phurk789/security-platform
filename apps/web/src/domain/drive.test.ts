@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { PAD_DEADZONE, keysToSticks, padToSticks } from './drive';
+import { PAD_DEADZONE, keysToSticks, padToSticks, speedLevels, throttleAt } from './drive';
+
+describe('speed buttons', () => {
+  it('offers 30 / 60 / 100 % up to the gateway cap, and no choice under an old 30 % cap', () => {
+    expect(speedLevels(1)).toEqual([0.3, 0.6, 1]);
+    expect(speedLevels(0.8)).toEqual([0.3, 0.6, 0.8]);
+    expect(speedLevels(0.5)).toEqual([0.3, 0.5]);
+    expect(speedLevels(0.3)).toEqual([0.3]);
+    expect(speedLevels(0.2)).toEqual([0.2]);
+    expect(speedLevels(0)).toEqual([]);
+  });
+
+  it('sends the throttle so the vehicle gets stick × level, whatever the gateway cap', () => {
+    // The gateway multiplies by its cap: at cap 1 the level goes through as is.
+    expect(throttleAt(1, 0.3, 1)).toBe(0.3);
+    expect(throttleAt(-1, 0.6, 1)).toBe(-0.6);
+    expect(throttleAt(0.5, 1, 1)).toBe(0.5);
+    // Cap 0.5: full stick at 30 % is sent as 0.6 (× 0.5 = 30 %); a level above the cap is the cap.
+    expect(throttleAt(1, 0.3, 0.5)).toBe(0.6);
+    expect(throttleAt(1, 1, 0.5)).toBe(1);
+    expect(throttleAt(0, 0.6, 1)).toBe(0);
+    expect(throttleAt(1, 0.3, 0)).toBe(0);
+  });
+});
 
 describe('console driving input', () => {
   it('maps WASD and arrow keys; opposite keys cancel', () => {

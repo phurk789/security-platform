@@ -143,9 +143,20 @@ export interface TeleopConfig {
   /** Flip a direction when right/forward on the console comes out left/backward on the vehicle. */
   reverseSteer?: boolean;
   reverseThrottle?: boolean;
+  /**
+   * Gear buttons while driving from the console, on a vehicle that keeps its hand-held remote: the RC channel and its
+   * value per gear, slowest first. UGV-01: channel 11 → SERVO4 (RCIN11Scaled) → RCU-ND C6, values 1100 / 1500 / 1900.
+   * The channel is overridden only after the driver picks a gear and only until the drive ends; then the remote's
+   * switch has it again. Vehicles without a remote set their gears in `noRemote` instead.
+   */
+  gearChannel?: number;
+  gears?: number[];
 }
 
-export const TELEOP_DEFAULTS: Required<TeleopConfig> = {
+/** Teleop settings with every default filled in (gears stay optional). */
+export type TeleopSettings = Required<Omit<TeleopConfig, 'gearChannel' | 'gears'>> & Pick<TeleopConfig, 'gearChannel' | 'gears'>;
+
+export const TELEOP_DEFAULTS: TeleopSettings = {
   maxThrottle: 0.3,
   maxSteer: 0.6,
   deadmanMs: 500,
@@ -170,6 +181,14 @@ export function teleopProblem(t: unknown): string | undefined {
   if (c.steerChannel === c.throttleChannel) return 'teleop.steerChannel and throttleChannel must differ';
   if (!num(c.center, 1000, 2000) || !num(c.travel, 50, 500) || c.center - c.travel < 800 || c.center + c.travel > 2200)
     return 'teleop.center ± travel must stay within 800–2200 µs';
+  if ((c.gearChannel === undefined) !== (c.gears === undefined)) return 'teleop.gearChannel and teleop.gears go together';
+  if (c.gearChannel !== undefined) {
+    if (!Number.isInteger(c.gearChannel) || !num(c.gearChannel, 1, 18)) return 'teleop.gearChannel must be an RC channel 1–18';
+    if (c.gearChannel === c.steerChannel || c.gearChannel === c.throttleChannel) return 'teleop.gearChannel must not be the steering or throttle channel';
+    const g = c.gears as unknown;
+    if (!Array.isArray(g) || g.length < 2 || g.length > 6 || g.some((v) => !num(v, 800, 2200)))
+      return 'teleop.gears must list 2–6 RC values between 800 and 2200 µs, slowest first';
+  }
   return undefined;
 }
 
@@ -342,10 +361,14 @@ export class MavlinkVehicleAdapter implements Adapter {
   private lastTel = 0;
 
   // live driving
-  private teleop?: Required<TeleopConfig>;
+  private teleop?: TeleopSettings;
   private drive = new DriveState(TELEOP_DEFAULTS.deadmanMs);
   /** True while RC overrides are going out (the pilot's sticks are not in charge). */
   private overriding = false;
+  /** Gear the console driver picked in this drive (index into teleop.gears; vehicles with a hand-held remote). */
+  private driveGear?: number;
+  /** The teleop gear channel is being overridden (released with the sticks). */
+  private gearOverridden = false;
   /** Overrides have gone out to an armed vehicle at least once (the part is then known to work). */
   private droveOnce = false;
   // no hand-held remote: the gateway's own sticks (virtualRemote.ts)
@@ -454,7 +477,14 @@ export class MavlinkVehicleAdapter implements Adapter {
       catalogId: cfg.catalogId && VEHICLE_CATALOG[cfg.catalogId] ? cfg.catalogId : undefined,
       indoor: cfg.indoor ? { buildingId: cfg.indoor.buildingId, level: cfg.indoor.level, positioning: 'slam' } : undefined,
       payloads: cfg.payload && PAYLOAD_CATALOG[cfg.payload.module] ? [cfg.payload.module] : undefined,
-      teleop: this.teleop ? ({ maxThrottle: this.teleop.maxThrottle, maxSteer: this.teleop.maxSteer, deadmanMs: this.teleop.deadmanMs } satisfies TeleopLimits) : undefined,
+      teleop: this.teleop
+        ? ({
+            maxThrottle: this.teleop.maxThrottle,
+            maxSteer: this.teleop.maxSteer,
+            deadmanMs: this.teleop.deadmanMs,
+            ...(this.gearCount() ? { gears: this.gearCount() } : {}),
+          } satisfies TeleopLimits)
+        : undefined,
       vehicleControl: { noRemote: !!this.vr, gears: this.vr?.cfg.gears.length ?? 0 },
       commands: ['start', 'pause', 'resume', 'stop'],
       components: this.comps.list(),
@@ -585,7 +615,27 @@ export class MavlinkVehicleAdapter implements Adapter {
       this.ctx.log.info(`${this.cfg.deviceId}: console driving started`);
       this.setPositionRate(250_000);
     }
+    this.pickGear(s.gear);
     this.driveTick();
+  }
+
+  /** Gears the console can pick: the virtual remote's (no hand-held remote), else teleop's own gear channel. */
+  private gearCount() {
+    return this.vr ? this.vr.cfg.gears.length : (this.teleop?.gears?.length ?? 0);
+  }
+
+  /** A gear from the drive panel (1-based). Anything out of range is ignored: the gear stays where it is. */
+  private pickGear(gear: unknown) {
+    const n = this.gearCount();
+    if (!n || typeof gear !== 'number' || !Number.isInteger(gear) || gear < 1 || gear > n) return;
+    if (this.vr) this.vr.gear = gear - 1;
+    else this.driveGear = gear - 1;
+  }
+
+  /** " · gear 2 of 3" for the drive part (vehicles with a remote; the virtual remote reports its own gear). */
+  private driveGearText() {
+    if (this.vr || !this.teleop?.gears) return '';
+    return this.driveGear === undefined ? ' · gear on the remote' : ` · gear ${this.driveGear + 1} of ${this.teleop.gears.length}`;
   }
 
   /** Why the vehicle may not be driven right now, or undefined when it may. */
@@ -617,7 +667,10 @@ export class MavlinkVehicleAdapter implements Adapter {
     this.comps.set(
       'drive',
       step.kind === 'drive'
-        ? { status: 'ok', detail: `Driving from the console · throttle ≤${Math.round(t.maxThrottle * 100)}% · steering ≤${Math.round(t.maxSteer * 100)}%` }
+        ? {
+            status: 'ok',
+            detail: `Driving from the console · throttle ≤${Math.round(t.maxThrottle * 100)}% · steering ≤${Math.round(t.maxSteer * 100)}%${this.driveGearText()}`,
+          }
         : step.reason === 'deadman'
           ? { status: 'warn', detail: 'No stick input from the console: stopped' }
           : { status: 'warn', detail: 'Stopped: centre the sticks to drive' },
@@ -628,9 +681,10 @@ export class MavlinkVehicleAdapter implements Adapter {
     const was = this.drive.active;
     this.drive.end();
     if (this.overriding) {
-      this.sendSticks(0, 0); // stop first, then hand the sticks back
+      this.sendSticks(0, 0); // stop first, then hand the sticks (and the gear channel) back
       this.releaseSticks();
     }
+    this.driveGear = undefined;
     if (was) {
       this.ctx.log.info(`${this.cfg.deviceId}: console driving ended (${why})`);
       this.setPositionRate(1_000_000);
@@ -648,11 +702,17 @@ export class MavlinkVehicleAdapter implements Adapter {
     }
     const t = this.teleop!;
     const pwm = (v: number, cap: number, reverse: boolean) => Math.round(t.center + (reverse ? -v : v) * cap * t.travel);
-    this.sendOverride({ [t.steerChannel]: pwm(steer, t.maxSteer, t.reverseSteer), [t.throttleChannel]: pwm(throttle, t.maxThrottle, t.reverseThrottle) });
+    const values: Record<number, number> = { [t.steerChannel]: pwm(steer, t.maxSteer, t.reverseSteer), [t.throttleChannel]: pwm(throttle, t.maxThrottle, t.reverseThrottle) };
+    // The gear channel only once the driver picked a gear; until then the remote's switch keeps it.
+    if (this.driveGear !== undefined && t.gearChannel !== undefined && t.gears) {
+      values[t.gearChannel] = t.gears[this.driveGear];
+      this.gearOverridden = true;
+    }
+    this.sendOverride(values);
     this.overriding = true;
   }
 
-  /** Hand the two channels back to the remote. Sent twice (UDP); ArduPilot also drops overrides after RC_OVERRIDE_TIME. */
+  /** Hand the sticks (and a picked gear) back to the remote. Sent twice (UDP); ArduPilot also drops overrides after RC_OVERRIDE_TIME. */
   private releaseSticks() {
     if (this.vr) {
       // There is no remote to hand them back to: centre them.
@@ -662,9 +722,11 @@ export class MavlinkVehicleAdapter implements Adapter {
     }
     const t = this.teleop!;
     const msg = { [t.steerChannel]: rcRelease(t.steerChannel), [t.throttleChannel]: rcRelease(t.throttleChannel) };
+    if (this.gearOverridden && t.gearChannel !== undefined) msg[t.gearChannel] = rcRelease(t.gearChannel);
     this.sendOverride(msg);
     this.sendOverride(msg);
     this.overriding = false;
+    this.gearOverridden = false;
   }
 
   /** RC_CHANNELS_OVERRIDE with the given channels set and every other channel left alone. */

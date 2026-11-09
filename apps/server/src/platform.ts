@@ -58,12 +58,18 @@ import {
   DEFAULT_RANGING_VFOV_DEG,
   RANGING_MAX_SAMPLES,
   RANGING_TYPES,
+  DEPTH_FROM_M,
   boxDistance,
+  boxDistanceBy,
+  cameraTilt,
+  fitDepthScale,
   fitRanging,
   footOf,
   rangingProblem,
   DETECTION_TYPES,
   VISION_MAX_BOXES,
+  VISION_MAX_FLOOR,
+  type DepthSample,
   type GwTelemetry,
   type Incident,
   type IncidentStatus,
@@ -218,15 +224,16 @@ export const DRIVE_MIN_INTERVAL_MS = 40;
 /** A gateway's credential to publish one device's video into the platform's media server. */
 export const MEDIA_PUBLISH_TTL_MS = 7 * 24 * 3600_000;
 
-/** A gateway's declared drive limits, kept only when they make sense (caps 0–1, dead-man 100 ms–3 s). */
+/** A gateway's declared drive limits, kept only when they make sense (caps 0–1, dead-man 100 ms–3 s, 1–6 gears). */
 export function sanitizeTeleop(raw: unknown): Device['teleop'] {
-  const t = raw as { maxThrottle?: unknown; maxSteer?: unknown; deadmanMs?: unknown } | undefined;
+  const t = raw as { maxThrottle?: unknown; maxSteer?: unknown; deadmanMs?: unknown; gears?: unknown } | undefined;
   if (!t || typeof t !== 'object') return undefined;
   const frac = (v: unknown) => (typeof v === 'number' && v > 0 && v <= 1 ? v : undefined);
   const maxThrottle = frac(t.maxThrottle);
   const maxSteer = frac(t.maxSteer);
   const deadmanMs = typeof t.deadmanMs === 'number' && t.deadmanMs >= 100 && t.deadmanMs <= 3000 ? t.deadmanMs : undefined;
-  return maxThrottle && maxSteer && deadmanMs ? { maxThrottle, maxSteer, deadmanMs } : undefined;
+  const gears = typeof t.gears === 'number' && Number.isInteger(t.gears) && t.gears >= 1 && t.gears <= 6 ? t.gears : undefined;
+  return maxThrottle && maxSteer && deadmanMs ? { maxThrottle, maxSteer, deadmanMs, ...(gears ? { gears } : {}) } : undefined;
 }
 
 /** A gateway's declared console controls (arm, disarm, mode, gear), kept only when they make sense. */
@@ -269,7 +276,29 @@ export function sanitizeVisionBox(raw: unknown): VisionBox | undefined {
     confidence: typeof b.confidence === 'number' && Number.isFinite(b.confidence) ? Math.round(c01(b.confidence) * 100) / 100 : 1,
     bbox: [r3(x), r3(y), r3(w), r3(h)],
     ...(typeof b.zone === 'string' && b.zone ? { zone: b.zone.slice(0, 60) } : {}),
+    ...(typeof b.depthRel === 'number' && Number.isFinite(b.depthRel) && Math.abs(b.depthRel) < 1e6 ? { depthRel: b.depthRel } : {}),
   };
+}
+
+/** Depth-model floor samples from a gateway: [x, y, value], x and y inside the frame. */
+export function sanitizeFloor(raw: unknown): DepthSample[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: DepthSample[] = [];
+  for (const s of raw.slice(0, VISION_MAX_FLOOR)) {
+    if (!Array.isArray(s) || s.length !== 3 || !s.every((v) => typeof v === 'number' && Number.isFinite(v))) continue;
+    if (s[0] < 0 || s[0] > 1 || s[1] < 0 || s[1] > 1) continue;
+    out.push([s[0], s[1], s[2]]);
+  }
+  return out.length ? out : undefined;
+}
+
+/** Overlap of two boxes [x, y, w, h]: intersection over union, 0–1. */
+function iou(a: readonly number[], b: readonly number[]) {
+  const ix = Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]));
+  const iy = Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
+  const inter = ix * iy;
+  const union = a[2] * a[3] + b[2] * b[3] - inter;
+  return union > 0 ? inter / union : 0;
 }
 
 /** Path of a device's pushed stream on the platform's media server: UGV-01 → ugv-01. */
@@ -323,7 +352,8 @@ export class Platform {
   /** Which AI box analyses which device's video, with the read pass it was given. Memory only. */
   private aiJobs = new Map<string, { orgId: string; box: string; read: string; issued: number }>();
   /** Live drive sessions by device id (memory only: a restart ends them). */
-  private driving = new Map<string, { userId: string; orgId: string; since: number; seq: number; lastAt: number; ownedBefore: boolean }>();
+  /** Open drive sessions by device. `gears`: how many the gateway offers (0: none), fixed for the session. */
+  private driving = new Map<string, { userId: string; orgId: string; since: number; seq: number; lastAt: number; ownedBefore: boolean; gears: number }>();
   /** Geofences per site (loaded on first use; defaults seeded for a new site). */
   private fenceCache = new Map<string, Geofence[]>();
   /** Fence ids each vehicle is currently inside of. */
@@ -2172,7 +2202,8 @@ export class Platform {
     const cur = this.driving.get(d.id);
     if (cur && cur.userId !== a.userId) return deny(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
     if (d.controlOwner && d.controlOwner !== a.userId) return deny(409, 'control_held', `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`);
-    if (!cur) this.driving.set(d.id, { userId: a.userId!, orgId: d.orgId, since: this.now(), seq: -1, lastAt: 0, ownedBefore: d.controlOwner === a.userId });
+    if (!cur)
+      this.driving.set(d.id, { userId: a.userId!, orgId: d.orgId, since: this.now(), seq: -1, lastAt: 0, ownedBefore: d.controlOwner === a.userId, gears: d.teleop.gears ?? 0 });
     d.controlOwner = a.userId;
     d.drivenBy = a.userId;
     tx(this.db, () => {
@@ -2193,7 +2224,7 @@ export class Platform {
   }
 
   /** One stick sample from the driver (WebSocket). False when it is not theirs to send or too soon. */
-  drive(a: Actor, msg: { deviceId?: unknown; seq?: unknown; throttle?: unknown; steer?: unknown }): boolean {
+  drive(a: Actor, msg: { deviceId?: unknown; seq?: unknown; throttle?: unknown; steer?: unknown; gear?: unknown }): boolean {
     const id = String(msg.deviceId ?? '');
     const cur = this.driving.get(id);
     if (!cur || cur.userId !== a.userId || cur.orgId !== a.orgId) return false;
@@ -2202,9 +2233,11 @@ export class Platform {
     const now = this.now();
     if (now - cur.lastAt < DRIVE_MIN_INTERVAL_MS) return false;
     const clamp = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0);
+    // A gear only when the gateway offers that many; anything else is dropped (the gear stays where it is).
+    const gear = typeof msg.gear === 'number' && Number.isInteger(msg.gear) && msg.gear >= 1 && msg.gear <= cur.gears ? msg.gear : undefined;
     cur.seq = seq;
     cur.lastAt = now;
-    return this.gateways.send(cur.orgId, id, { t: 'drive', deviceId: id, seq, throttle: clamp(msg.throttle), steer: clamp(msg.steer), at: now });
+    return this.gateways.send(cur.orgId, id, { t: 'drive', deviceId: id, seq, throttle: clamp(msg.throttle), steer: clamp(msg.steer), at: now, ...(gear ? { gear } : {}) });
   }
 
   /** The driver's console went away: stop everything they were driving. */
@@ -2600,14 +2633,18 @@ export class Platform {
     const now = this.now();
     const px = (v: unknown) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 16384 ? (v as number) : undefined);
     const aspect = px(m.width) && px(m.height) ? px(m.width)! / px(m.height)! : 16 / 9;
-    // Distance to whoever stands in a box, from the camera's ranging (never from the gateway).
+    // Distance to whoever stands in a box, from the camera's ranging (never from the gateway): from
+    // the feet up close; far away, or with the feet out of view, from the AI box's depth model scaled
+    // this frame against the floor the ranging can measure.
     const { ranging, gimbalPitch } = this.rangingFor(d);
+    const floor = ranging ? sanitizeFloor(m.floor) : undefined;
+    const fit = ranging && floor ? fitDepthScale(floor, aspect, ranging.heightM, cameraTilt(ranging, gimbalPitch), ranging.vfovDeg) : undefined;
     const boxes = (Array.isArray(m.boxes) ? m.boxes.slice(0, VISION_MAX_BOXES) : [])
       .map(sanitizeVisionBox)
       .filter((b): b is VisionBox => !!b)
-      .map((b) => {
-        const distM = (RANGING_TYPES as readonly string[]).includes(b.type) ? boxDistance(b.bbox, aspect, ranging, gimbalPitch) : undefined;
-        return distM === undefined ? b : { ...b, distM };
+      .map(({ depthRel, ...b }): VisionBox => {
+        const got = (RANGING_TYPES as readonly string[]).includes(b.type) ? boxDistanceBy(b.bbox, aspect, ranging, gimbalPitch, { rel: depthRel, fit }) : undefined;
+        return got ? { ...b, distM: got.m, distBy: got.by } : b;
       });
     this.lastBoxes.set(d.id, { at: now, aspect, boxes });
     // An empty list (the last box left) always goes through, so the boxes on screen are cleared.
@@ -2632,10 +2669,16 @@ export class Platform {
         // How far away it was, from the camera's ranging (the server's estimate, not the gateway's).
         const { ranging, gimbalPitch } = this.rangingFor(d);
         const bbox = e.detection.bbox;
-        const distanceM =
+        let distanceM =
           ranging && Array.isArray(bbox) && (RANGING_TYPES as readonly string[]).includes(e.detection.type)
             ? boxDistance(bbox, this.lastBoxes.get(d.id)?.aspect ?? 16 / 9, ranging, gimbalPitch)
             : undefined;
+        // Far away or feet out of view: the live box the depth model measured, if this is one of them.
+        const last = this.lastBoxes.get(d.id);
+        if ((distanceM === undefined || distanceM > DEPTH_FROM_M) && Array.isArray(bbox) && last && this.now() - last.at < 3000) {
+          const same = last.boxes.filter((b) => b.distBy === 'depth' && b.distM !== undefined && iou(b.bbox, bbox) >= 0.5).sort((a, b) => iou(b.bbox, bbox) - iou(a.bbox, bbox))[0];
+          if (same) distanceM = same.distM;
+        }
         const { distanceM: _fromGateway, ...attributes } = e.detection.attributes ?? {};
         // The camera speaks for itself: a system actor named after the device raises the detection.
         this.ingestDetection(this.systemActor(orgId, 'system', d.id), {

@@ -7,7 +7,7 @@
 
 .drive-pad {
   position: relative;
-  width: min(200px, 100%);
+  width: min(12.5rem, 100%); /* 200px at the 16px reference size; grows with the console's text */
   aspect-ratio: 1;
   margin: 2px auto 10px;
   border-radius: 50%;
@@ -23,15 +23,23 @@
 .drive-axis.v { top: 8%; bottom: 8%; left: 50%; width: 1px; }
 .drive-knob {
   position: absolute;
-  width: 46px;
-  height: 46px;
-  margin: -23px 0 0 -23px;
+  width: 2.875rem;
+  height: 2.875rem;
+  margin: -1.4375rem 0 0 -1.4375rem;
   border-radius: 50%;
   background: var(--cyan);
   box-shadow: 0 0 14px var(--hud-glow, rgba(0, 200, 255, 0.4));
   pointer-events: none;
   transition: left 60ms linear, top 60ms linear;
 }
+
+/* Speed and gear buttons while driving. */
+.drive-choice { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.drive-choice small { font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin-right: 4px; min-width: 4.5em; }
+.drive-choice button { min-width: 44px; padding-inline: 8px; }
+/* The picked speed and gear must read at a glance in every look (beats the themes' .btn-secondary). */
+:root .app :is(.drive-choice, .vc-gears) button[aria-pressed='true'] { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 700; }
+.drive-choice em { font-size: 0.72rem; font-style: normal; color: var(--text-3); }
 
 .drive-read { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
 .drive-read span { display: flex; flex-direction: column; align-items: center; padding: 5px 0; border: 1px solid var(--line); border-radius: 6px; }

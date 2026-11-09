@@ -122,6 +122,13 @@ fresh telemetry and no running mission, and then forwards their stick samples (a
 `apps/gateway/src/drive.ts` (`DriveState`) implements the ordering, dead-man and centring rules; the MAVLink
 adapter turns samples into `RC_CHANNELS_OVERRIDE` on the steering and throttle channels only.
 
+Gears (optional): an adapter that declares `teleop.gears: n` gets gear buttons on the drive panel, and samples may
+carry `"gear": 1…n` (slowest first; the server drops any other value). Absent means "leave the gear where it is". A
+gear picked during a drive holds until the drive ends. The MAVLink adapter then also overrides `teleop.gearChannel`
+with `teleop.gears[gear − 1]`, and releases it with the sticks. Without a hand-held remote (`noRemote`), the gear
+sets the virtual remote's gear instead, which stays after the drive. The console's speed buttons (30 / 60 / 100 %)
+scale `throttle` before it is sent, so they never exceed the adapter's own `maxThrottle`.
+
 ## 5. Events
 
 `kind` is one of `checkpoint`, `route_complete`, `snapshot`, `failsafe_stop` or `fault`. A `snapshot` can

@@ -112,7 +112,7 @@ export interface Device {
    */
   noFix?: boolean;
   /** Can be driven live from the console, with these adapter limits (declared by the gateway). */
-  teleop?: { maxThrottle: number; maxSteer: number; deadmanMs: number };
+  teleop?: { maxThrottle: number; maxSteer: number; deadmanMs: number; gears?: number };
   /** Arm, disarm, MANUAL/HOLD and gear from the console (declared by the gateway; see VehicleControlInfo). */
   vehicleControl?: VehicleControlInfo;
   /** User driving it live right now (drive session), if any. */

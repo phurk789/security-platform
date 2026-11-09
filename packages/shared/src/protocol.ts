@@ -82,6 +82,11 @@ export interface TeleopLimits {
   maxSteer: number;
   /** The vehicle stops when no stick update arrived for this long (ms). */
   deadmanMs: number;
+  /**
+   * Gears the driver may pick while driving (1…gears, slowest first; see SrvDrive.gear). UGV-01: the RCU-ND motor
+   * board's speed input on RC channel 11. Absent: no gear buttons.
+   */
+  gears?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,8 +323,15 @@ export interface VisionBox {
   bbox: [number, number, number, number];
   /** Image zone it is in, by name. */
   zone?: string;
-  /** Estimated distance from the camera, metres (set by the server from the camera's ranging; feet in view). */
+  /** Estimated distance from the camera, metres (set by the server from the camera's ranging). */
   distM?: number;
+  /** How distM was found: from the feet on the floor, or from the depth model scaled against the floor. */
+  distBy?: 'floor' | 'depth';
+  /**
+   * The AI box's depth-model value for this box: no unit, bigger = nearer. Gateway to server only:
+   * the server scales it with the frame's `floor` samples into distM and drops it.
+   */
+  depthRel?: number;
 }
 
 /**
@@ -335,10 +347,14 @@ export interface GwTracks {
   width?: number;
   height?: number;
   boxes: VisionBox[];
+  /** Depth-model samples of the floor in this frame, [x, y, value] (frame fractions): the server scales `depthRel` with them. */
+  floor?: [number, number, number][];
 }
 
 /** Most boxes one tracks message may carry. */
 export const VISION_MAX_BOXES = 30;
+/** Most floor samples one tracks message may carry. */
+export const VISION_MAX_FLOOR = 120;
 
 /** Gateway → server: how a vehicle control request ended. `ok` only when the vehicle accepted it. */
 export interface GwVehicleControlResult {
@@ -422,6 +438,11 @@ export interface SrvDrive {
   steer: number;
   /** Server time when it was forwarded (ms). */
   at: number;
+  /**
+   * Gear the driver picked (1…TeleopLimits.gears). Absent: leave the gear where it is (the remote's switch, or the
+   * virtual remote's current gear). A gear picked during a drive holds until the drive ends.
+   */
+  gear?: number;
   /** Stop now and give control back to the remote control. */
   release?: boolean;
 }
@@ -655,6 +676,8 @@ export interface ConsoleDrive {
   seq: number;
   throttle: number;
   steer: number;
+  /** Gear picked on the drive panel, if any (see SrvDrive.gear). */
+  gear?: number;
 }
 
 export interface UserAdminView extends User {
