@@ -19,6 +19,7 @@ need_root() {
 
 # The Pi's Ethernet port on 192.168.144.0/24 (camera .25), never the default route: the internet stays on 4G or
 # Wi-Fi. Refuses when this SSH session itself comes in over that port (the change would cut it off).
+# autoconnect-retries 0: NetworkManager keeps retrying after the cable is moved (its default gives up after 4 tries).
 siyi_lan() {
   local ip="${1:-192.168.144.101}" ifname="${2:-eth0}" last
   if ! [[ $ip =~ ^192\.168\.144\.([0-9]{1,3})$ ]] || [ "${BASH_REMATCH[1]}" -lt 2 ] || [ "${BASH_REMATCH[1]}" -gt 254 ]; then
@@ -39,7 +40,7 @@ siyi_lan() {
   fi
   nmcli connection delete siyi-lan >/dev/null 2>&1 || true
   nmcli connection add type ethernet ifname "$ifname" con-name siyi-lan autoconnect yes connection.autoconnect-priority 100 \
-    ipv4.method manual ipv4.addresses "$ip/24" ipv4.never-default yes ipv6.method disabled >/dev/null
+    connection.autoconnect-retries 0 ipv4.method manual ipv4.addresses "$ip/24" ipv4.never-default yes ipv6.method disabled >/dev/null
   if nmcli connection up siyi-lan >/dev/null 2>&1; then
     echo "พอร์ต $ifname = $ip (เส้นทางอินเทอร์เน็ตไม่เปลี่ยน)"
   else

@@ -6,7 +6,7 @@
 //    which the edge PC installs separately (`npm i onnxruntime-node`) along with the model file;
 //  - http: an AI service next to the gateway (TensorRT on a Jetson) that takes a JPEG and answers boxes.
 import { createRequire } from 'node:module';
-import type { DetectionType } from '@13store/shared';
+import { VISION_MAX_FLOOR, type DetectionType } from '@13store/shared';
 import { boxIoU, components, encodeJpeg, letterbox, toGrey, type Box, type Frame, type GreyFrame } from './frames';
 
 export interface Candidate {
@@ -16,12 +16,16 @@ export interface Candidate {
   /** Model class or other label (e.g. "car", "hotspot"). */
   label?: string;
   attributes?: { temperatureC?: number; count?: number; label?: string };
+  /** The AI service's depth-model value for this box (no unit; bigger = nearer), when it runs one. */
+  depthRel?: number;
 }
 
 export interface Detector {
   readonly name: string;
   /** Candidates in this frame. May return [] while warming up. */
   detect(frame: Frame, at: number): Promise<Candidate[]> | Candidate[];
+  /** Depth-model samples of the floor from the last detect(), [x, y, value], when the detector has them. */
+  floor?(): [number, number, number][] | undefined;
   /** For the health report. */
   info(): Record<string, unknown>;
 }
@@ -345,7 +349,25 @@ export interface HttpDetectorConfig {
 interface HttpAnswer {
   model?: unknown;
   ms?: unknown;
-  detections?: { label?: unknown; confidence?: unknown; box?: unknown; bbox?: unknown }[];
+  detections?: { label?: unknown; confidence?: unknown; box?: unknown; bbox?: unknown; depth?: unknown }[];
+  /** With a depth model: floor samples [x, y, value] and the depth model's name and time. */
+  floor?: unknown;
+  depthModel?: unknown;
+  depthMs?: unknown;
+}
+
+/** Floor samples from an AI service answer: [x, y, value] with x, y inside the frame, at most VISION_MAX_FLOOR. */
+export function floorSamples(raw: unknown): [number, number, number][] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: [number, number, number][] = [];
+  for (const s of raw) {
+    if (!Array.isArray(s) || s.length !== 3 || !s.every((v) => typeof v === 'number' && Number.isFinite(v))) continue;
+    const [x, y, v] = s as number[];
+    if (x < 0 || x > 1 || y < 0 || y > 1) continue;
+    out.push([x, y, v]);
+    if (out.length >= VISION_MAX_FLOOR) break;
+  }
+  return out.length ? out : undefined;
 }
 
 /**
@@ -361,6 +383,9 @@ export class HttpDetector implements Detector {
   private model?: string;
   private error?: string;
   private pausedUntil = 0;
+  private depthModel?: string;
+  private depthMs?: number;
+  private lastFloor?: [number, number, number][];
   readonly classMap: Record<string, DetectionType>;
   readonly include: Set<string>;
 
@@ -401,6 +426,9 @@ export class HttpDetector implements Detector {
     this.roundTripMs = this.now() - t0;
     if (typeof answer.ms === 'number' && Number.isFinite(answer.ms)) this.lastMs = Math.round(answer.ms * 10) / 10;
     if (typeof answer.model === 'string') this.model = answer.model.slice(0, 80);
+    this.depthModel = typeof answer.depthModel === 'string' ? answer.depthModel.slice(0, 80) : undefined;
+    this.depthMs = typeof answer.depthMs === 'number' && Number.isFinite(answer.depthMs) ? Math.round(answer.depthMs * 10) / 10 : undefined;
+    this.lastFloor = floorSamples(answer.floor);
     const min = this.cfg.minConfidence ?? 0.35;
     const out: Candidate[] = [];
     for (const d of answer.detections) {
@@ -415,13 +443,34 @@ export class HttpDetector implements Detector {
       const y1 = Math.min(1, y + h);
       if (x1 <= x0 || y1 <= y0) continue;
       const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
-      out.push({ type: this.classMap[label] ?? 'other', confidence: Math.round(conf * 1000) / 1000, bbox: [r4(x0), r4(y0), r4(x1 - x0), r4(y1 - y0)], label, attributes: { label } });
+      const depthRel = typeof d.depth === 'number' && Number.isFinite(d.depth) ? d.depth : undefined;
+      out.push({
+        type: this.classMap[label] ?? 'other',
+        confidence: Math.round(conf * 1000) / 1000,
+        bbox: [r4(x0), r4(y0), r4(x1 - x0), r4(y1 - y0)],
+        label,
+        attributes: { label },
+        ...(depthRel !== undefined ? { depthRel } : {}),
+      });
     }
     return out;
   }
 
+  floor() {
+    return this.lastFloor;
+  }
+
   info() {
-    return { url: this.cfg.url, model: this.model, frames: this.frames, inferenceMs: this.lastMs, roundTripMs: this.roundTripMs, error: this.error, classes: [...this.include] };
+    return {
+      url: this.cfg.url,
+      model: this.model,
+      frames: this.frames,
+      inferenceMs: this.lastMs,
+      roundTripMs: this.roundTripMs,
+      error: this.error,
+      classes: [...this.include],
+      ...(this.depthModel ? { depthModel: this.depthModel, depthMs: this.depthMs } : {}),
+    };
   }
 }
 

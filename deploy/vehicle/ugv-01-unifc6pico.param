@@ -98,3 +98,15 @@ FENCE_ACTION,2
 # The board takes the first GPS-protocol port as GPS 1, so the empty GPS1 port (SERIAL3) is off.
 SERIAL3_PROTOCOL,-1
 SERIAL4_PROTOCOL,5
+#
+# LAN port: keep it OFF. Connect the Raspberry Pi to the board's USB-C port instead (/dev/ttyACM0).
+# Tried 2026-11-09 with NET_ENABLE 1, as a UDP server at 192.168.144.102:14550 for the Pi. The Pi did reach the
+# board over LAN, but the board then misbehaved:
+#   - boot took 2-3 minutes ("Initialising ArduPilot" every 15 s);
+#   - it stopped answering parameter requests (from the remote's UniGCS and from USB alike);
+#   - arming failed with "PreArm: Logging failed" and "AP_Logger: stuck thread".
+# With NET_ENABLE 0 the same board and SD card boot in about a minute, answer parameters, log, and arm.
+# For reference only, the LAN values that were used (NET_ENABLE needs a reboot before NET_* appear):
+#   NET_DHCP 0, NET_IPADDR0-3 192.168.144.102, NET_NETMASK 24, NET_P1_TYPE 2 (UDP server), NET_P1_PROTOCOL 2,
+#   NET_P1_PORT 14550; the Pi's site.json link was { "mode": "client", "host": "192.168.144.102", "port": 14550 }.
+NET_ENABLE,0

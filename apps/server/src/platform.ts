@@ -58,12 +58,18 @@ import {
   DEFAULT_RANGING_VFOV_DEG,
   RANGING_MAX_SAMPLES,
   RANGING_TYPES,
+  DEPTH_FROM_M,
   boxDistance,
+  boxDistanceBy,
+  cameraTilt,
+  fitDepthScale,
   fitRanging,
   footOf,
   rangingProblem,
   DETECTION_TYPES,
   VISION_MAX_BOXES,
+  VISION_MAX_FLOOR,
+  type DepthSample,
   type GwTelemetry,
   type Incident,
   type IncidentStatus,
@@ -269,7 +275,29 @@ export function sanitizeVisionBox(raw: unknown): VisionBox | undefined {
     confidence: typeof b.confidence === 'number' && Number.isFinite(b.confidence) ? Math.round(c01(b.confidence) * 100) / 100 : 1,
     bbox: [r3(x), r3(y), r3(w), r3(h)],
     ...(typeof b.zone === 'string' && b.zone ? { zone: b.zone.slice(0, 60) } : {}),
+    ...(typeof b.depthRel === 'number' && Number.isFinite(b.depthRel) && Math.abs(b.depthRel) < 1e6 ? { depthRel: b.depthRel } : {}),
   };
+}
+
+/** Depth-model floor samples from a gateway: [x, y, value], x and y inside the frame. */
+export function sanitizeFloor(raw: unknown): DepthSample[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: DepthSample[] = [];
+  for (const s of raw.slice(0, VISION_MAX_FLOOR)) {
+    if (!Array.isArray(s) || s.length !== 3 || !s.every((v) => typeof v === 'number' && Number.isFinite(v))) continue;
+    if (s[0] < 0 || s[0] > 1 || s[1] < 0 || s[1] > 1) continue;
+    out.push([s[0], s[1], s[2]]);
+  }
+  return out.length ? out : undefined;
+}
+
+/** Overlap of two boxes [x, y, w, h]: intersection over union, 0–1. */
+function iou(a: readonly number[], b: readonly number[]) {
+  const ix = Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]));
+  const iy = Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
+  const inter = ix * iy;
+  const union = a[2] * a[3] + b[2] * b[3] - inter;
+  return union > 0 ? inter / union : 0;
 }
 
 /** Path of a device's pushed stream on the platform's media server: UGV-01 → ugv-01. */
@@ -2600,14 +2628,18 @@ export class Platform {
     const now = this.now();
     const px = (v: unknown) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 16384 ? (v as number) : undefined);
     const aspect = px(m.width) && px(m.height) ? px(m.width)! / px(m.height)! : 16 / 9;
-    // Distance to whoever stands in a box, from the camera's ranging (never from the gateway).
+    // Distance to whoever stands in a box, from the camera's ranging (never from the gateway): from
+    // the feet up close; far away, or with the feet out of view, from the AI box's depth model scaled
+    // this frame against the floor the ranging can measure.
     const { ranging, gimbalPitch } = this.rangingFor(d);
+    const floor = ranging ? sanitizeFloor(m.floor) : undefined;
+    const fit = ranging && floor ? fitDepthScale(floor, aspect, ranging.heightM, cameraTilt(ranging, gimbalPitch), ranging.vfovDeg) : undefined;
     const boxes = (Array.isArray(m.boxes) ? m.boxes.slice(0, VISION_MAX_BOXES) : [])
       .map(sanitizeVisionBox)
       .filter((b): b is VisionBox => !!b)
-      .map((b) => {
-        const distM = (RANGING_TYPES as readonly string[]).includes(b.type) ? boxDistance(b.bbox, aspect, ranging, gimbalPitch) : undefined;
-        return distM === undefined ? b : { ...b, distM };
+      .map(({ depthRel, ...b }): VisionBox => {
+        const got = (RANGING_TYPES as readonly string[]).includes(b.type) ? boxDistanceBy(b.bbox, aspect, ranging, gimbalPitch, { rel: depthRel, fit }) : undefined;
+        return got ? { ...b, distM: got.m, distBy: got.by } : b;
       });
     this.lastBoxes.set(d.id, { at: now, aspect, boxes });
     // An empty list (the last box left) always goes through, so the boxes on screen are cleared.
@@ -2632,10 +2664,16 @@ export class Platform {
         // How far away it was, from the camera's ranging (the server's estimate, not the gateway's).
         const { ranging, gimbalPitch } = this.rangingFor(d);
         const bbox = e.detection.bbox;
-        const distanceM =
+        let distanceM =
           ranging && Array.isArray(bbox) && (RANGING_TYPES as readonly string[]).includes(e.detection.type)
             ? boxDistance(bbox, this.lastBoxes.get(d.id)?.aspect ?? 16 / 9, ranging, gimbalPitch)
             : undefined;
+        // Far away or feet out of view: the live box the depth model measured, if this is one of them.
+        const last = this.lastBoxes.get(d.id);
+        if ((distanceM === undefined || distanceM > DEPTH_FROM_M) && Array.isArray(bbox) && last && this.now() - last.at < 3000) {
+          const same = last.boxes.filter((b) => b.distBy === 'depth' && b.distM !== undefined && iou(b.bbox, bbox) >= 0.5).sort((a, b) => iou(b.bbox, bbox) - iou(a.bbox, bbox))[0];
+          if (same) distanceM = same.distM;
+        }
         const { distanceM: _fromGateway, ...attributes } = e.detection.attributes ?? {};
         // The camera speaks for itself: a system actor named after the device raises the detection.
         this.ingestDetection(this.systemActor(orgId, 'system', d.id), {

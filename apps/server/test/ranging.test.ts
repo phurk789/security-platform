@@ -164,4 +164,58 @@ describe('distance to people', () => {
     const second = ((await sup.get('/detections?limit=5')).body as any[]).find((d) => d.deviceId === V && d.type === 'person');
     expect(second.attributes?.distanceM).toBeUndefined();
   });
+
+  it('measures people far away, or with their feet out of view, from the AI box depth model scaled against the floor', async () => {
+    expect((await sup.put(`/devices/${V}/ranging`, { heightM: 0.5, tiltDeg: 8, vfovDeg: 50 })).status).toBe(200);
+    // The depth model's value is A/z + B for some A, B the server does not know (z: along the camera axis).
+    const [A, B, H, T, tv] = [5.3, 0.7, 0.5, 8, Math.tan(rad(25))];
+    const rayAt = (x: number, y: number) => {
+      const X = 2 * (x - 0.5) * tv * ASPECT;
+      const Y = 2 * (y - 0.5) * tv;
+      return { X, down: Y * Math.cos(rad(T)) + Math.sin(rad(T)), fwd: Math.cos(rad(T)) - Y * Math.sin(rad(T)) };
+    };
+    const floor: number[][] = [];
+    for (let y = 0.55; y <= 0.97; y += 0.06) for (let x = 0.1; x <= 0.9; x += 0.1) floor.push([x, y, (A * rayAt(x, y).down) / H + B]);
+    // Someone D metres away, the depth value read where the platform looks in their box.
+    const relAt = (bbox: number[], D: number) => {
+      const r = rayAt(bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] * 0.6);
+      return (A * Math.hypot(r.X, r.fwd)) / D + B;
+    };
+    const far = personAt(foot(20, H, T), 7);
+    const cut = { id: 8, type: 'person', confidence: 0.8, bbox: [0.42, 0.45, 0.16, 0.55] };
+    const con = await consoleSocket(srv.wsUrl, sup.token);
+    try {
+      const last = () => con.events.filter((e) => e.type === 'tracks' && e.deviceId === V).at(-1);
+      box.send(
+        JSON.stringify({
+          t: 'tracks',
+          deviceId: V,
+          at: Date.now(),
+          width: 960,
+          height: 540,
+          boxes: [{ ...far, depthRel: relAt(far.bbox, 20) }, { ...cut, depthRel: relAt(cut.bbox, 2.2) }],
+          floor,
+        }),
+      );
+      await waitFor(() => last()?.boxes.length === 2);
+      const [b1, b2] = last().boxes;
+      expect(b1).toMatchObject({ id: 7, distM: 20, distBy: 'depth' });
+      expect(b2).toMatchObject({ id: 8, distBy: 'depth' });
+      expect(b2.distM).toBeCloseTo(2.2, 1);
+      // The raw depth value stays on the server.
+      expect(b1.depthRel).toBeUndefined();
+      // A detection of the cut-off person gets the depth model's distance from the live box.
+      box.send(JSON.stringify({ t: 'event', deviceId: V, kind: 'detection', at: Date.now(), detection: { type: 'loitering', confidence: 0.85, bbox: cut.bbox } }));
+      await waitFor(async () => ((await sup.get('/detections?limit=5')).body as any[]).some((d) => d.deviceId === V && d.type === 'loitering'));
+      const det = ((await sup.get('/detections?limit=5')).body as any[]).find((d) => d.deviceId === V && d.type === 'loitering');
+      expect(det.attributes.distanceM).toBeCloseTo(2.2, 1);
+      // Floor samples that do not fit a floor (a cluttered picture): no depth distances, feet only.
+      await new Promise((r) => setTimeout(r, 150)); // live boxes go out at most ten times a second
+      box.send(JSON.stringify({ t: 'tracks', deviceId: V, at: Date.now(), width: 960, height: 540, boxes: [{ ...cut, depthRel: 3 }], floor: floor.map(([x, y]) => [x, y, Math.random()]) }));
+      await waitFor(() => last()?.boxes.length === 1);
+      expect(last().boxes[0].distM).toBeUndefined();
+    } finally {
+      con.close();
+    }
+  }, 30_000);
 });

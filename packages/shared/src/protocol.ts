@@ -318,8 +318,15 @@ export interface VisionBox {
   bbox: [number, number, number, number];
   /** Image zone it is in, by name. */
   zone?: string;
-  /** Estimated distance from the camera, metres (set by the server from the camera's ranging; feet in view). */
+  /** Estimated distance from the camera, metres (set by the server from the camera's ranging). */
   distM?: number;
+  /** How distM was found: from the feet on the floor, or from the depth model scaled against the floor. */
+  distBy?: 'floor' | 'depth';
+  /**
+   * The AI box's depth-model value for this box: no unit, bigger = nearer. Gateway to server only:
+   * the server scales it with the frame's `floor` samples into distM and drops it.
+   */
+  depthRel?: number;
 }
 
 /**
@@ -335,10 +342,14 @@ export interface GwTracks {
   width?: number;
   height?: number;
   boxes: VisionBox[];
+  /** Depth-model samples of the floor in this frame, [x, y, value] (frame fractions): the server scales `depthRel` with them. */
+  floor?: [number, number, number][];
 }
 
 /** Most boxes one tracks message may carry. */
 export const VISION_MAX_BOXES = 30;
+/** Most floor samples one tracks message may carry. */
+export const VISION_MAX_FLOOR = 120;
 
 /** Gateway → server: how a vehicle control request ended. `ok` only when the vehicle accepted it. */
 export interface GwVehicleControlResult {

@@ -185,8 +185,32 @@ touches the bottom edge (feet cut off), at or above the horizon, or beyond 40 m.
 - **Permission and record:** `camera.control`; audited as `ranging.set`, `ranging.calibrate`,
   `ranging.clear`.
 - **Accuracy:** with a camera half a metre up, about 5 % at 2 m, 10–15 % at 5 m and 25–30 % at
-  10 m (a pixel or two at the feet, a fraction of a degree of tilt). A depth model calibrated
-  against the floor is the planned next step for far away.
+  10 m (a pixel or two at the feet, a fraction of a degree of tilt).
+
+### Far away: a depth model scaled against the floor
+
+With `--depth` (Depth Anything V2 **Small**, Apache-2.0, ONNX) `vision_server.py` also answers how
+near things are, without a unit: `depth` on each detection (the 85th percentile over the body,
+centred where `depthPointOf()` looks) and `floor`, about 70 `[x, y, value]` samples from the lower
+picture (none under a detection). The gateway passes them on (`VisionBox.depthRel`,
+`GwTracks.floor`); the server keeps them to itself.
+
+The model's value is, up to noise, `a/z + b` with `z` along the camera axis and `a`, `b` changing
+from frame to frame. The floor is the ruler: the camera's ranging gives `z` for every floor sample
+(0.6–15 m), so a straight-line fit of value against `1/z` (outliers such as things standing on the
+floor dropped; at least 6 samples spanning distances; mean error under 20 %) gives `a`, `b` for that
+frame (`fitDepthScale`). A box then gets `z = a/(value − b)` and its ground distance along its ray
+(`depthDistance`). `boxDistanceBy` keeps the feet up to 8 m (`DEPTH_FROM_M`) and uses the depth model
+beyond, or when the feet are out of the picture; live boxes say which (`distBy`), and a detection
+takes the distance of the matching live box.
+
+- **Cost:** the depth map is made every 3rd frame (`--depth-every`) at 518 px on the long side
+  (`--depth-size`; 364 lost a 0.5 m-wide person at 14 m against the wall behind).
+- **Checked on a rendered scene with known geometry:** 9 m → 8.7, 14 m → 14, 18 m → 17, 25 m → 21
+  (beyond the floor used for the fit the model reads near), 1.5 m with the feet cut off → 1.3.
+  Not yet on the real camera.
+- **Falls back to the feet** when the fit fails (a cluttered floor) or the depth distance makes no
+  sense (someone far behind a nearer person reads as the nearer one).
 
 ## Configuration
 

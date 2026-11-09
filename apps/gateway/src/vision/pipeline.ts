@@ -61,6 +61,8 @@ export interface LiveBoxes {
   width: number;
   height: number;
   boxes: VisionBox[];
+  /** Depth-model samples of the floor (from an AI service with a depth model), for the server's distances. */
+  floor?: [number, number, number][];
 }
 
 export interface VisionHealth {
@@ -275,11 +277,14 @@ export class VisionPipeline {
         confidence: Math.round(c.confidence * 100) / 100,
         bbox: c.bbox.map(r3) as VisionBox['bbox'],
         ...(c.zone ? { zone: c.zone.name } : {}),
+        ...(typeof c.depthRel === 'number' ? { depthRel: Math.round(c.depthRel * 1e4) / 1e4 } : {}),
       };
     });
     this.lastBoxesAt = at;
     this.hadBoxes = any;
-    this.out.onBoxes({ at, width: frame.width, height: frame.height, boxes });
+    // The floor samples go with the boxes: the server scales their depth values with them.
+    const floor = any ? this.detectors.map((d) => d.floor?.()).find((f) => f?.length) : undefined;
+    this.out.onBoxes({ at, width: frame.width, height: frame.height, boxes, ...(floor ? { floor } : {}) });
   }
 
   private crowds(cands: (Candidate & { zone?: ImageZone })[]): (Candidate & { zone?: ImageZone })[] {

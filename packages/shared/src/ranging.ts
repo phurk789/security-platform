@@ -182,3 +182,138 @@ export function rangingProblem(r: { heightM?: unknown; tiltDeg?: unknown; vfovDe
 export function fmtDistance(m: number) {
   return `${roundDistance(m)} m`;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Far away: a depth model scaled against the floor.
+//
+// The AI box can run a single-picture depth model (Depth Anything V2 Small). It says what is nearer
+// and what is further, not how many metres: its value `rel` is, up to noise, a·(1/z) + b, where z is
+// the distance along the camera axis and a, b change from frame to frame. The floor is the ruler:
+// from the camera's height and tilt the platform knows z for every floor pixel, so a straight-line
+// fit of `rel` against 1/z over floor samples gives a and b for that frame, and then any box's z.
+// The floor method stays in charge up close (it is exact there); the depth model takes over far
+// away and when the feet are out of the picture.
+
+/** A floor sample from the depth model: where in the picture (fractions, from the top-left) and its value there. */
+export type DepthSample = readonly [x: number, y: number, rel: number];
+
+/** The depth model's values in metres for one frame: rel ≈ a / z + b. */
+export interface DepthFit {
+  a: number;
+  b: number;
+  /** Floor samples the fit kept. */
+  n: number;
+  /** Mean error of the fit over those samples, percent of their distance. */
+  errPct: number;
+}
+
+/** Beyond this the floor method gets coarse with a low camera: the depth model's distance is used. */
+export const DEPTH_FROM_M = 8;
+/** Floor samples used for the fit: near enough to be exact, far enough to see the slope. */
+const FIT_MIN_M = 0.6;
+const FIT_MAX_M = 15;
+/** A fit worse than this is not used. */
+const FIT_MAX_ERR_PCT = 20;
+
+/** The camera ray through a picture point: lateral and forward share of the ground distance, and the floor depth there. */
+function ray(x: number, y: number, aspect: number, tiltDeg: number, vfovDeg: number) {
+  const tv = Math.tan(rad(vfovDeg) / 2);
+  const X = 2 * (x - 0.5) * tv * aspect;
+  const Y = 2 * (y - 0.5) * tv;
+  const t = rad(tiltDeg);
+  return { X, down: Y * Math.cos(t) + Math.sin(t), fwd: Math.cos(t) - Y * Math.sin(t), norm: Math.hypot(X, Y, 1) };
+}
+
+/**
+ * The depth model's scale for this frame from floor samples, or undefined when there are too few
+ * usable ones, they do not spread far enough, or they do not line up (a cluttered floor). Things
+ * standing on the floor are dropped as outliers.
+ */
+export function fitDepthScale(samples: readonly DepthSample[], aspect: number, heightM: number, tiltDeg: number, vfovDeg: number): DepthFit | undefined {
+  if (!(heightM > 0) || !(aspect > 0) || !(vfovDeg > 0 && vfovDeg < 179)) return undefined;
+  // u = 1/z of each floor sample the camera geometry can place on the floor.
+  let pts: { u: number; rel: number }[] = [];
+  for (const [x, y, rel] of samples) {
+    if (![x, y, rel].every(Number.isFinite)) continue;
+    const r = ray(x, y, aspect, tiltDeg, vfovDeg);
+    if (r.down <= Math.sin(rad(1)) * r.norm) continue;
+    const z = heightM / r.down;
+    const ground = z * Math.hypot(r.X, r.fwd);
+    if (ground < FIT_MIN_M || ground > FIT_MAX_M) continue;
+    pts.push({ u: 1 / z, rel });
+  }
+  const line = (p: typeof pts) => {
+    const n = p.length;
+    const mu = p.reduce((s, q) => s + q.u, 0) / n;
+    const mr = p.reduce((s, q) => s + q.rel, 0) / n;
+    let sxy = 0;
+    let sxx = 0;
+    for (const q of p) {
+      sxy += (q.u - mu) * (q.rel - mr);
+      sxx += (q.u - mu) ** 2;
+    }
+    const a = sxx > 0 ? sxy / sxx : NaN;
+    return { a, b: mr - a * mu };
+  };
+  for (let round = 0; round < 3; round++) {
+    if (pts.length < 6) return undefined;
+    const { a, b } = line(pts);
+    if (!(a > 0)) return undefined;
+    // Drop the samples far off the line (a box, a person, a wall at the bottom of the picture).
+    const res = pts.map((q) => Math.abs(q.rel - (a * q.u + b)));
+    const sorted = [...res].sort((m, n) => m - n);
+    const mad = sorted[Math.floor(sorted.length / 2)] || 1e-9;
+    const kept = pts.filter((_, i) => res[i] <= 3 * mad + 1e-9);
+    if (kept.length === pts.length) break;
+    pts = kept;
+  }
+  if (pts.length < 6) return undefined;
+  // The samples must span distances, or the slope means nothing.
+  const us = pts.map((q) => q.u);
+  if (Math.max(...us) / Math.min(...us) < 1.5) return undefined;
+  const { a, b } = line(pts);
+  if (!(a > 0)) return undefined;
+  const errPct = (pts.reduce((s, q) => s + Math.abs((q.rel - b) / a - q.u) / q.u, 0) / pts.length) * 100;
+  if (!(errPct <= FIT_MAX_ERR_PCT)) return undefined;
+  return { a: Math.round(a * 1e4) / 1e4, b: Math.round(b * 1e4) / 1e4, n: pts.length, errPct: Math.round(errPct * 10) / 10 };
+}
+
+/**
+ * Ground distance to something whose depth-model value is `rel`, seen at picture point (x, y), with
+ * this frame's fit. Undefined when the value is beyond the fit (as far as the horizon or further) or
+ * the result is out of range.
+ */
+export function depthDistance(rel: number, at: readonly [number, number], aspect: number, tiltDeg: number, vfovDeg: number, fit: DepthFit): number | undefined {
+  if (!Number.isFinite(rel) || !(fit.a > 0)) return undefined;
+  const u = (rel - fit.b) / fit.a;
+  if (!(u > 0)) return undefined;
+  const r = ray(at[0], at[1], aspect, tiltDeg, vfovDeg);
+  const d = (1 / u) * Math.hypot(r.X, r.fwd);
+  return d >= RANGE_MIN_M && d <= RANGE_MAX_M ? d : undefined;
+}
+
+/** Where in a box the depth model's value is read (vision_server.py samples the middle of the body). */
+export function depthPointOf(bbox: readonly number[]): [number, number] {
+  return [bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] * 0.6];
+}
+
+/**
+ * Distance to whoever is in this box and how it was found: from the feet on the floor up close, from
+ * the depth model (scaled against the floor this frame) far away or when the feet are out of view.
+ */
+export function boxDistanceBy(
+  bbox: readonly number[],
+  aspect: number,
+  r: CameraRanging | undefined,
+  gimbalPitchDeg?: number,
+  depth?: { rel?: number; fit?: DepthFit },
+): { m: number; by: 'floor' | 'depth' } | undefined {
+  if (!r) return undefined;
+  const floor = boxDistance(bbox, aspect, r, gimbalPitchDeg);
+  const far =
+    depth?.fit && typeof depth.rel === 'number' && (floor === undefined || floor > DEPTH_FROM_M)
+      ? depthDistance(depth.rel, depthPointOf(bbox), aspect, cameraTilt(r, gimbalPitchDeg), r.vfovDeg, depth.fit)
+      : undefined;
+  if (far !== undefined && (floor === undefined || far > DEPTH_FROM_M)) return { m: roundDistance(far), by: 'depth' };
+  return floor === undefined ? undefined : { m: floor, by: 'floor' };
+}
