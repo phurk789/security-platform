@@ -123,24 +123,26 @@
 .theme-hud .t3-dev b, .theme-hud .t3-bld b { font-family: var(--hud-font); letter-spacing: 0.04em; }
 .theme-hud .t3-bld { border-color: rgba(56, 225, 255, 0.3); background: rgba(4, 12, 24, 0.72); }
 
-/* ---------- floating layout (wide screens) ---------- */
+/* ---------- floating layout (wide screens) ----------
+   Panel widths are in rem, so they grow and shrink with the console's fluid text size (liquid-glass.css)
+   and keep the same share of the screen on a laptop and on a large monitor. */
 .overview.hud {
-  --view-l: 340px;
-  --view-r: 412px;
+  --view-l: 21.25rem;
+  --view-r: 25.75rem;
   --view-t: 0px;
-  --view-b: 178px;
+  --view-b: 11.125rem;
   display: block;
   position: relative;
   padding: 0;
   min-height: 0;
 }
 .overview.hud .center { position: absolute; inset: 0; z-index: 0; isolation: isolate; border: 0; border-radius: 0; background: #040a14; }
-.overview.hud .hud-left { position: absolute; z-index: 10; top: 12px; left: 12px; bottom: 12px; width: 316px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.overview.hud .hud-left { position: absolute; z-index: 10; top: 12px; left: 12px; bottom: 12px; width: 19.75rem; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 .overview.hud .hud-left .hud-fleet { flex: 0 1 auto; height: auto; max-height: 64%; }
-.overview.hud .hud-left .queue { flex: 1 1 0; height: auto; min-height: 150px; }
+.overview.hud .hud-left .queue { flex: 1 1 0; height: auto; min-height: 9.375rem; }
 .overview.hud .hud-left .inc-card { grid-template-columns: 52px 1fr; gap: 9px; padding: 8px; }
 .overview.hud .hud-left .inc-card .thumb { height: 64px; }
-.overview.hud .ov-right { position: absolute; z-index: 10; top: 12px; right: 12px; bottom: 12px; width: 388px; }
+.overview.hud .ov-right { position: absolute; z-index: 10; top: 12px; right: 12px; bottom: 12px; width: 24.25rem; }
 .overview.hud .hud-bottom { position: absolute; z-index: 9; left: var(--view-l); right: var(--view-r); bottom: 12px; }
 .overview.hud .timeline { padding: 8px 14px 12px; }
 .overview.hud .kpis { left: var(--view-l); top: 12px; max-width: calc(100% - var(--view-l) - var(--view-r) - 230px); }
@@ -153,9 +155,9 @@
 .overview.hud .map > svg { position: absolute; left: var(--view-l); top: 0; width: calc(100% - var(--view-l) - var(--view-r)); height: calc(100% - var(--view-b)); }
 
 @media (max-width: 1500px) {
-  .overview.hud { --view-l: 312px; --view-r: 372px; }
-  .overview.hud .hud-left { width: 288px; }
-  .overview.hud .ov-right { width: 348px; }
+  .overview.hud { --view-l: 19.5rem; --view-r: 23.25rem; }
+  .overview.hud .hud-left { width: 18rem; }
+  .overview.hud .ov-right { width: 21.75rem; }
 }
 
 /* ---------- fleet panel ---------- */
@@ -187,8 +189,8 @@
 .fc-novideo { aspect-ratio: 16 / 9; display: grid; place-items: center; padding: 10px; text-align: center; font-size: 0.75rem; color: var(--text-3); border: 1px dashed var(--line-2); border-radius: 4px; }
 
 .fc-stats { display: grid; grid-template-columns: auto repeat(3, minmax(0, 1fr)); gap: 8px; align-items: center; }
-.fc-ring { position: relative; width: 44px; height: 44px; flex: none; }
-.fc-ring svg { width: 44px; height: 44px; display: block; }
+.fc-ring { position: relative; width: 2.75rem; height: 2.75rem; flex: none; }
+.fc-ring svg { width: 2.75rem; height: 2.75rem; display: block; }
 .fc-ring circle { fill: none; stroke-width: 4; }
 .fc-ring .track { stroke: rgba(255, 255, 255, 0.08); }
 .fc-ring .val { stroke: var(--cyan); stroke-linecap: round; filter: drop-shadow(0 0 3px rgba(56, 225, 255, 0.6)); transition: stroke-dasharray 0.6s; }
@@ -268,7 +270,7 @@ html[lang='th'] .theme-hud .sidenav button { letter-spacing: 0.01em; }
 }
 
 /* rendered vehicle picture on the fleet card */
-.fc-thumb { width: 66px; height: 42px; object-fit: contain; flex: none; border-radius: 5px; background: radial-gradient(60% 70% at 50% 60%, rgba(56, 225, 255, 0.16), transparent 75%); }
+.fc-thumb { width: 4.125rem; height: 2.625rem; object-fit: contain; flex: none; border-radius: 5px; background: radial-gradient(60% 70% at 50% 60%, rgba(56, 225, 255, 0.16), transparent 75%); }
 :root[data-theme='light'] .fc-thumb { background: radial-gradient(60% 70% at 50% 60%, rgba(2, 132, 199, 0.12), transparent 75%); }
 
 /* fleet filter chips (All / UGV / UAV / Online) */
