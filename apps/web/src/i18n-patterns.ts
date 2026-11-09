@@ -132,7 +132,10 @@ const RULES: Rule[] = [
   [/^The vehicle holds (\d+) mission items instead of (\d+)\. Route not started\.$/, (m) => `บนรถมีรายการภารกิจ ${m[1]} รายการ แทนที่จะเป็น ${m[2]} รายการ จึงไม่เริ่มวิ่ง`],
   // Console driving, as the gateway reports it (the line at the top of the Drive panel).
   [/^Not driven from the console yet · steering ch(\d+), throttle ch(\d+)$/, (m) => `ยังไม่ได้ขับจากคอนโซล · เลี้ยว ch${m[1]} · คันเร่ง ch${m[2]}`],
-  [/^Driving from the console · throttle ≤(\d+)% · steering ≤(\d+)%$/, (m) => `กำลังขับจากคอนโซล · คันเร่ง ≤${m[1]}% · เลี้ยว ≤${m[2]}%`],
+  [
+    /^Driving from the console · throttle ≤(\d+)% · steering ≤(\d+)%(?: · gear (\d+) of (\d+)| · (gear on the remote))?$/,
+    (m) => `กำลังขับจากคอนโซล · คันเร่ง ≤${m[1]}% · เลี้ยว ≤${m[2]}%${m[3] ? ` · เกียร์ ${m[3]} จาก ${m[4]}` : m[5] ? ' · เกียร์ตามรีโมต' : ''}`,
+  ],
   [/^Idle, the remote has the sticks \((.+)\)$/, (m, inner) => `ว่าง รีโมตคุมคันบังคับอยู่ (${inner(m[1])})`],
   [/^Idle \((.+)\)$/, (m, inner) => `ว่าง (${inner(m[1])})`],
   [/^Not driving\. (.+)\.$/, (m, inner) => `ไม่ได้ขับ: ${inner(m[1])}`],

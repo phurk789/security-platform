@@ -224,15 +224,16 @@ export const DRIVE_MIN_INTERVAL_MS = 40;
 /** A gateway's credential to publish one device's video into the platform's media server. */
 export const MEDIA_PUBLISH_TTL_MS = 7 * 24 * 3600_000;
 
-/** A gateway's declared drive limits, kept only when they make sense (caps 0–1, dead-man 100 ms–3 s). */
+/** A gateway's declared drive limits, kept only when they make sense (caps 0–1, dead-man 100 ms–3 s, 1–6 gears). */
 export function sanitizeTeleop(raw: unknown): Device['teleop'] {
-  const t = raw as { maxThrottle?: unknown; maxSteer?: unknown; deadmanMs?: unknown } | undefined;
+  const t = raw as { maxThrottle?: unknown; maxSteer?: unknown; deadmanMs?: unknown; gears?: unknown } | undefined;
   if (!t || typeof t !== 'object') return undefined;
   const frac = (v: unknown) => (typeof v === 'number' && v > 0 && v <= 1 ? v : undefined);
   const maxThrottle = frac(t.maxThrottle);
   const maxSteer = frac(t.maxSteer);
   const deadmanMs = typeof t.deadmanMs === 'number' && t.deadmanMs >= 100 && t.deadmanMs <= 3000 ? t.deadmanMs : undefined;
-  return maxThrottle && maxSteer && deadmanMs ? { maxThrottle, maxSteer, deadmanMs } : undefined;
+  const gears = typeof t.gears === 'number' && Number.isInteger(t.gears) && t.gears >= 1 && t.gears <= 6 ? t.gears : undefined;
+  return maxThrottle && maxSteer && deadmanMs ? { maxThrottle, maxSteer, deadmanMs, ...(gears ? { gears } : {}) } : undefined;
 }
 
 /** A gateway's declared console controls (arm, disarm, mode, gear), kept only when they make sense. */
@@ -351,7 +352,8 @@ export class Platform {
   /** Which AI box analyses which device's video, with the read pass it was given. Memory only. */
   private aiJobs = new Map<string, { orgId: string; box: string; read: string; issued: number }>();
   /** Live drive sessions by device id (memory only: a restart ends them). */
-  private driving = new Map<string, { userId: string; orgId: string; since: number; seq: number; lastAt: number; ownedBefore: boolean }>();
+  /** Open drive sessions by device. `gears`: how many the gateway offers (0: none), fixed for the session. */
+  private driving = new Map<string, { userId: string; orgId: string; since: number; seq: number; lastAt: number; ownedBefore: boolean; gears: number }>();
   /** Geofences per site (loaded on first use; defaults seeded for a new site). */
   private fenceCache = new Map<string, Geofence[]>();
   /** Fence ids each vehicle is currently inside of. */
@@ -2200,7 +2202,8 @@ export class Platform {
     const cur = this.driving.get(d.id);
     if (cur && cur.userId !== a.userId) return deny(409, 'control_held', `${d.id} is being driven by ${this.userName(a.orgId, cur.userId)}.`);
     if (d.controlOwner && d.controlOwner !== a.userId) return deny(409, 'control_held', `Control of ${d.id} is held by ${this.userName(a.orgId, d.controlOwner)}. A handover is required.`);
-    if (!cur) this.driving.set(d.id, { userId: a.userId!, orgId: d.orgId, since: this.now(), seq: -1, lastAt: 0, ownedBefore: d.controlOwner === a.userId });
+    if (!cur)
+      this.driving.set(d.id, { userId: a.userId!, orgId: d.orgId, since: this.now(), seq: -1, lastAt: 0, ownedBefore: d.controlOwner === a.userId, gears: d.teleop.gears ?? 0 });
     d.controlOwner = a.userId;
     d.drivenBy = a.userId;
     tx(this.db, () => {
@@ -2221,7 +2224,7 @@ export class Platform {
   }
 
   /** One stick sample from the driver (WebSocket). False when it is not theirs to send or too soon. */
-  drive(a: Actor, msg: { deviceId?: unknown; seq?: unknown; throttle?: unknown; steer?: unknown }): boolean {
+  drive(a: Actor, msg: { deviceId?: unknown; seq?: unknown; throttle?: unknown; steer?: unknown; gear?: unknown }): boolean {
     const id = String(msg.deviceId ?? '');
     const cur = this.driving.get(id);
     if (!cur || cur.userId !== a.userId || cur.orgId !== a.orgId) return false;
@@ -2230,9 +2233,11 @@ export class Platform {
     const now = this.now();
     if (now - cur.lastAt < DRIVE_MIN_INTERVAL_MS) return false;
     const clamp = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0);
+    // A gear only when the gateway offers that many; anything else is dropped (the gear stays where it is).
+    const gear = typeof msg.gear === 'number' && Number.isInteger(msg.gear) && msg.gear >= 1 && msg.gear <= cur.gears ? msg.gear : undefined;
     cur.seq = seq;
     cur.lastAt = now;
-    return this.gateways.send(cur.orgId, id, { t: 'drive', deviceId: id, seq, throttle: clamp(msg.throttle), steer: clamp(msg.steer), at: now });
+    return this.gateways.send(cur.orgId, id, { t: 'drive', deviceId: id, seq, throttle: clamp(msg.throttle), steer: clamp(msg.steer), at: now, ...(gear ? { gear } : {}) });
   }
 
   /** The driver's console went away: stop everything they were driving. */

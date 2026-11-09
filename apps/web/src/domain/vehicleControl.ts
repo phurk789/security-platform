@@ -11,11 +11,14 @@ export function gearOf(detail?: string): number | undefined {
 export type RemoteChoice = 'remote' | 'none-rcu' | 'none';
 
 /**
- * site.json `noRemote` for each choice. "none-rcu": the RCU-ND motor board of UGV-01, which needs its enable/speed
- * input (C6) fed from RC channel 11: RC11_MIN / TRIM / MAX = 1100 / 1500 / 1900 → gears 1 / 2 / 3.
+ * The RCU-ND motor board of UGV-01: its enable/speed input (C6) is fed from RC channel 11 (SERVO4 = RCIN11Scaled),
+ * RC11_MIN / TRIM / MAX = 1100 / 1500 / 1900 → gears 1 / 2 / 3.
  */
+export const RCU_ND_GEARS = { gearChannel: 11, gears: [1100, 1500, 1900] };
+
+/** site.json `noRemote` for each choice. "none-rcu": the gateway holds the RCU-ND gear channel (RCU_ND_GEARS). */
 export function noRemoteFor(choice: RemoteChoice): Record<string, unknown> | undefined {
-  if (choice === 'none-rcu') return { noRemote: { gearChannel: 11, gears: [1100, 1500, 1900] } };
+  if (choice === 'none-rcu') return { noRemote: { ...RCU_ND_GEARS } };
   if (choice === 'none') return { noRemote: true };
   return undefined;
 }

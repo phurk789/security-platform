@@ -130,6 +130,7 @@ export function parseSiteConfig(json: unknown): SiteConfig {
       const t = { ...TELEOP_DEFAULTS, ...(d.teleop && d.teleop !== true ? d.teleop : {}) };
       const problem = noRemoteProblem(d.noRemote, [t.steerChannel, t.throttleChannel]);
       if (problem) throw new ConfigError(`${d.deviceId}: ${problem}`);
+      if (t.gearChannel !== undefined) throw new ConfigError(`${d.deviceId}: with noRemote the gears go in noRemote (gearChannel, gears), not in teleop.`);
     }
     if (d.type === 'mavlink' && d.gcsRelay !== undefined && typeof d.gcsRelay !== 'boolean') {
       const r = d.gcsRelay as { host?: unknown; port?: unknown };

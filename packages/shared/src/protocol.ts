@@ -82,6 +82,11 @@ export interface TeleopLimits {
   maxSteer: number;
   /** The vehicle stops when no stick update arrived for this long (ms). */
   deadmanMs: number;
+  /**
+   * Gears the driver may pick while driving (1…gears, slowest first; see SrvDrive.gear). UGV-01: the RCU-ND motor
+   * board's speed input on RC channel 11. Absent: no gear buttons.
+   */
+  gears?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -433,6 +438,11 @@ export interface SrvDrive {
   steer: number;
   /** Server time when it was forwarded (ms). */
   at: number;
+  /**
+   * Gear the driver picked (1…TeleopLimits.gears). Absent: leave the gear where it is (the remote's switch, or the
+   * virtual remote's current gear). A gear picked during a drive holds until the drive ends.
+   */
+  gear?: number;
   /** Stop now and give control back to the remote control. */
   release?: boolean;
 }
@@ -666,6 +676,8 @@ export interface ConsoleDrive {
   seq: number;
   throttle: number;
   steer: number;
+  /** Gear picked on the drive panel, if any (see SrvDrive.gear). */
+  gear?: number;
 }
 
 export interface UserAdminView extends User {
