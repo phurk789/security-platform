@@ -62,7 +62,8 @@ export interface Session {
    */
   vehicleControl(deviceId: string, action: VehicleControlAction, confirmClear?: boolean): Promise<VehicleControlResult | undefined>;
   /** One stick sample (−1…1) over the live connection. False while the connection is down. */
-  driveSample(deviceId: string, seq: number, throttle: number, steer: number): boolean;
+  /** One stick sample; `gear` (1…teleop.gears) once the driver picked one. */
+  driveSample(deviceId: string, seq: number, throttle: number, steer: number, gear?: number): boolean;
   /** Change a device's operating mode (supervisors promote, with a reason and a password check). */
   setDeviceMode(deviceId: string, to: OperationalMode, reason: string): Promise<boolean>;
   reload(): Promise<void>;

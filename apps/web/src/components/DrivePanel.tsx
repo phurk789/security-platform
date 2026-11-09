@@ -1,12 +1,15 @@
 // Live driving from the console (UGVs whose gateway offers it). The operator opens a drive session,
 // then steers with WASD / arrow keys or the round pad. Samples go out ten times a second; the
 // gateway caps them and stops the vehicle when they stop coming, so closing the tab, losing the
-// network or switching units always ends in a stop.
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+// network or switching units always ends in a stop. Speed buttons (30 / 60 / 100 %, up to the
+// gateway's cap) scale the throttle, and every drive starts on the slowest. Gear buttons, when the
+// gateway offers gears, ride along with the samples; until one is picked the gear stays where it is.
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Gamepad2, OctagonX, ShieldCheck } from 'lucide-react';
 import { modeOf, type Device } from '@13store/shared';
 import { can, currentUser, freshness, userName } from '../domain/policy';
-import { CENTRED, DRIVE_KEYS, DRIVE_SEND_MS, keysToSticks, padToSticks, type Sticks } from '../domain/drive';
+import { CENTRED, DRIVE_KEYS, DRIVE_SEND_MS, keysToSticks, padToSticks, speedLevels, throttleAt, type Sticks } from '../domain/drive';
+import { gearOf } from '../domain/vehicleControl';
 import { useT } from '../i18n';
 import { useStore } from '../store';
 import { ModeBadge } from './Badges';
@@ -31,21 +34,35 @@ export function DrivePanel({ d }: { d: Device }) {
   const [ready, setReady] = useState(false);
   const [reason, setReason] = useState('');
   const [sticks, setSticks] = useState<Sticks>(CENTRED);
+  /** Speed button (index into speedLevels) and the gear picked in this drive, if any. */
+  const [speedIdx, setSpeedIdx] = useState(0);
+  const [gear, setGear] = useState<number | undefined>(undefined);
 
   // Latest state for cleanup: was this console still the driver when the panel went away?
   const latest = useRef(s);
   latest.current = s;
   const keys = useRef(new Set<string>());
   const pad = useRef<Sticks | null>(null);
+  // The send loop reads these each tick (it is set up once per drive).
+  const cap = d.teleop?.maxThrottle ?? 0;
+  const levels = speedLevels(cap);
+  const level = levels[Math.min(speedIdx, levels.length - 1)] ?? 0;
+  const out = useRef({ level, cap, gear });
+  out.current = { level, cap, gear };
 
   useEffect(() => {
     if (!mine || !session) return;
     const id = d.id;
+    // Every drive starts at the slowest speed, with the gear left where it is.
+    setSpeedIdx(0);
+    setGear(undefined);
+    out.current = { ...out.current, level: speedLevels(out.current.cap)[0] ?? 0, gear: undefined };
     const current = () => pad.current ?? keysToSticks(keys.current);
     const push = () => {
       const st = current();
+      const o = out.current;
       setSticks(st);
-      session.driveSample(id, ++driveSeq, st.throttle, st.steer);
+      session.driveSample(id, ++driveSeq, throttleAt(st.throttle, o.level, o.cap), st.steer, o.gear);
     };
     const stop = () => {
       keys.current.clear();
@@ -137,6 +154,15 @@ export function DrivePanel({ d }: { d: Device }) {
 
   const pct = (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}%`;
   const lim = d.teleop;
+  const gears = lim.gears ?? 0;
+  // The gear the vehicle reports: the virtual remote's (no hand-held remote), or the one picked in this drive.
+  const remotePart = d.components?.find((c) => c.id === 'remote');
+  const shownGear = gear ?? gearOf(part?.detail) ?? (d.vehicleControl?.noRemote ? gearOf(remotePart?.detail) : undefined);
+  /** A button press must not keep focus: Space (stop) would also press it again. */
+  const tap = (e: MouseEvent<HTMLButtonElement>, f: () => void) => {
+    e.currentTarget.blur();
+    f();
+  };
 
   return (
     <section className="panel cc-box drive">
@@ -164,10 +190,31 @@ export function DrivePanel({ d }: { d: Device }) {
               <span className="drive-axis v" />
               <span className="drive-knob" style={{ left: `${50 + sticks.steer * 50}%`, top: `${50 - sticks.throttle * 50}%` }} />
             </div>
+            {levels.length > 1 && (
+              <div className="drive-choice" role="group" aria-label={t('Top speed')}>
+                <small>{t('Top speed')}</small>
+                {levels.map((l, i) => (
+                  <button key={l} type="button" className={`btn-secondary${l === level ? ' on' : ''}`} aria-pressed={l === level} onClick={(e) => tap(e, () => setSpeedIdx(i))}>
+                    {Math.round(l * 100)}%
+                  </button>
+                ))}
+              </div>
+            )}
+            {gears > 0 && (
+              <div className="drive-choice" role="group" aria-label={t('Gear')}>
+                <small>{t('Gear')}</small>
+                {Array.from({ length: gears }, (_, i) => i + 1).map((g) => (
+                  <button key={g} type="button" className={`btn-secondary${shownGear === g ? ' on' : ''}`} aria-pressed={shownGear === g} onClick={(e) => tap(e, () => setGear(g))}>
+                    {g}
+                  </button>
+                ))}
+                {shownGear === undefined && !d.vehicleControl?.noRemote && <em>{t("on the remote's switch")}</em>}
+              </div>
+            )}
             <div className="drive-read">
               <span>
                 <small>{t('Throttle')}</small>
-                <b>{pct(sticks.throttle * lim.maxThrottle)}</b>
+                <b>{pct(sticks.throttle * level)}</b>
               </span>
               <span>
                 <small>{t('Steering')}</small>

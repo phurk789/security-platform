@@ -533,6 +533,9 @@ export const TH: Record<string, string> = {
   'TELEM1 to the Pi pins (/dev/ttyAMA0)': 'TELEM1 เข้าขา Pi (/dev/ttyAMA0)',
   'TELEM1 to the Pi 5 UART connector (/dev/ttyAMA10)': 'TELEM1 เข้าช่อง UART 3 ขาของ Pi 5 (/dev/ttyAMA10)',
   'USB cable (/dev/ttyACM0)': 'สาย USB (/dev/ttyACM0)',
+  'Gear buttons when driving from the console': 'ปุ่มเกียร์ตอนขับจากหน้าเว็บ',
+  'RCU-ND motor board · gear buttons on channel 11': 'บอร์ดมอเตอร์ RCU-ND · ปุ่มเกียร์ช่อง 11',
+  'No gear buttons': 'ไม่มีปุ่มเกียร์',
   'Pairing code': 'รหัสจับคู่',
   'Server address on the remote:': 'ที่อยู่เซิร์ฟเวอร์ที่ใส่ในรีโมต:',
   'Valid for {left}': 'ใช้ได้อีก {left}',
@@ -1345,6 +1348,8 @@ export const TH: Record<string, string> = {
   'Driving finished': 'ขับเสร็จแล้ว',
   'Drive pad: drag up to go forward, sideways to turn': 'แป้นขับ: ลากขึ้นเพื่อเดินหน้า ลากซ้ายขวาเพื่อเลี้ยว',
   'STOP · end drive': 'หยุด · จบการขับ',
+  'Top speed': 'ความเร็วสูงสุด',
+  "on the remote's switch": 'ตามสวิตช์บนรีโมต',
   'Hold W A S D or the arrow keys, or drag the pad. Space or Esc stops. Release everything and the vehicle stops.':
     'กด W A S D หรือปุ่มลูกศรค้างไว้ หรือลากแป้น กด Space หรือ Esc เพื่อหยุด ปล่อยทุกปุ่มแล้วรถจะหยุด',
   '{who} is driving {id}.': '{who} กำลังขับ {id}',

@@ -27,6 +27,8 @@ describe('Thai for server and vehicle messages', () => {
   it('translates what the gateway says about console driving', () => {
     expect(th('Not driven from the console yet · steering ch1, throttle ch3')).toBe('ยังไม่ได้ขับจากคอนโซล · เลี้ยว ch1 · คันเร่ง ch3');
     expect(th('Driving from the console · throttle ≤30% · steering ≤60%')).toBe('กำลังขับจากคอนโซล · คันเร่ง ≤30% · เลี้ยว ≤60%');
+    expect(th('Driving from the console · throttle ≤100% · steering ≤60% · gear 3 of 3')).toBe('กำลังขับจากคอนโซล · คันเร่ง ≤100% · เลี้ยว ≤60% · เกียร์ 3 จาก 3');
+    expect(th('Driving from the console · throttle ≤100% · steering ≤60% · gear on the remote')).toBe('กำลังขับจากคอนโซล · คันเร่ง ≤100% · เลี้ยว ≤60% · เกียร์ตามรีโมต');
     expect(th('Idle, the remote has the sticks (no stick input for 1.5 s)')).toBe('ว่าง รีโมตคุมคันบังคับอยู่ (ไม่มีสัญญาณคันบังคับ 1.5 วินาที)');
     expect(th('Not driving. The vehicle is in HOLD: switch it to MANUAL on the remote.')).toBe('ไม่ได้ขับ: รถอยู่โหมด HOLD ให้สลับเป็น MANUAL ที่รีโมต');
     expect(th('Idle')).toBe('ว่าง');

@@ -15,10 +15,14 @@ describe('Pair an edge remote (Admin card)', () => {
       profile: 'ardupilot-rover',
       link: { mode: 'client', host: '192.168.144.20', port: 19856 },
       allowRemoteArm: false,
-      teleop: true,
+      // Up to full throttle (the drive panel starts at 30 %), and UGV-01's RCU-ND gears on channel 11.
+      teleop: { maxThrottle: 1, maxSteer: 0.55, travel: 450, gearChannel: 11, gears: [1100, 1500, 1900] },
       gcsRelay: true,
       stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', push: true },
     });
+    const plain = remoteDevices({ ...REMOTE_DEFAULTS, rcuGears: false });
+    expect(() => parseSiteConfig({ geo: GEO, devices: plain })).not.toThrow();
+    expect(plain[0].teleop).toEqual({ maxThrottle: 1, maxSteer: 0.55, travel: 450 });
   });
 
   it('leaves video out when no camera address is given', () => {
@@ -33,7 +37,7 @@ describe('Pair an edge remote (Admin card)', () => {
       link: { mode: 'serial', path: '/dev/ttyAMA0', baud: 115200 },
       radio: 'Raspberry Pi on the vehicle (TELEM1)',
       allowRemoteArm: false,
-      teleop: true,
+      teleop: { maxThrottle: 1, maxSteer: 0.55, travel: 450 },
       stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', push: true },
     });
     expect(uart[0]).not.toHaveProperty('gcsRelay');

@@ -77,6 +77,36 @@ describe('live driving (server rules)', () => {
     expect(sanitizeTeleop({ maxThrottle: 0.3, maxSteer: 0.6, deadmanMs: 10_000 })).toBeUndefined();
     expect(sanitizeTeleop('yes')).toBeUndefined();
     expect(sanitizeTeleop(undefined)).toBeUndefined();
+    // Gears: a whole number 1–6, otherwise left out (the limits themselves still count).
+    expect(sanitizeTeleop({ maxThrottle: 1, maxSteer: 0.6, deadmanMs: 500, gears: 3 })).toEqual({ maxThrottle: 1, maxSteer: 0.6, deadmanMs: 500, gears: 3 });
+    for (const gears of [0, 7, 2.5, '3']) expect(sanitizeTeleop({ maxThrottle: 1, maxSteer: 0.6, deadmanMs: 500, gears })).toEqual({ maxThrottle: 1, maxSteer: 0.6, deadmanMs: 500 });
+  });
+
+  it('forwards a gear the gateway offers with the samples, and drops any other', async () => {
+    const gw = await gateway(srv.wsUrl, { maxThrottle: 1, maxSteer: 0.6, deadmanMs: 500, gears: 3 });
+    const con = await consoleSocket(srv.wsUrl, op.token);
+    try {
+      await waitFor(() => device().teleop?.gears === 3 && Date.now() - device().lastSeen < 500);
+      if (device().mode !== 'LIVE_MANUAL') setMode('LIVE_MANUAL');
+      expect((await op.post(`/devices/${ID}/drive`, { action: 'start' })).status).toBe(200);
+      const send = (seq: number, gear?: unknown) => con.ws.send(JSON.stringify({ type: 'drive', deviceId: ID, seq, throttle: 0.3, steer: 0, gear }));
+      send(1, 2);
+      await sleep(60);
+      send(2, 4); // more gears than offered
+      await sleep(60);
+      send(3, 'top');
+      await sleep(60);
+      send(4);
+      await waitFor(() => gw.drives().length === 4);
+      expect(gw.drives().map((m) => m.gear)).toEqual([2, undefined, undefined, undefined]);
+      expect((await op.post(`/devices/${ID}/drive`, { action: 'stop' })).status).toBe(200);
+      await waitFor(() => gw.drives().some((m) => m.release));
+    } finally {
+      con.close();
+      gw.close();
+      await waitFor(() => !device().drivenBy);
+      if (device().mode !== 'SHADOW') setMode('SHADOW'); // the next test starts from SHADOW
+    }
   });
 
   it('lets an operator drive a LIVE_MANUAL rover, forwards their stick samples in order, and ends the drive on stop', async () => {
