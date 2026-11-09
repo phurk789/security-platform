@@ -138,6 +138,22 @@ describe('SIYI camera adapter', () => {
     // The camera now reports the raw angle back; the platform must show 30° right again.
     await until(() => lastYaw() === 30);
   }, 10_000);
+
+  it('on a vehicle (follows): reports its gimbal but no position, and still turns', async () => {
+    const cam = await fakeCamera();
+    const a = new SiyiCameraAdapter({ deviceId: 'UGV-01-CAM', host: '127.0.0.1', port: cam.port, follows: 'UGV-01' });
+    const { ctx, got } = fakeCtx();
+    a.start(ctx);
+    cleanup.push(() => a.stop(), cam.close);
+    await until(() => got.telemetry.length > 0);
+    const t = got.telemetry.at(-1) as { pos?: unknown; gimbal?: { yaw: number } };
+    expect(t.pos).toBeUndefined(); // the platform takes the vehicle's position
+    expect(t.gimbal?.yaw).toBe(12.3);
+    expect(a.declaration.follows).toBe('UGV-01');
+    a.onCamera('look', { action: 'gimbal_angle', yaw: 45, pitch: -30 });
+    await until(() => got.camera.some((c) => c.requestId === 'look'));
+    expect(got.camera.find((c) => c.requestId === 'look')).toMatchObject({ ok: true, confirmed: true });
+  }, 10_000);
 });
 
 // ---------------------------------------------------------------------------

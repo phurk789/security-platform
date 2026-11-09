@@ -211,7 +211,10 @@ device `type` (`mavlink` / `siyi-camera` / `simulated`), `deviceId`, `profile`
 (`ardupilot-rover`, `ardupilot-copter`, `px4-rover`, `px4-multicopter`), `link`, `pos` for a
 fixed camera, `stream.whep` for the browser video URL (also on a `mavlink` vehicle, for the
 onboard camera's video; that is video only, gimbal control needs a `siyi-camera` device), and the
-yaw signs of a SIYI camera. The
+yaw signs of a SIYI camera. A `siyi-camera` on a vehicle (UGV-01's A8 mini) takes `"follows":
+"<vehicle id>"` instead of `pos`: it becomes the vehicle's camera for checkpoint jobs and the
+cockpit, uses the vehicle's position and heading, and its `mount.bearingDeg` counts from the
+vehicle's nose (example and checks: `deploy/pi/README_TH.md` section 12). The
 platform treats positive yaw as a turn to the right. SIYI models differ, and one camera can use
 different signs for different SDK messages, so check both in test 11:
 
