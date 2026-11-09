@@ -201,8 +201,8 @@ export function NotificationChannels({ onStepUp }: { onStepUp: (retry: () => voi
             {t('Incident events only at severity')}
             <select value={f.minSeverity} onChange={(e) => setF({ ...f, minSeverity: e.target.value as typeof f.minSeverity })}>
               <option value="">{t('any')}</option>
-              <option value="medium">{t('medium')} +</option>
-              <option value="high">{t('high')}</option>
+              <option value="medium">{t('Medium')} +</option>
+              <option value="high">{t('High')}</option>
             </select>
           </label>
           <div className="row gap-s">

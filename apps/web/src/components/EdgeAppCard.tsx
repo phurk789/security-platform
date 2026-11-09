@@ -1,13 +1,24 @@
 // Admin → "Edge app updates": publish a new build of the edge Android app. Paired remotes find it with their
 // gateway key ("Check for updates" in the app) and install it after the person on site confirms.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { PackageCheck, Upload } from 'lucide-react';
 import { fmtDate, fmtTime, type EdgeAppRelease } from '@13store/shared';
 import type { Api } from '../api';
 import { useT } from '../i18n';
 import { fmtMB, publishQuery, readBuildManifest, uploadProblem, type BuildManifest } from '../domain/edgeApp';
 
-export function EdgeAppCard({ api, act, reloadKey }: { api: Api; act: (fn: () => Promise<unknown>, ok?: string) => Promise<void>; reloadKey: number }) {
+export function EdgeAppCard({
+  api,
+  act,
+  reloadKey,
+  lockNote,
+}: {
+  api: Api;
+  act: (fn: () => Promise<unknown>, ok?: string) => Promise<void>;
+  reloadKey: number;
+  /** Shown instead of the published version while the server hides it until the password is confirmed again. */
+  lockNote?: ReactNode;
+}) {
   const t = useT();
   const [release, setRelease] = useState<EdgeAppRelease | null>(null);
   const [apk, setApk] = useState<File | null>(null);
@@ -56,7 +67,9 @@ export function EdgeAppCard({ api, act, reloadKey }: { api: Api; act: (fn: () =>
           'Publish a new build of the 13STORE Edge app: choose the .apk and the .json that build-apk.sh wrote next to it. Paired remotes see it under "Check for updates" and install it after the person on site confirms. The app keeps its pairing.',
         )}
       </p>
-      {release ? (
+      {lockNote ? (
+        lockNote
+      ) : release ? (
         <ul className="list">
           <li>
             <span>

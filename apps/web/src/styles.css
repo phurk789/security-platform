@@ -2287,15 +2287,124 @@ code {
   background: rgba(56, 189, 248, 0.1);
   color: var(--text);
 }
-.admin-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
-  gap: 12px;
-  align-items: start;
+/* ---------- Administration: cards in groups, two columns per group that end level ---------- */
+.admin-page {
+  container: admin / inline-size;
 }
-.admin-grid .card {
+.admin-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -4px 0 16px;
+}
+.admin-jump .chip {
+  font-size: 0.82rem;
+  padding: 5px 12px;
+}
+.admin-lock,
+.admin-msg {
+  margin: 0 0 14px;
+}
+.admin-lock > span,
+.admin-msg > span {
+  flex: 1 1 18rem;
+}
+/* The result of a change stays in view while scrolling: many changes are made far down the page. */
+.admin-msg {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 5;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.admin-msg.banner.info {
+  margin: 0 0 14px;
+  background: color-mix(in srgb, var(--cyan) 10%, var(--bg-2));
+}
+.admin-msg.banner.warn {
+  background: color-mix(in srgb, #fbbf24 12%, var(--bg-2));
+}
+.admin-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  margin-bottom: 2rem;
+  scroll-margin-top: 0.75rem;
+}
+.admin-group > header h2 {
+  font-size: 1.1rem;
+}
+.admin-group > header p {
+  margin: 2px 0 0;
+  font-size: 0.85rem;
+}
+.admin-group .card {
   margin: 0;
   min-width: 0;
+}
+/* The card already spaces its parts; paragraph margins on top of that left holes ("nothing yet" lines). */
+.admin-group .card > p {
+  margin-block: 0;
+}
+/* A button on its own line is as wide as its words, not the whole card. */
+.admin-group .card > button {
+  align-self: flex-start;
+}
+.admin-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.875rem;
+}
+.admin-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  min-width: 0;
+}
+/* The last card of the shorter column grows, so both columns end on the same line. */
+.admin-col > .card:last-child {
+  flex: 1 1 auto;
+}
+@container admin (max-width: 60rem) {
+  .admin-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* A list the server hides until the password is confirmed again. */
+.admin-locked {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--line-2);
+  border-radius: 12px;
+  color: var(--text-2);
+  font-size: 0.88rem;
+}
+.admin-locked > span {
+  flex: 1 1 14rem;
+}
+/* Why a button is still grey. */
+.admin-group .card > p.form-hint {
+  margin-top: -4px;
+}
+/* List rows: the text takes the room and wraps, the buttons stay on the right. */
+.admin-page .list li > :first-child {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+/* A select is as wide as its words and never squeezes the fields beside it; same height as the fields. */
+.admin-page .inline-form select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 40px;
+}
+.admin-page #pair-camera {
+  flex: 2 1 16rem;
+}
+.admin-page #nd-id {
+  flex-basis: 12rem;
 }
 .inline-form {
   display: flex;
@@ -3508,9 +3617,6 @@ html:lang(th) .meta dt {
   margin-top: 6px;
 }
 /* detection rules */
-.rules-card {
-  grid-column: 1 / -1;
-}
 .rules {
   display: flex;
   flex-direction: column;
