@@ -99,9 +99,10 @@ import {
   COMPONENT_STATUSES,
   applyComponentUpdates,
   aimAt,
+  cameraPose,
   lineOfSight,
-  mountOf,
   pickCamera,
+  vehicleCameraOf,
   type Aim,
   type Building,
   type CameraAction,
@@ -1868,13 +1869,15 @@ export class Platform {
       'ok',
       `accepted ${accepted.join(', ') || 'none'}${rejected.length ? `; rejected ${rejected.map((r) => r.deviceId).join(', ')}` : ''}${notes.length ? `; ignored ${notes.join(', ')}` : ''}`,
     );
-    // Camera AIs that follow a vehicle get a pass to read its video from the media server.
+    // Camera AIs that follow a vehicle get a pass to read its video from the media server. A gimbal
+    // camera riding on the vehicle does not need one: it only turns, the vehicle sends the video.
     const reads: MediaRead[] = [];
     if (this.pushEnabled)
       for (const id of accepted) {
         const ai = this.devices.get(id);
         const host = ai?.follows ? this.devices.get(ai.follows) : undefined;
-        if (ai && host && host.orgId === orgId) reads.push({ deviceId: ai.id, follows: host.id, read: this.readUrl(orgId, ai.id, host.id, gatewayId) });
+        if (ai && host && host.orgId === orgId && ai.capabilities.includes('analytics'))
+          reads.push({ deviceId: ai.id, follows: host.id, read: this.readUrl(orgId, ai.id, host.id, gatewayId) });
       }
     // A vehicle that now pushes video may be waiting for an AI box.
     if (accepted.length) this.assignAi(orgId);
@@ -2064,11 +2067,15 @@ export class Platform {
   // hand, or calibrated: someone stands at a known distance and the latest box of that one person
   // becomes a point; one point gives the height, two or more the height and the tilt.
 
-  /** The ranging that applies to a device's boxes (its own, or the vehicle's it follows) and the gimbal tilt reported now. */
+  /**
+   * The ranging that applies to a device's boxes (its own, or the vehicle's it follows) and the gimbal tilt reported
+   * now: the vehicle's own gimbal, or the gimbal camera riding on it (the platform turns that one at checkpoints).
+   */
   private rangingFor(d: Device): { ranging?: CameraRanging; gimbalPitch?: number } {
     const host = d.follows ? this.devices.get(d.follows) : d;
     if (!host?.ranging) return {};
-    const p = host.capabilities?.includes('gimbal') ? host.gimbal?.pitch : undefined;
+    const stored = this.devices.get(host.id);
+    const p = stored ? this.vehicleCamera(stored)?.gimbal?.pitch : undefined;
     return { ranging: host.ranging, gimbalPitch: typeof p === 'number' && Number.isFinite(p) ? p : undefined };
   }
 
@@ -2394,9 +2401,11 @@ export class Platform {
       };
       return fail(400, 'invalid', `${d.id} has no ${what[need] ?? need}.`);
     }
-    if (d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== a.userId && a.role !== 'system') {
+    // On a vehicle only the operator holding control moves its camera, also when the camera is its own device riding on it.
+    const vehicle = d.kind !== 'cctv' ? d : this.hostOf(d);
+    if (vehicle?.controlOwner && vehicle.controlOwner !== a.userId && a.role !== 'system') {
       this.audit(a, 'camera.control', d.id, 'denied', 'another operator holds control');
-      return fail(409, 'not_control_owner', `Another operator holds control of ${d.id}. Ask them to hand over control.`);
+      return fail(409, 'not_control_owner', `Another operator holds control of ${vehicle.id}. Ask them to hand over control.`);
     }
     // Moving the camera or switching an actuator on needs a LIVE mode; stops, lights off, photo and record do not.
     const mode = modeOf(d);
@@ -2444,13 +2453,16 @@ export class Platform {
       label = `${x.toFixed(0)}, ${y.toFixed(0)} m`;
     }
     const d = this.checkCameraControl(a, deviceId);
-    const mount = mountOf(d);
-    if (!mount) return fail(400, 'invalid', `${d.id} has no mounting data, so it cannot be pointed at a place. Add "mount" to its adapter config.`);
-    const aim = aimAt(d.pos, mount, target);
+    // A camera riding on a vehicle is where the vehicle is and turns with it.
+    const pose = cameraPose(d, this.hostOf(d));
+    if (!pose && d.follows) return fail(409, 'conflict', `${d.id} rides on ${d.follows}, which has no position fix, so it cannot be pointed at a place.`);
+    if (!pose) return fail(400, 'invalid', `${d.id} has no mounting data, so it cannot be pointed at a place. Add "mount" to its adapter config.`);
+    const { pos, mount } = pose;
+    const aim = aimAt(pos, mount, target);
     if (!aim.reachable) return fail(409, 'out_of_reach', `${d.id} cannot turn that far (needs ${aim.yaw.toFixed(0)}°, limit ±135°).`);
     if (a.kind === 'user') this.manualCamera.set(d.id, this.now());
     const r = await this.aimSend(d, aim);
-    const los = lineOfSight(d.pos, target, this.buildingsOf(d.siteId), mount.heightM);
+    const los = lineOfSight(pos, target, this.buildingsOf(d.siteId), mount.heightM);
     this.audit(a, 'camera.control', d.id, r.ok ? 'ok' : 'error', `point at ${label} (yaw ${aim.yaw}°, pitch ${aim.pitch}°, ${aim.zoom}×, ${aim.distanceM} m) — ${r.detail}`);
     return { ...r, detail: los ? r.detail : `${r.detail} A building may block the view.`, aim, lineOfSight: los };
   }
@@ -3635,6 +3647,11 @@ export class Platform {
     const say = (title: string, tone: 'ok' | 'warn', detail?: string) => this.event(null, orgId, d.siteId, m.incidentId, title, { actor: d.id, tone, detail });
     const cam = this.vehicleCamera(d);
     if (!cam) return say(`Camera at checkpoint ${label} not turned`, 'warn', `${d.id} has no gimbal the platform can turn.`);
+    // A camera riding on the vehicle is its own device with its own mode: it turns only in a LIVE mode,
+    // as it would for the person who started the route. A photo does not move it, so it is still taken.
+    const camMode = modeOf(cam);
+    const mayTurn = modeAllowsMotion(camMode, 'person');
+    const on = cam.id !== d.id ? `On ${cam.id}.` : undefined;
     const started = this.now();
     const handsOn = () => (this.manualCamera.get(cam.id) ?? 0) >= started;
     const running = () => {
@@ -3647,13 +3664,16 @@ export class Platform {
     const zoomed = !!p.look?.zoom && cam.capabilities.includes('zoom');
     const holdMs = (p.holdS ?? 0) * 1000;
     const actor = this.systemActor(orgId, 'system', `${d.id} route`);
-    if (p.look || p.sweep)
+    if ((p.look || p.sweep) && !mayTurn) {
+      this.audit(actor, 'camera.control', cam.id, 'denied', `route ${m.id} checkpoint ${label}: ${describeLook(p)} — mode ${camMode}`);
+      say(`Camera at checkpoint ${label} not turned`, 'warn', `${cam.id} is in ${camMode} mode. Camera moves need LIVE_MANUAL; a supervisor promotes the device.`);
+    } else if (p.look || p.sweep)
       void (async () => {
         const turn = await this.sendCamera(cam, { action: 'gimbal_angle', yaw, pitch });
         const zoom = zoomed && turn.ok ? await this.sendCamera(cam, { action: 'zoom_to', level: p.look!.zoom! }) : undefined;
         const ok = turn.ok && (zoom?.ok ?? true);
         this.audit(actor, 'camera.control', cam.id, ok ? 'ok' : 'error', `route ${m.id} checkpoint ${label}: ${describeLook(p)} — ${zoom && !zoom.ok ? zoom.detail : turn.detail}`);
-        if (ok) say(`Camera at checkpoint ${label}: ${describeLook(p)}`, 'ok');
+        if (ok) say(`Camera at checkpoint ${label}: ${describeLook(p)}`, 'ok', on);
         else say(`Camera at checkpoint ${label} not turned`, 'warn', zoom && !zoom.ok ? zoom.detail : turn.detail);
       })();
     // The photo once the gimbal has had time to get there.
@@ -3663,9 +3683,10 @@ export class Platform {
         if (!cam.capabilities.includes('photo')) return say(`No photo at checkpoint ${label}`, 'warn', `${cam.id} has no photo function.`);
         void this.sendCamera(cam, { action: 'photo' }).then((r) => {
           this.audit(actor, 'camera.control', cam.id, r.ok ? 'ok' : 'error', `route ${m.id} checkpoint ${label}: photo — ${r.detail}`);
-          say(r.ok ? `Photo taken at checkpoint ${label}` : `No photo at checkpoint ${label}`, r.ok ? 'ok' : 'warn', r.ok ? undefined : r.detail);
+          say(r.ok ? `Photo taken at checkpoint ${label}` : `No photo at checkpoint ${label}`, r.ok ? 'ok' : 'warn', r.ok ? on : r.detail);
         });
       });
+    if (!mayTurn) return;
     // The sweep: a step every 2.5 s after the photo, until the wait is nearly over.
     if (p.sweep && holdMs > 0) {
       const yaws = sweepYaws(yaw, p.sweep);
@@ -3691,11 +3712,15 @@ export class Platform {
     });
   }
 
-  /** The gimbal that films for a vehicle: its own, or a camera that follows it. */
+  /** The gimbal that films for a vehicle: its own, or a gimbal camera that rides on it (same organisation). */
   private vehicleCamera(d: Device & { orgId: string }) {
-    if (d.capabilities.includes('gimbal')) return d;
-    for (const x of this.devices.values()) if (x.orgId === d.orgId && x.follows === d.id && x.capabilities.includes('gimbal')) return x;
-    return undefined;
+    return vehicleCameraOf(d, [...this.devices.values()].filter((x) => x.orgId === d.orgId));
+  }
+
+  /** The vehicle a device rides on or watches (`follows`), in the same organisation. */
+  private hostOf(d: Device & { orgId: string }) {
+    const host = d.follows ? this.devices.get(d.follows) : undefined;
+    return host && host.orgId === d.orgId ? host : undefined;
   }
 
   // ---- saved routes (a route library per site) ---------------------------------------

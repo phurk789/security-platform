@@ -162,8 +162,11 @@ export interface Device {
   /** Analytics watching this camera (edge vision pipeline or camera-side), as last reported. */
   analytics?: DeviceAnalytics;
   /**
-   * Analytics on another device's video: the vehicle whose camera this AI watches. Its live boxes
-   * show on that vehicle's cockpit view, and its detections are filed at the vehicle's position.
+   * The vehicle this device belongs to. A camera AI on the vehicle's video: its live boxes show on
+   * that vehicle's cockpit view, and its detections are filed at the vehicle's position. A gimbal
+   * camera on the vehicle (its own SDK link, e.g. a SIYI A8 mini): it is the vehicle's camera for
+   * checkpoint jobs and the cockpit, it is where the vehicle is, and its mount is measured from the
+   * vehicle's nose.
    */
   follows?: string;
   /** AI on this device's video by an AI box, switched on and off from the console. */

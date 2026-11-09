@@ -12,8 +12,13 @@ export interface SiyiCameraConfig {
   port?: number;
   model?: string;
   zone?: string;
-  /** Where the camera is mounted on the site grid (fixed mast). */
-  pos: { x: number; y: number };
+  /** Where the camera is mounted on the site grid (fixed mast). Not set on a camera that follows a vehicle. */
+  pos?: { x: number; y: number };
+  /**
+   * The vehicle this camera rides on (e.g. UGV-01's A8 mini). The camera then reports no position of
+   * its own: the platform uses the vehicle's position and heading, and treats it as the vehicle's camera.
+   */
+  follows?: string;
   stream?: StreamInfo;
   /** Firmware version you have tested this adapter against (shown in Devices). */
   firmwareTested?: string;
@@ -82,11 +87,14 @@ export class SiyiCameraAdapter implements Adapter {
       commands: [],
       units: { position: 'site-m', speed: 'm/s', battery: 'percent' },
       rateMs: 1000,
-      limitations: `SIYI SDK at ${this.host}:${this.port}. Video via the site media server.`,
+      limitations: cfg.follows
+        ? `SIYI SDK at ${this.host}:${this.port}. Camera on ${cfg.follows}: video on the vehicle, position and heading from the vehicle.`
+        : `SIYI SDK at ${this.host}:${this.port}. Video via the site media server.`,
       linkLossBehavior: 'Gimbal holds its last attitude; an active recording continues to the SD card.',
       view: undefined,
       stream: cfg.stream,
       mount: cfg.mount,
+      ...(cfg.follows ? { follows: cfg.follows } : {}),
       components: this.comps.list(),
     } as AdapterDeclaration;
   }
@@ -143,7 +151,8 @@ export class SiyiCameraAdapter implements Adapter {
     this.ctx.telemetry({
       seq: ++this.telSeq,
       sourceTime: this.lastReply,
-      pos: { ...this.cfg.pos },
+      // A camera on a vehicle does not know where it is; the platform uses the vehicle's position.
+      ...(this.cfg.pos ? { pos: { ...this.cfg.pos } } : {}),
       accuracyM: 0.5,
       speed: 0,
       quality: 'good',

@@ -20,6 +20,11 @@ describe('Thai for server and vehicle messages', () => {
     expect(th('Camera at checkpoint 1 not turned')).toBe('กล้องที่จุดตรวจ 1 ไม่ได้หัน');
     expect(th('Photo taken at checkpoint 3 (Yard)')).toBe('ถ่ายรูปที่จุดตรวจ 3 (Yard) แล้ว');
     expect(th('UGV-01 has no gimbal the platform can turn.')).toBe('UGV-01 ไม่มีกิมบอลที่ระบบสั่งหันได้');
+    expect(th('On UGV-01-CAM.')).toBe('ใช้กล้อง UGV-01-CAM');
+    expect(th('UGV-01-CAM is in SHADOW mode. Camera moves need LIVE_MANUAL; a supervisor promotes the device.')).toBe(
+      'UGV-01-CAM อยู่โหมด SHADOW การหันกล้องต้องเป็น LIVE_MANUAL หัวหน้าเวรเป็นคนเปลี่ยนโหมด',
+    );
+    expect(th('UGV-01-CAM rides on UGV-01, which has no position fix, so it cannot be pointed at a place.')).toBe('UGV-01-CAM อยู่บน UGV-01 ซึ่งยังไม่มีตำแหน่ง GNSS จึงสั่งหันไปที่จุดไม่ได้');
     expect(th('Checkpoint 1: the camera tilt (°) must be -90–30.')).toBe('จุดตรวจ 1: มุมก้ม/เงยของกล้องต้องอยู่ระหว่าง -90–30°');
     expect(th('Checkpoint 4: the sweep must be 10–135° either side.')).toBe('จุดตรวจ 4: การกวาดกล้องต้องอยู่ระหว่าง 10–135° แต่ละข้าง');
   });

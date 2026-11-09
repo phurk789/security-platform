@@ -7,7 +7,7 @@
 // and the full-screen button also hides the app's top bar and menu.
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowRight, Battery, Camera, ChevronDown, ChevronRight, ChevronUp, Crosshair, Drone, Gauge, History, LayoutGrid, ListChecks, MapPinned, Maximize2, Minimize2, Navigation, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, Signal, Gamepad2, Truck } from 'lucide-react';
-import { PAYLOAD_CATALOG, VEHICLE_CATALOG, routeSpeedOf, runtimeLeftMin, type Device, type Mission } from '@13store/shared';
+import { PAYLOAD_CATALOG, VEHICLE_CATALOG, routeSpeedOf, runtimeLeftMin, vehicleCameraOf, type Device, type Mission } from '@13store/shared';
 import { can, currentUser, fmtTime, freshness, userName } from '../domain/policy';
 import { isTerminal } from '../domain/reducer';
 import { useT, type T } from '../i18n';
@@ -114,7 +114,11 @@ export function CommandCenter() {
       return !open;
     });
   const missionLive = !!m && LIVE_MISSION.includes(m.status);
-  const hasCamera = !!d && ['gimbal', 'spotlight', 'beacon', 'speaker'].some((c) => d.capabilities.includes(c));
+  // The vehicle's camera may be its own device riding on it (e.g. a SIYI A8 mini on its own SDK link).
+  const cam = d ? vehicleCameraOf(d, Object.values(s.devices)) : undefined;
+  const rider = cam && cam.id !== d?.id ? cam : undefined;
+  const hasPayload = !!d && ['spotlight', 'beacon', 'speaker'].some((c) => d.capabilities.includes(c));
+  const hasCamera = !!cam || hasPayload;
   const hasSpecs = !!d?.catalogId && !!VEHICLE_CATALOG[d.catalogId];
   // Boxes behind "Other panels" in the cockpit: mission (unless running), readiness, camera, specs, activity.
   const tucked = [!missionLive, !!d && showsReadiness(d), hasCamera, hasSpecs, true].filter(Boolean).length;
@@ -226,7 +230,10 @@ export function CommandCenter() {
               {hasCamera && (
                 <section className="panel cc-box">
                   <div className="panel-head"><h2><Camera size={17} />{d.payloads?.length ? t('Camera & 4-in-1 module') : t('Camera')}</h2></div>
-                  <div className="cc-box-body"><CameraControls device={d} aimAt={m ? { incidentId: m.incidentId } : undefined} /></div>
+                  <div className="cc-box-body">
+                    {rider && <CameraControls device={rider} aimAt={m ? { incidentId: m.incidentId } : undefined} />}
+                    {(!rider || hasPayload) && <CameraControls device={d} aimAt={m && !rider ? { incidentId: m.incidentId } : undefined} />}
+                  </div>
                 </section>
               )}
               {hasSpecs && (

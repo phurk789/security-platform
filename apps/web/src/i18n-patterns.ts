@@ -100,6 +100,10 @@ const RULES: Rule[] = [
   [/^Photo taken at checkpoint (\d+(?: \(.+\))?)$/, (m) => `ถ่ายรูปที่จุดตรวจ ${m[1]} แล้ว`],
   [/^No photo at checkpoint (\d+(?: \(.+\))?)$/, (m) => `ไม่ได้ถ่ายรูปที่จุดตรวจ ${m[1]}`],
   [/^(\S+) has no gimbal the platform can turn\.$/, (m) => `${m[1]} ไม่มีกิมบอลที่ระบบสั่งหันได้`],
+  // A gimbal camera riding on the vehicle (its own device, its own mode).
+  [/^On ([A-Z0-9-]{3,32})\.$/, (m) => `ใช้กล้อง ${m[1]}`],
+  [/^(\S+) is in (\w+) mode\. Camera moves need LIVE_MANUAL; a supervisor promotes the device\.$/, (m) => `${m[1]} อยู่โหมด ${m[2]} การหันกล้องต้องเป็น LIVE_MANUAL หัวหน้าเวรเป็นคนเปลี่ยนโหมด`],
+  [/^(\S+) rides on (\S+), which has no position fix, so it cannot be pointed at a place\.$/, (m) => `${m[1]} อยู่บน ${m[2]} ซึ่งยังไม่มีตำแหน่ง GNSS จึงสั่งหันไปที่จุดไม่ได้`],
   [/^(\S+) has no photo function\.$/, (m) => `${m[1]} ถ่ายรูปไม่ได้`],
   [/^A route named "(.+)" is already saved on this site\.$/, (m) => `มีเส้นทางชื่อ "${m[1]}" บันทึกไว้ในไซต์นี้แล้ว`],
   [/^±([\d.]+) m(?: · (\d+) sats)?$/, (m) => `±${m[1]} ม.${m[2] ? ` · ${m[2]} ดวง` : ''}`],
