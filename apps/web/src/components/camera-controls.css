@@ -66,7 +66,11 @@
 .feed .whep-msg .whep-retry { margin-top: 10px; font-size: 0.74rem; padding: 4px 12px; cursor: pointer; }
 .feed.frozen video.whep { filter: grayscale(0.7) brightness(0.7); }
 
-@media (max-width: 480px) {
+/* Narrow box (the cockpit dock, a phone): photo and record go on their own row under the pad and
+   zoom. Side by side they need about 360px; with less, the zoom + button slid under "Photo".
+   The box holding the control is the container, so this follows the panel, not the screen. */
+:has(> .ptz) { container: ptz-box / inline-size; }
+@container ptz-box (max-width: 360px) {
   .ptz { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'pad mid' 'act act' 'aim aim' 'status status'; }
   .ptz-act { flex-direction: row; }
   .ptz-act .ptz-btn { flex: 1; }

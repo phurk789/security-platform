@@ -529,6 +529,16 @@ h2 {
 .ic-body .row {
   width: 100%;
 }
+/* The incident id stays whole; the time beside it wraps instead. */
+.ic-body .row.between {
+  gap: 8px;
+}
+.ic-body .row.between > b {
+  white-space: nowrap;
+}
+.ic-body .row.between > small {
+  text-align: right;
+}
 .ic-title {
   font-weight: 600;
   font-size: 1.02rem;
@@ -1717,7 +1727,7 @@ input[type='text'] {
 
 /* ---------- pages ---------- */
 .page {
-  padding: 20px 24px;
+  padding: 1.25rem 1.5rem;
   overflow-y: auto;
   min-height: 0;
 }
@@ -1779,6 +1789,19 @@ td {
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
+/* Short tokens stay on one line when a wide table is squeezed on a laptop (an id split into
+   "INC-" / "027", a button label over two lines); longer text and the model under an id still wrap
+   and the table scrolls sideways in its .table-wrap. */
+td.mono,
+td :is(button, .badge) {
+  white-space: nowrap;
+}
+td.mono small {
+  white-space: normal;
+}
+td.mono:has(> small) {
+  min-width: 11rem;
+}
 tr.click {
   cursor: pointer;
 }
@@ -1793,11 +1816,11 @@ table.compact th {
   padding: 6px 8px;
 }
 .wrap-cell {
-  min-width: 220px;
+  min-width: 13.75rem;
 }
 .ev-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 1fr) 23.75rem;
   gap: 12px;
 }
 .ev-map {
@@ -1805,6 +1828,18 @@ table.compact th {
   min-height: 460px;
   padding: 0;
   overflow: hidden;
+}
+/* Side by side: the 3D map fills the screen height under the page head, so its controls are not
+   below the fold on a 720 px laptop and it is not a short strip on a 1440 px monitor. The side
+   column scrolls with the page. */
+@media (min-width: 1201px) {
+  .ev-grid {
+    align-items: start;
+  }
+  .ev-map {
+    min-height: 0;
+    height: max(20rem, calc(100dvh - 14rem));
+  }
 }
 .ev-side {
   display: flex;
@@ -2167,14 +2202,14 @@ table.compact th {
   background: radial-gradient(1200px 600px at 70% -10%, rgba(56, 189, 248, 0.12), transparent), var(--bg);
 }
 .login-card {
-  width: min(460px, 100%);
+  width: min(28.75rem, 100%);
   background: var(--panel);
   border: 1px solid var(--line-2);
   border-radius: 14px;
-  padding: 24px;
+  padding: 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 1rem;
 }
 .login-card .brand {
   flex-wrap: wrap;
@@ -3753,6 +3788,43 @@ html:lang(th) .meta dt {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 14px;
 }
+/* Tiles and charts follow the card's width, so no row is left half empty (8 tiles used to break
+   6 + 2 on a laptop): all tiles in one row when they fit, else rows of four (three when there are
+   six); four charts in a row with the response-time table a little wider, else two and two. */
+.kpi-dash {
+  container-type: inline-size;
+}
+.kpi-dash .kpi-tiles {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.kpi-dash .kpi-tiles:not(:has(> :nth-child(7))) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.kpi-dash .kpi-charts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@container (min-width: 80rem) {
+  .kpi-dash .kpi-tiles,
+  .kpi-dash .kpi-tiles:not(:has(> :nth-child(7))) {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+}
+@container (min-width: 64rem) {
+  .kpi-dash .kpi-charts {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr);
+  }
+}
+@container (max-width: 36rem) {
+  .kpi-dash .kpi-tiles,
+  .kpi-dash .kpi-tiles:not(:has(> :nth-child(7))) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .kpi-dash .kpi-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .kpi-charts .chart h4 {
   margin: 0 0 6px;
   font-size: 0.82rem;
@@ -3966,6 +4038,10 @@ a.latlon:hover {
 }
 .brand-logo {
   display: block;
+}
+/* The sign-in logo grows with the card (110px at the 16px reference size). */
+.login-logo .brand-logo {
+  height: 6.875rem;
 }
 
 /* Admin users card: what each role can do. */
