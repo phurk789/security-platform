@@ -564,6 +564,85 @@
   color: inherit;
   font-size: 0.8rem;
 }
+.route-cp-edit .wide {
+  grid-column: 1 / -1;
+}
+/* The camera's jobs at a checkpoint: turn (tilt, pan, zoom), sweep, photo, clip. */
+.route-cam {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  margin: 2px 0 0;
+  padding: 8px 9px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+}
+.route-cam legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+.route-cp-edit label.route-range {
+  grid-template-columns: 74px minmax(0, 1fr) 70px;
+  align-items: center;
+  gap: 8px;
+}
+.route-range input[type='range'] {
+  width: 100%;
+  accent-color: #fbbf24;
+}
+.route-range b {
+  font-size: 0.74rem;
+  font-weight: 650;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.route-seg {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.74rem;
+}
+.route-seg > span {
+  flex: 0 0 100%;
+  color: var(--text-2);
+}
+.route-seg button {
+  min-width: 40px;
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.route-seg button.on {
+  border-color: #fbbf24;
+  background: #fbbf24;
+  color: #0b1220;
+  font-weight: 700;
+}
+.route-cam-warn,
+.route-cam-note {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+.route-cam-warn {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+}
+.route-cam-note {
+  color: var(--text-3);
+}
 .route-lib {
   display: inline-flex;
   align-items: center;

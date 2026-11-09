@@ -15,6 +15,15 @@ describe('Thai for server and vehicle messages', () => {
     expect(th('Route uploaded (8 waypoints).')).toBe('ส่งเส้นทางให้รถแล้ว (8 จุด)');
   });
 
+  it('translates the camera jobs at checkpoints and their checks', () => {
+    expect(th('Camera at checkpoint 2 (Gate): down 30°, right 45°, 3×, sweeping ±60°')).toBe('กล้องที่จุดตรวจ 2 (Gate): ก้ม 30°, ขวา 45°, 3×, กวาด ±60°');
+    expect(th('Camera at checkpoint 1 not turned')).toBe('กล้องที่จุดตรวจ 1 ไม่ได้หัน');
+    expect(th('Photo taken at checkpoint 3 (Yard)')).toBe('ถ่ายรูปที่จุดตรวจ 3 (Yard) แล้ว');
+    expect(th('UGV-01 has no gimbal the platform can turn.')).toBe('UGV-01 ไม่มีกิมบอลที่ระบบสั่งหันได้');
+    expect(th('Checkpoint 1: the camera tilt (°) must be -90–30.')).toBe('จุดตรวจ 1: มุมก้ม/เงยของกล้องต้องอยู่ระหว่าง -90–30°');
+    expect(th('Checkpoint 4: the sweep must be 10–135° either side.')).toBe('จุดตรวจ 4: การกวาดกล้องต้องอยู่ระหว่าง 10–135° แต่ละข้าง');
+  });
+
   it('translates what the gateway says about console driving', () => {
     expect(th('Not driven from the console yet · steering ch1, throttle ch3')).toBe('ยังไม่ได้ขับจากคอนโซล · เลี้ยว ch1 · คันเร่ง ch3');
     expect(th('Driving from the console · throttle ≤30% · steering ≤60%')).toBe('กำลังขับจากคอนโซล · คันเร่ง ≤30% · เลี้ยว ≤60%');

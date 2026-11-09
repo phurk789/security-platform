@@ -6,7 +6,7 @@ import './realmap.css';
 import { useEffect, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MlMap, type MapLayerMouseEvent, type MapMouseEvent } from 'maplibre-gl';
 import { Layers as LayersIcon, LocateFixed, SatelliteDish } from 'lucide-react';
-import { GEOFENCE_KIND_LABEL, SITE, fmtLatLon, geoToSite, type AppState, type Layers as LayerState } from '@13store/shared';
+import { GEOFENCE_KIND_LABEL, SITE, fmtLatLon, geoToSite, pointActs, type AppState, type Layers as LayerState } from '@13store/shared';
 import { MAX_ZONE_POINTS, addPoint, insertPoint, isZonePurpose, maxPoints, movePoint, northUpRect, removePoint, routeDraft, useRouteDraft, type ZoneMeta } from '../domain/routeDraft';
 import { useHiddenZones } from '../domain/zoneVisibility';
 import { useMapFit, useMapPreview } from '../domain/mapFocus';
@@ -240,6 +240,8 @@ export default function RealMap({ follow }: { follow?: string } = {}) {
     const onMapClick = (e: MapMouseEvent) => {
       const d = routeDraft.get();
       if (!d || d.state !== 'drawing') return;
+      // Setting what happens at the checkpoints: the map picks them (their markers), it adds none.
+      if (d.step === 'actions') return;
       if ((e.originalEvent.target as HTMLElement | null)?.closest?.('.route-pt, .route-mid')) return;
       const geo = latest.current.s.geo;
       const p = geoToSite(geo, { lat: e.lngLat.lat, lon: e.lngLat.lng });
@@ -359,7 +361,7 @@ export default function RealMap({ follow }: { follow?: string } = {}) {
         // A checkpoint: its number, ringed when open in the panel, dotted when something happens there.
         el.textContent = String(i + 1);
         if (draft.selected === i) el.classList.add('sel');
-        if (p.holdS || p.capture) el.classList.add('acts');
+        if (pointActs(p)) el.classList.add('acts');
         el.title = `${p.name ? `${i + 1} · ${p.name} — ` : ''}${tt('Click to set up · drag to move · right-click to remove')}`;
       }
       el.addEventListener('contextmenu', (ev) => {
@@ -396,7 +398,7 @@ export default function RealMap({ follow }: { follow?: string } = {}) {
     });
     // Midpoint handles: a reshaped zone's edges (closed), a route's legs (open, with their length).
     const zoneEdges = meta?.mode === 'edit' && draft.points.length >= 2 && draft.points.length < MAX_ZONE_POINTS;
-    const routeLegs = !zone && draft.points.length >= 2 && draft.points.length < maxPoints(draft.purpose);
+    const routeLegs = !zone && draft.step !== 'actions' && draft.points.length >= 2 && draft.points.length < maxPoints(draft.purpose);
     if (zoneEdges || routeLegs) {
       const n = draft.points.length;
       const edges = zoneEdges ? (n === 2 ? 1 : n) : n - 1;
