@@ -99,17 +99,14 @@ FENCE_ACTION,2
 SERIAL3_PROTOCOL,-1
 SERIAL4_PROTOCOL,5
 #
-# LAN port (set 2026-11-09): MAVLink 2 to the Raspberry Pi on the vehicle over UDP, no USB cable.
-# The board is a UDP server at 192.168.144.102:14550 on the SIYI air unit's network (camera .25, Pi .101);
-# the Pi's site.json uses link { "mode": "client", "host": "192.168.144.102", "port": 14550 }.
-# NET_ENABLE needs a reboot before the other NET_ parameters appear, NET_P1_TYPE another before NET_P1_*.
-NET_ENABLE,1
-NET_DHCP,0
-NET_IPADDR0,192
-NET_IPADDR1,168
-NET_IPADDR2,144
-NET_IPADDR3,102
-NET_NETMASK,24
-NET_P1_TYPE,2
-NET_P1_PROTOCOL,2
-NET_P1_PORT,14550
+# LAN port: keep it OFF. Connect the Raspberry Pi to the board's USB-C port instead (/dev/ttyACM0).
+# Tried 2026-11-09 with NET_ENABLE 1, as a UDP server at 192.168.144.102:14550 for the Pi. The Pi did reach the
+# board over LAN, but the board then misbehaved:
+#   - boot took 2-3 minutes ("Initialising ArduPilot" every 15 s);
+#   - it stopped answering parameter requests (from the remote's UniGCS and from USB alike);
+#   - arming failed with "PreArm: Logging failed" and "AP_Logger: stuck thread".
+# With NET_ENABLE 0 the same board and SD card boot in about a minute, answer parameters, log, and arm.
+# For reference only, the LAN values that were used (NET_ENABLE needs a reboot before NET_* appear):
+#   NET_DHCP 0, NET_IPADDR0-3 192.168.144.102, NET_NETMASK 24, NET_P1_TYPE 2 (UDP server), NET_P1_PROTOCOL 2,
+#   NET_P1_PORT 14550; the Pi's site.json link was { "mode": "client", "host": "192.168.144.102", "port": 14550 }.
+NET_ENABLE,0
