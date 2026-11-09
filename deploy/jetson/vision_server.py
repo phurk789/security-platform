@@ -261,6 +261,17 @@ def main():
     ap.add_argument("--depth-size", type=int, default=518, help="longest side the depth model sees, a multiple of 14 (default 518, the model's own: smaller misses people far away)")
     ap.add_argument("--depth-every", type=int, default=3, help="a new depth map every N frames (default 3)")
     a = ap.parse_args()
+    # Settings kept next to the service (vision_server.json in the working directory) fill what the
+    # command line leaves out, so the depth model can be switched on or off with a file and a restart
+    # of the same container: {"depth": "/work/depth-anything-v2-small.onnx", "depthSize": 518, "depthEvery": 3}
+    if os.path.exists("vision_server.json"):
+        with open("vision_server.json", encoding="utf-8") as f:
+            saved = json.load(f)
+        if not a.depth and isinstance(saved.get("depth"), str) and saved["depth"]:
+            a.depth = saved["depth"]
+            a.depth_size = int(saved.get("depthSize", a.depth_size))
+            a.depth_every = int(saved.get("depthEvery", a.depth_every))
+            print(f"[vision] depth model from vision_server.json: {a.depth}", flush=True)
     if not a.fake and not a.model:
         ap.error("--model is required (or --fake to test the wiring)")
     backend = Fake() if a.fake else Yolo(a.model, a.imgsz, a.conf, a.classes, a.device, a.half)

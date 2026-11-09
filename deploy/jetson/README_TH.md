@@ -170,12 +170,10 @@ sha256sum depth-anything-v2-small.onnx   # afb6a5c28f3b6bf1618c6e43f02073ef9dfdc
 # ชุดรันต้องมี onnxruntime ที่ใช้ GPU ได้ ควรเห็น TensorrtExecutionProvider หรือ CUDAExecutionProvider
 docker exec 13store-vision python3 -c "import onnxruntime as o; print(o.get_available_providers())"
 
-# รันบริการใหม่พร้อม --depth (ครั้งแรกจะสร้าง TensorRT engine ไว้ใน trt-cache ใช้เวลาหลายนาที ครั้งต่อไปเร็ว)
-docker rm -f 13store-vision
-docker run -d --name 13store-vision --restart unless-stopped --log-opt max-size=10m --log-opt max-file=3 --runtime nvidia --ipc=host \
-  -p 127.0.0.1:8601:8601 -v $HOME/13store/vision:/work -w /work \
-  -e YOLO_OFFLINE=true -e YOLO_AUTOINSTALL=false -e YOLO_CONFIG_DIR=/work/.config \
-  13store/ultralytics:jp6 python3 vision_server.py --host 0.0.0.0 --model /work/yolov8s.engine --depth /work/depth-anything-v2-small.onnx
+# เปิดโมเดลความลึกด้วยไฟล์ตั้งค่าข้างบริการ แล้วรีสตาร์ตตู้เดิม (ไม่ต้องสร้างตู้ใหม่)
+# ครั้งแรกจะสร้าง TensorRT engine ไว้ใน trt-cache ใช้เวลาหลายนาที ระหว่างนั้นบริการ AI ยังไม่ตอบ ครั้งต่อไปเร็ว
+echo '{"depth": "/work/depth-anything-v2-small.onnx"}' > vision_server.json
+docker restart 13store-vision
 
 docker logs -f 13store-vision    # รอจนขึ้น "[vision] depth: depth-anything-v2-small.onnx on TensorrtExecutionProvider ..."
 curl http://127.0.0.1:8601/health   # มี depthModel, depthProviders, depthMs
@@ -184,7 +182,8 @@ curl http://127.0.0.1:8601/health   # มี depthModel, depthProviders, depthMs
 แล้ว **อัปเดต gateway บน Jetson ด้วย** (ตามขั้น 4: `npm run kit:pi` แล้วคัดลอก `edge-gateway.mjs` ใหม่ จากนั้น `systemctl --user restart 13store-edge`)
 gateway ตัวเก่าจะทิ้งค่าบนพื้นไป ระยะไกลจึงยังไม่ขึ้น
 
-- ถ้าคำสั่งเช็กด้านบนไม่เห็น GPU (มีแต่ `CPUExecutionProvider`) บริการยังใช้ได้แต่ช้ามาก ให้แจ้งทีมก่อนเปิดใช้งาน
+- ปิดโมเดลความลึก: `rm vision_server.json && docker restart 13store-vision` (จะใส่ `--depth` ในคำสั่ง docker run แทนไฟล์ก็ได้)
+- ถ้าคำสั่งเช็กด้านบนไม่เห็น GPU (มีแต่ `CPUExecutionProvider`) อย่าเปิด: บนซีพียูช้ามากจนกรอบคนช้าตาม ให้แจ้งทีมก่อน
 - โมเดลความลึกรันทุก 3 เฟรม (`--depth-every 3`) และดูภาพที่ด้านยาว 518 จุด (`--depth-size 518`) ขนาดเล็กกว่านี้จะพลาดคนที่อยู่ไกล
 - ทดสอบกับฉากจำลองที่รู้ระยะ: 9 ม. คลาด 3%, 14 ม. ตรง, 18 ม. คลาด 6%, 25 ม. ได้ 21 ม. (โมเดลมักบอกใกล้กว่าจริงเมื่อเกินระยะของพื้นที่ใช้ปรับ ~15 ม.)
 - ถ้าคนยืนบังกัน ค่าของคนที่อยู่ไกลอาจเป็นของคนที่อยู่ใกล้ ระบบจะกลับไปใช้ระยะจากเท้าเมื่อค่าที่ได้ไม่สมเหตุสมผล
