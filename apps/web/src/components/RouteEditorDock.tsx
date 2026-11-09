@@ -1,13 +1,17 @@
-// The route editor beside the map (mission planning page): what is being drawn and its name, how
-// long it is, what is wrong with it, the checkpoints (click one to name it and set its speed, a
-// wait, a photo), the tools, and Cancel / Save at the bottom. The map stays clear for clicking:
-// while a page docks the editor, the floating panel on the map is not shown.
-import { useRef } from 'react';
-import { Camera, Check, CircleAlert, Eraser, Hourglass, MousePointerClick, Undo2, X } from 'lucide-react';
-import { routeTimeS, type RoutePoint } from '@13store/shared';
-import { maxPoints, routeDraft, type LibraryMeta, type RouteDraft } from '../domain/routeDraft';
+// The route editor beside the map (mission planning page), in two steps:
+//   1. Checkpoints: click the map to place them; the list, the length, what is wrong, the tools.
+//   2. What happens at each: one speed for the whole route, then each checkpoint's own speed, a
+//      wait, and the camera's jobs there (turn it, sweep, a photo, a clip). The map picks
+//      checkpoints in this step instead of adding them.
+// Cancel / Save stay at the bottom in both steps. The map stays clear for clicking: while a page
+// docks the editor, the floating panel on the map is not shown.
+import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, CircleAlert, Eraser, MousePointerClick, Undo2, X } from 'lucide-react';
+import { ROUTE_LIMITS, pointActs, routeTimeS, type RoutePoint } from '@13store/shared';
+import { maxPoints, routeDraft, setAllSpeeds, type LibraryMeta, type RouteDraft } from '../domain/routeDraft';
 import { useT } from '../i18n';
 import { PointEditor, RouteTools, fmtDuration, useDraftActions, useDraftKeys } from './RouteDraftPanel';
+import { PointChips } from './RouteActions';
 
 export function RouteEditorDock({ d, msg }: { d: RouteDraft; msg?: { ok: boolean; text: string } | null }) {
   const t = useT();
@@ -18,7 +22,12 @@ export function RouteEditorDock({ d, msg }: { d: RouteDraft; msg?: { ok: boolean
   const max = maxPoints(d.purpose);
   const n = d.points.length;
   const outside = new Set(c.outside);
+  const step = d.step === 'actions' && n > 0 ? 'actions' : 'points';
   const eyebrow = library ? (library.id ? 'EDIT ROUTE' : 'NEW ROUTE') : d.purpose === 'patrol' ? 'PATROL ROUTE' : 'MISSION ROUTE';
+  // Picking a checkpoint (in the list or on the map) opens its settings, in the second step.
+  useEffect(() => {
+    if (d.selected !== undefined && d.step !== 'actions') routeDraft.setStep('actions');
+  }, [d.selected, d.step]);
 
   return (
     <section className="panel mp-box route-dock" aria-label={title}>
@@ -32,8 +41,17 @@ export function RouteEditorDock({ d, msg }: { d: RouteDraft; msg?: { ok: boolean
         </button>
       </div>
 
+      <div className="route-steps seg" role="tablist" aria-label={t('Route editor steps')}>
+        <button type="button" role="tab" aria-selected={step === 'points'} className={step === 'points' ? 'on' : ''} onClick={() => routeDraft.setStep('points')}>
+          <span className="route-step-n">1</span> {t('Checkpoints')}
+        </button>
+        <button type="button" role="tab" aria-selected={step === 'actions'} className={step === 'actions' ? 'on' : ''} disabled={!n} onClick={() => routeDraft.setStep('actions')}>
+          <span className="route-step-n">2</span> {t('What happens at each')}
+        </button>
+      </div>
+
       <div className="route-dock-body">
-        {library && (
+        {library && step === 'points' && (
           <label className="field">
             <span>{t('Route name')}</span>
             <input
@@ -61,15 +79,6 @@ export function RouteEditorDock({ d, msg }: { d: RouteDraft; msg?: { ok: boolean
           </span>
         </div>
 
-        {n === 0 ? (
-          <p className="route-dock-hint">
-            <MousePointerClick size={18} /> {t('Click the map where the vehicle should go first. Keep clicking to add the next checkpoints, in order.')}
-          </p>
-        ) : c.ok ? (
-          <p className="route-dock-ok">
-            <Check size={15} /> {library ? t('Ready to save. Keep clicking the map to add more checkpoints.') : t('Ready to use. Keep clicking the map to add more checkpoints.')}
-          </p>
-        ) : null}
         {c.outside.length > 0 && (
           <p className="route-dock-bad">
             <CircleAlert size={15} /> {t('Checkpoints {list} are outside the site boundary.', { list: c.outside.join(', ') })} {t('Drag them inside the area, or right-click to remove them.')}
@@ -80,34 +89,77 @@ export function RouteEditorDock({ d, msg }: { d: RouteDraft; msg?: { ok: boolean
             <CircleAlert size={15} /> {t('The route crosses keep-out zone {names}.', { names: c.fences.map((f) => f.name).join(', ') })}
           </p>
         )}
-        {c.full && <p className="route-dock-warn">{t('{n} points is the most this can have.', { n: max })}</p>}
-        {!library && !from && <p className="route-dock-warn">{t('{id} has no position yet, so the distance starts at the first checkpoint.', { id: d.deviceId })}</p>}
         {msg && <p className={msg.ok ? 'route-dock-ok' : 'route-dock-bad'}>{msg.text}</p>}
 
-        {n > 0 && (
-          <ol className="route-dock-cps" aria-label={t('Checkpoints')}>
-            {d.points.map((p, i) => (
-              <li key={i} className={d.selected === i ? 'on' : ''}>
-                <CheckpointRow i={i} p={p} speed={speed} selected={d.selected === i} bad={outside.has(i + 1)} />
-                {d.selected === i && <PointEditor i={i} p={p} speed={speed} />}
-              </li>
-            ))}
-          </ol>
-        )}
+        {step === 'points' ? (
+          <>
+            {n === 0 ? (
+              <p className="route-dock-hint">
+                <MousePointerClick size={18} /> {t('Click the map where the vehicle should go first. Keep clicking to add the next checkpoints, in order.')}
+              </p>
+            ) : c.ok ? (
+              <p className="route-dock-ok">
+                <Check size={15} /> {t('Keep clicking the map to add checkpoints. Then set what the vehicle does at each one.')}
+              </p>
+            ) : null}
+            {c.full && <p className="route-dock-warn">{t('{n} points is the most this can have.', { n: max })}</p>}
+            {!library && !from && <p className="route-dock-warn">{t('{id} has no position yet, so the distance starts at the first checkpoint.', { id: d.deviceId })}</p>}
 
-        {n > 0 && (
-          <div className="route-dock-tools">
-            <button type="button" className="btn-ghost small" disabled={!d.past.length} onClick={() => routeDraft.undo()} title={t('Undo (Backspace)')}>
-              <Undo2 size={14} /> {t('Undo')}
-            </button>
-            <button type="button" className="btn-ghost small" onClick={() => routeDraft.setPoints([])}>
-              <Eraser size={14} /> {t('Clear')}
-            </button>
-            <RouteTools points={d.points} max={max} canSave={!library} />
-          </div>
-        )}
+            {n > 0 && (
+              <ol className="route-dock-cps" aria-label={t('Checkpoints')}>
+                {d.points.map((p, i) => (
+                  <li key={i}>
+                    <CheckpointRow i={i} p={p} speed={speed} selected={false} bad={outside.has(i + 1)} />
+                  </li>
+                ))}
+              </ol>
+            )}
 
-        <p className="route-dock-help">{t('On the map: drag a checkpoint to move it, drag the dot between two checkpoints to add one there, right-click a checkpoint to remove it.')}</p>
+            {n > 0 && (
+              <div className="route-dock-tools">
+                <button type="button" className="btn-ghost small" disabled={!d.past.length} onClick={() => routeDraft.undo()} title={t('Undo (Backspace)')}>
+                  <Undo2 size={14} /> {t('Undo')}
+                </button>
+                <button type="button" className="btn-ghost small" onClick={() => routeDraft.setPoints([])}>
+                  <Eraser size={14} /> {t('Clear')}
+                </button>
+                <RouteTools points={d.points} max={max} canSave={!library} />
+              </div>
+            )}
+
+            {n > 0 && (
+              <button type="button" className="btn-secondary route-next" onClick={() => routeDraft.setStep('actions')}>
+                {t('Next: what happens at each checkpoint')} <ArrowRight size={15} />
+              </button>
+            )}
+            <p className="route-dock-help">{t('On the map: drag a checkpoint to move it, drag the dot between two checkpoints to add one there, right-click a checkpoint to remove it.')}</p>
+          </>
+        ) : (
+          <>
+            <RouteSpeed points={d.points} speed={speed} />
+            <p className="route-dock-note">
+              <MousePointerClick size={15} /> {t('Pick a checkpoint here or on the map to set its speed, a wait and the camera there.')}
+            </p>
+            <ol className="route-dock-cps route-dock-acts" aria-label={t('Checkpoints')}>
+              {d.points.map((p, i) => (
+                <li key={i} className={d.selected === i ? 'on' : pointActs(p) ? 'acts' : ''}>
+                  <CheckpointRow i={i} p={p} speed={speed} selected={d.selected === i} bad={outside.has(i + 1)} />
+                  {d.selected === i && <PointEditor i={i} p={p} speed={speed} />}
+                </li>
+              ))}
+            </ol>
+            <button
+              type="button"
+              className="btn-ghost small route-back"
+              onClick={() => {
+                routeDraft.select(undefined);
+                routeDraft.setStep('points');
+              }}
+            >
+              <ArrowLeft size={14} /> {t('Back to the checkpoints')}
+            </button>
+          </>
+        )}
       </div>
 
       <div className="route-dock-foot">
@@ -122,24 +174,38 @@ export function RouteEditorDock({ d, msg }: { d: RouteDraft; msg?: { ok: boolean
   );
 }
 
-/** One checkpoint in the list: its number (red when outside the area), name and settings; click to set it up. */
+/** One speed for the whole route: fills every checkpoint's leg speed (empty: the vehicle's own). */
+function RouteSpeed({ points, speed }: { points: RoutePoint[]; speed: number }) {
+  const t = useT();
+  // The speed every leg already shares, if they do.
+  const shared = points.every((p) => p.speed === points[0]?.speed) ? points[0]?.speed : undefined;
+  const [v, setV] = useState(shared === undefined ? '' : String(shared));
+  const value = v.trim() === '' ? undefined : Number(v);
+  const valid = value === undefined || (Number.isFinite(value) && value >= ROUTE_LIMITS.minSpeed && value <= ROUTE_LIMITS.maxSpeed);
+  return (
+    <div className="route-speed">
+      <label>
+        <span>{t('Speed for the whole route (m/s)')}</span>
+        <input type="number" min={ROUTE_LIMITS.minSpeed} max={ROUTE_LIMITS.maxSpeed} step={0.1} value={v} placeholder={String(speed)} onChange={(e) => setV(e.target.value)} />
+      </label>
+      <button type="button" className="btn-secondary small" disabled={!valid} onClick={() => routeDraft.setPoints(setAllSpeeds(points, value === undefined ? undefined : Math.round(value * 10) / 10))}>
+        {t('Use at every checkpoint')}
+      </button>
+      <small>{valid ? t('Empty: the vehicle’s own route speed ({v} m/s).', { v: speed }) : t('{lo}–{hi} m/s', { lo: ROUTE_LIMITS.minSpeed, hi: ROUTE_LIMITS.maxSpeed })}</small>
+    </div>
+  );
+}
+
+/** One checkpoint in the list: its number (red when outside the area), name and what happens there; click to set it up. */
 function CheckpointRow({ i, p, speed, selected, bad }: { i: number; p: RoutePoint; speed: number; selected: boolean; bad: boolean }) {
   const t = useT();
   return (
     <button type="button" className="route-dock-cp" aria-expanded={selected} onClick={() => routeDraft.select(selected ? undefined : i)}>
       <span className={`route-cp-n${bad ? ' bad' : ''}`}>{i + 1}</span>
       <span className="grow">{p.name || t('Checkpoint {n}', { n: i + 1 })}</span>
-      {p.speed !== undefined && p.speed !== speed && <span className="route-cp-tag">{t('{v} m/s', { v: p.speed })}</span>}
-      {p.holdS ? (
-        <span className="route-cp-tag">
-          <Hourglass size={11} /> {t('{n} s', { n: p.holdS })}
-        </span>
-      ) : null}
-      {p.capture && (
-        <span className="route-cp-tag" title={t('The view here is kept as evidence')}>
-          <Camera size={11} />
-        </span>
-      )}
+      <span className="route-cp-tags">
+        <PointChips p={p} speed={speed} />
+      </span>
     </button>
   );
 }

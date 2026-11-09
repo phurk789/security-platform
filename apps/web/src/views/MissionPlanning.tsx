@@ -6,7 +6,7 @@
 // approval, route checks, operating area) apply unchanged.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CalendarClock, Camera, Check, ChevronRight, CircleAlert, FolderOpen, Gamepad2, Hourglass, ListChecks, MapPinned, MousePointerClick, Pause, Pencil, Play, Plus, Route as RouteIcon, Search, Siren, Trash2, X } from 'lucide-react';
-import { ROUTINE_TASK_TYPE, TASK_NAME_MAX, fmtDate, operatingAreas, type AppState, type Mission, type Patrol, type Point, type RoutePoint, type SavedRoute } from '@13store/shared';
+import { ROUTINE_TASK_TYPE, TASK_NAME_MAX, fmtDate, operatingAreas, pointActs, type AppState, type Mission, type Patrol, type Point, type RoutePoint, type SavedRoute } from '@13store/shared';
 import { can, currentUser, fmtTime, userName } from '../domain/policy';
 import { mapFocus } from '../domain/mapFocus';
 import { ENDED, PLANNING, PLAN_GROUPS, RUNNING, STEPS, missionPurpose, planCounts, planList, routeNumbers, stepIndex, upcomingRuns, type PlanFilter, type PlanRow, type RouteNumbers } from '../domain/missionPlanning';
@@ -20,6 +20,7 @@ import { LiveMission, Planner, PrepareMission, fmtEta } from '../components/Inci
 import { MainMap } from '../components/MainMap';
 import { DAYS, PatrolForm, PatrolsOffline } from '../components/Patrols';
 import { RouteEditorDock } from '../components/RouteEditorDock';
+import { RouteActionsList } from '../components/RouteActions';
 import './mission-planning.css';
 
 /** A new mission being set up: for an alert or a routine task, maybe starting from a saved route. */
@@ -549,7 +550,12 @@ function PlanScreen({ screen, go, libMsg, setLibMsg }: { screen: Exclude<Screen,
             <MainMap />
             {drawing && (
               <div className="mp-map-hint" aria-hidden="true">
-                <MousePointerClick size={15} /> {drawing.points.length ? t('Click to add the next checkpoint') : t('Click the map to place the first checkpoint')}
+                <MousePointerClick size={15} />{' '}
+                {drawing.step === 'actions' && drawing.points.length
+                  ? t('Click a checkpoint to set what happens there')
+                  : drawing.points.length
+                    ? t('Click to add the next checkpoint')
+                    : t('Click the map to place the first checkpoint')}
               </div>
             )}
           </div>
@@ -741,6 +747,15 @@ function MissionDetail({ m }: { m: Mission }) {
         </div>
       </section>
       <section className="panel mp-box mp-flow">{PLANNING.includes(m.status) ? <Planner m={m} /> : RUNNING.includes(m.status) ? <LiveMission m={m} /> : <MissionResult m={m} />}</section>
+      {/* The route: each checkpoint and what the vehicle and its camera do there (open when something does). */}
+      <details className="panel mp-box mp-cmds" open={m.checkpoints.some(pointActs)}>
+        <summary>
+          {t('Checkpoints and what happens there')} <small>({m.checkpoints.length})</small>
+        </summary>
+        <div className="step">
+          <RouteActionsList points={m.checkpoints} />
+        </div>
+      </details>
       {cmds.length > 0 && (
         <details className="panel mp-box mp-cmds">
           <summary>
@@ -999,21 +1014,7 @@ function RouteDetail({ r, canEdit, msg, onUse, onPatrol, onDeleted }: { r: Saved
           </div>
         </div>
         <div className="step">
-          <ol className="mp-points">
-            {r.points.map((p, i) => (
-              <li key={i}>
-                <span className="mp-pt">{i + 1}</span>
-                <span className="grow">{p.name ?? t('Checkpoint {n}', { n: i + 1 })}</span>
-                {p.speed !== undefined && <small>{p.speed} m/s</small>}
-                {p.holdS ? (
-                  <small>
-                    <Hourglass size={11} /> {p.holdS} s
-                  </small>
-                ) : null}
-                {p.capture && <Camera size={13} aria-label={t('Capture point')} />}
-              </li>
-            ))}
-          </ol>
+          <RouteActionsList points={r.points} />
         </div>
       </section>
       <section className="panel mp-box">

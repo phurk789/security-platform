@@ -8,6 +8,17 @@ const VERB: Record<string, string> = { start: 'เริ่ม', resume: 'ทำ
 const NOUN: Record<string, string> = { sites: 'ไซต์', devices: 'อุปกรณ์', users: 'ผู้ใช้', incidents: 'เหตุ', missions: 'ภารกิจ', patrols: 'รอบลาดตระเวน', detections: 'การตรวจจับ' };
 const ZONE_KIND: Record<string, string> = { 'keep-out': 'ห้ามเข้า', caution: 'ระวัง', 'no-fly': 'ห้ามบิน', 'operating area': 'พื้นที่ปฏิบัติงาน' };
 
+/** "down 30°, right 45°, 3×, sweeping ±60°" (describeLook) in Thai. */
+function thaiLook(en: string) {
+  if (en === 'level, straight ahead') return 'ระดับตรง มองหน้ารถ';
+  return en
+    .replace(/\bdown (\d+)°/g, 'ก้ม $1°')
+    .replace(/\bup (\d+)°/g, 'เงย $1°')
+    .replace(/\bleft (\d+)°/g, 'ซ้าย $1°')
+    .replace(/\bright (\d+)°/g, 'ขวา $1°')
+    .replace(/\bsweeping ±(\d+)°/g, 'กวาด ±$1°');
+}
+
 const RULES: Rule[] = [
   // Messages that wrap another message come first, so the inner one is not matched as a whole.
   [/^Patrol "(.+?)" skipped: (.+)$/, (m, inner) => `ข้ามรอบลาดตระเวน "${m[1]}": ${inner(m[2])}`],
@@ -80,6 +91,16 @@ const RULES: Rule[] = [
   [/^Checkpoint (\d+): the name must be text\.$/, (m) => `จุดตรวจ ${m[1]}: ชื่อต้องเป็นข้อความ`],
   [/^Checkpoint (\d+): speed must be ([\d.]+)–([\d.]+) m\/s\.$/, (m) => `จุดตรวจ ${m[1]}: ความเร็วต้องอยู่ระหว่าง ${m[2]}–${m[3]} ม./วิ`],
   [/^Checkpoint (\d+): the wait must be 0–(\d+) s\.$/, (m) => `จุดตรวจ ${m[1]}: เวลาหยุดรอต้องอยู่ระหว่าง 0–${m[2]} วินาที`],
+  [/^Checkpoint (\d+): the camera direction must be \{pitch, yaw, zoom\}\.$/, (m) => `จุดตรวจ ${m[1]}: ทิศกล้องต้องเป็น {pitch, yaw, zoom}`],
+  [/^Checkpoint (\d+): the camera (tilt|pan|zoom) \((°|×)\) must be (-?[\d.]+)–([\d.]+)\.$/, (m) => `จุดตรวจ ${m[1]}: ${({ tilt: 'มุมก้ม/เงย', pan: 'มุมหันซ้าย/ขวา', zoom: 'ซูม' } as Record<string, string>)[m[2]]}ของกล้องต้องอยู่ระหว่าง ${m[4]}–${m[5]}${m[3]}`],
+  [/^Checkpoint (\d+): the sweep must be (\d+)–(\d+)° either side\.$/, (m) => `จุดตรวจ ${m[1]}: การกวาดกล้องต้องอยู่ระหว่าง ${m[2]}–${m[3]}° แต่ละข้าง`],
+  // Camera jobs at checkpoints (the route turns the camera, sweeps, takes a photo).
+  [/^Camera at checkpoint (\d+(?: \(.+\))?) not turned$/, (m) => `กล้องที่จุดตรวจ ${m[1]} ไม่ได้หัน`],
+  [/^Camera at checkpoint (\d+(?: \(.+\))?): (.+)$/, (m) => `กล้องที่จุดตรวจ ${m[1]}: ${thaiLook(m[2])}`],
+  [/^Photo taken at checkpoint (\d+(?: \(.+\))?)$/, (m) => `ถ่ายรูปที่จุดตรวจ ${m[1]} แล้ว`],
+  [/^No photo at checkpoint (\d+(?: \(.+\))?)$/, (m) => `ไม่ได้ถ่ายรูปที่จุดตรวจ ${m[1]}`],
+  [/^(\S+) has no gimbal the platform can turn\.$/, (m) => `${m[1]} ไม่มีกิมบอลที่ระบบสั่งหันได้`],
+  [/^(\S+) has no photo function\.$/, (m) => `${m[1]} ถ่ายรูปไม่ได้`],
   [/^A route named "(.+)" is already saved on this site\.$/, (m) => `มีเส้นทางชื่อ "${m[1]}" บันทึกไว้ในไซต์นี้แล้ว`],
   [/^±([\d.]+) m(?: · (\d+) sats)?$/, (m) => `±${m[1]} ม.${m[2] ? ` · ${m[2]} ดวง` : ''}`],
   [/^(\S+) reached final checkpoint$/, (m) => `${m[1]} ถึงจุดตรวจสุดท้ายแล้ว`],

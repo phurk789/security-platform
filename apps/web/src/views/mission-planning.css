@@ -145,6 +145,34 @@
 :root .app.liquid-ui .route-dock .route-cp-edit { grid-template-columns: 1fr 1fr; margin: 0 6px 8px; border-radius: 10px; }
 :root .app.liquid-ui .route-dock .route-cp-edit label:first-child { grid-column: 1 / -1; }
 :root .app.liquid-ui .route-dock .route-cp-edit input:not([type='checkbox']) { width: 100%; }
+:root .app.liquid-ui .route-dock .route-cp-edit .wide { grid-column: 1 / -1; }
+/* Two steps: placing the checkpoints, then what happens at each. */
+:root .app.liquid-ui .route-steps { display: grid; grid-template-columns: 1fr 1fr; margin: 0 16px 10px; }
+:root .app.liquid-ui .route-steps button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; padding: 6px 8px; font-size: .74rem; }
+:root .app.liquid-ui .route-step-n { display: grid; flex: none; place-items: center; width: 18px; height: 18px; border: 1px solid var(--line-2); border-radius: 50%; background: var(--lg-surface-2); font-size: .64rem; font-weight: 700; }
+:root .app.liquid-ui .route-steps button.on .route-step-n { border-color: var(--text); background: var(--text); color: var(--lg-surface-solid); }
+:root .app.liquid-ui .route-next { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; }
+:root .app.liquid-ui .route-back { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; }
+:root .app.liquid-ui .route-dock-note { display: flex; gap: 8px; margin: 0; color: var(--text-2); font-size: .72rem; line-height: 1.5; }
+:root .app.liquid-ui .route-dock-note svg { flex: none; margin-top: 1px; color: var(--amber); }
+:root .app.liquid-ui .route-speed { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px 8px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--lg-surface-2); }
+:root .app.liquid-ui .route-speed label { display: grid; gap: 4px; color: var(--text-2); font-size: .72rem; }
+:root .app.liquid-ui .route-speed input { width: 100%; }
+:root .app.liquid-ui .route-speed small { grid-column: 1 / -1; color: var(--text-3); font-size: .64rem; }
+:root .app.liquid-ui .route-dock-cps.route-dock-acts { max-height: none; overflow: visible; }
+:root .app.liquid-ui :is(.route-cp-tags, .mp-pt-tags) { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; min-width: 0; }
+/* A checkpoint row: number, then its name with what happens there on a line under it. */
+:root .app.liquid-ui .route-dock-cp { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; column-gap: 9px; row-gap: 4px; }
+:root .app.liquid-ui .route-dock-cp .grow { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root .app.liquid-ui .route-dock-cp .route-cp-tags { grid-column: 2; justify-content: flex-start; }
+:root .app.liquid-ui .route-dock-cp .route-cp-tags:empty { display: none; }
+:root .app.liquid-ui .route-cp-tag { gap: 3px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--lg-surface-2); color: var(--text-2); font-size: .64rem; }
+:root .app.liquid-ui .route-cam { border-color: var(--line-2); }
+:root .app.liquid-ui .route-cam legend { color: var(--text); }
+:root .app.liquid-ui .route-range input[type='range'] { accent-color: var(--amber); }
+:root .app.liquid-ui .route-seg button { border-color: var(--line-2); color: var(--text-2); }
+:root .app.liquid-ui .route-seg button.on { border-color: var(--text); background: var(--text); color: var(--lg-surface-solid); }
+:root .app.liquid-ui .route-cam-warn { background: color-mix(in srgb, var(--amber) 12%, var(--lg-surface-2)); color: var(--text); }
 :root .app.liquid-ui .route-dock-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 2px; border-top: 1px solid var(--line); }
 :root .app.liquid-ui .route-dock-tools > button, :root .app.liquid-ui .route-dock-tools .route-draft-actions button { display: inline-flex; align-items: center; gap: 5px; }
 :root .app.liquid-ui .route-dock-tools .route-draft-actions { display: contents; }
@@ -155,7 +183,10 @@
 :root .app.liquid-ui .route-dock-foot { position: sticky; bottom: 0; display: flex; gap: 8px; padding: 12px 16px 14px; border-top: 1px solid var(--line); background: inherit; border-radius: 0 0 21px 21px; }
 :root .app.liquid-ui .route-dock-foot button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 :root .app.liquid-ui .mp-points { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 300px; overflow-y: auto; }
-:root .app.liquid-ui .mp-points li { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 9px; font-size: .74rem; }
+:root .app.liquid-ui .mp-points li { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; column-gap: 8px; row-gap: 4px; padding: 5px 6px; border-radius: 9px; font-size: .74rem; }
+:root .app.liquid-ui .mp-points li .grow { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root .app.liquid-ui .mp-points .mp-pt-tags { grid-column: 2; justify-content: flex-start; }
+:root .app.liquid-ui .mp-points .mp-pt-tags:empty { display: none; }
 :root .app.liquid-ui .mp-points li:nth-child(odd) { background: var(--lg-surface-2); }
 :root .app.liquid-ui .mp-points small { display: inline-flex; align-items: center; gap: 3px; font-size: .62rem; color: var(--text-3); }
 :root .app.liquid-ui .mp-pt { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; font-size: .58rem; font-weight: 650; border: 1px solid var(--line); background: var(--lg-surface); }

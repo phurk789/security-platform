@@ -94,4 +94,45 @@ describe('route planner on the server', () => {
     expect(tl.length).toBeGreaterThan(0);
     await nida.post('/commands', { missionId: m.body.id, type: 'stop', idempotencyKey: `${m.body.id}:stop` });
   }, 30_000);
+
+  it('turns the camera at a checkpoint, takes a photo, then turns it back to the front at 1×', async () => {
+    const incidentId = await incident();
+    const pts = await planned(incidentId, 'UGV-02');
+    const job = { name: 'Gate', holdS: 3, look: { pitch: -30, yaw: 45, zoom: 3 }, photo: true };
+    const set = pts.map((p, i) => (i === 0 ? { ...p, ...job } : p));
+    const m = await alex.post('/missions', { incidentId, deviceId: 'UGV-02', operatorId: 'u-nida', checkpoints: set });
+    expect(m.status, JSON.stringify(m.body)).toBe(200);
+    expect(m.body.checkpoints[0]).toEqual({ x: pts[0].x, y: pts[0].y, ...job });
+    expect((await alex.post(`/missions/${m.body.id}/submit`)).status).toBe(200);
+    expect((await ploy.post(`/missions/${m.body.id}/approve`)).status).toBe(200);
+    expect((await nida.post(`/missions/${m.body.id}/accept`)).status).toBe(200);
+    expect((await nida.post('/commands', { missionId: m.body.id, type: 'start', idempotencyKey: `${m.body.id}:start` })).status).toBe(200);
+    await waitFor(async () => ((await nida.get(`/missions/${m.body.id}`)).body as { status: string }).status === 'executing', 8000);
+    srv.built.platform.deviceEvent(ORG, { t: 'event', deviceId: 'UGV-02', at: Date.now(), kind: 'checkpoint', checkpoint: 0 });
+    const gimbal = async () => (await nida.get('/devices/UGV-02')).body.gimbal as { yaw: number; pitch: number; zoom?: number } | undefined;
+    // Turned and zoomed as the checkpoint asks.
+    await waitFor(async () => {
+      const g = await gimbal();
+      return !!g && Math.round(g.yaw) === 45 && Math.round(g.pitch) === -30 && Math.round(g.zoom ?? 1) === 3;
+    }, 8000);
+    const said = (like: string) => srv.db.prepare('SELECT data FROM timeline WHERE incident_id = ? AND data LIKE ?').all(incidentId, `%${like}%`).length > 0;
+    await waitFor(() => said('Camera at checkpoint 1 (Gate): down 30°, right 45°, 3×'), 5000);
+    await waitFor(() => said('Photo taken at checkpoint 1 (Gate)'), 6000);
+    // Back to the front at 1× once the wait is over (it was 3 s; the platform waits at least 5 s).
+    await waitFor(async () => {
+      const g = await gimbal();
+      return !!g && Math.round(g.yaw) === 0 && Math.round(g.pitch) === 0 && Math.round(g.zoom ?? 1) === 1;
+    }, 12_000);
+    await nida.post('/commands', { missionId: m.body.id, type: 'stop', idempotencyKey: `${m.body.id}:stop` });
+  }, 40_000);
+
+  it('says so when the vehicle has no gimbal to turn', async () => {
+    const plat = srv.built.platform as unknown as { checkpointCamera: (o: string, d: unknown, m: unknown, i: number) => void };
+    const d = { id: 'UGV-X', orgId: ORG, siteId: 'site-demo', capabilities: [] };
+    const incidentId = await incident();
+    plat.checkpointCamera(ORG, d, { id: 'MSN-X', incidentId, checkpoints: [{ x: 0, y: 0, look: { pitch: -20 } }] }, 0);
+    const rows = srv.db.prepare("SELECT data FROM timeline WHERE incident_id = ? AND data LIKE '%Camera at checkpoint 1 not turned%'").all(incidentId) as { data: string }[];
+    expect(rows.length).toBe(1);
+    expect(rows[0].data).toMatch(/UGV-X has no gimbal the platform can turn/);
+  });
 });

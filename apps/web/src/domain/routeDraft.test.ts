@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Geofence } from '@13store/shared';
-import { MAX_CHECKPOINTS, MAX_ZONE_POINTS, addPoint, checkDraft, closeLoop, finishedDraft, insertPoint, isLoop, maxPoints, movePoint, northUpRect, removePoint, reverseRoute, routeDraft, routeDraftDock, setPointSettings } from './routeDraft';
+import { MAX_CHECKPOINTS, MAX_ZONE_POINTS, addPoint, checkDraft, closeLoop, finishedDraft, insertPoint, isLoop, maxPoints, movePoint, northUpRect, removePoint, reverseRoute, routeDraft, routeDraftDock, setPointSettings, setAllSpeeds } from './routeDraft';
 
 const keepOut: Geofence = {
   id: 'GF-X',
@@ -164,5 +164,27 @@ describe('the route editor beside the map', () => {
     expect(routeDraftDock.get()).toBe(true);
     b();
     expect(routeDraftDock.get()).toBe(false);
+  });
+});
+
+describe('what happens at each checkpoint', () => {
+  it('sets one speed for the whole route, or gives every leg the vehicle’s own speed again', () => {
+    const pts = [
+      { x: 0, y: 0, speed: 2, holdS: 5 },
+      { x: 1, y: 1 },
+    ];
+    expect(setAllSpeeds(pts, 1.5)).toEqual([
+      { x: 0, y: 0, speed: 1.5, holdS: 5 },
+      { x: 1, y: 1, speed: 1.5 },
+    ]);
+    expect(setAllSpeeds(pts, undefined)).toEqual([{ x: 0, y: 0, holdS: 5 }, { x: 1, y: 1 }]);
+  });
+
+  it('starts by placing checkpoints, then switches to what happens at them', () => {
+    routeDraft.start({ purpose: 'library', deviceId: '', points: [] });
+    expect(routeDraft.get()?.step).toBe('points');
+    routeDraft.setStep('actions');
+    expect(routeDraft.get()?.step).toBe('actions');
+    routeDraft.clear();
   });
 });

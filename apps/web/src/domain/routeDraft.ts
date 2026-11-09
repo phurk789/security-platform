@@ -57,6 +57,11 @@ export interface RouteDraft {
   selected?: number;
   /** drawing: the map takes clicks. done: finished, the caller collects the points. */
   state: 'drawing' | 'done';
+  /**
+   * Route editor beside the map: placing the checkpoints, or setting what the vehicle does at each
+   * one. While actions are set, clicking the map picks a checkpoint instead of adding one.
+   */
+  step?: 'points' | 'actions';
   /** Done by Cancel: the points are the ones it started with. */
   cancelled?: boolean;
   /** Page to go back to when the drawing ends (the patrol and zone forms are not on the map page). */
@@ -91,6 +96,15 @@ export function setPointSettings(points: RoutePoint[], i: number, patch: Partial
     if (n !== i) return q;
     const next: RoutePoint = { ...q, ...patch };
     for (const k of Object.keys(next) as (keyof RoutePoint)[]) if (next[k] === undefined || next[k] === '' || next[k] === false) delete next[k];
+    return next;
+  });
+}
+
+/** One speed for the whole route: every leg at `speed` m/s (undefined: the vehicle's own route speed). */
+export function setAllSpeeds(points: RoutePoint[], speed: number | undefined): RoutePoint[] {
+  return points.map((q) => {
+    const next: RoutePoint = { ...q, speed };
+    if (speed === undefined) delete next.speed;
     return next;
   });
 }
@@ -179,7 +193,7 @@ export const routeDraft = {
   get: (): RouteDraft | null => current,
   start(d: Omit<RouteDraft, 'state' | 'initial' | 'past' | 'cancelled'>) {
     const points = d.points.map(roundKeep);
-    current = { ...d, points, initial: points, past: [], state: 'drawing', selected: undefined, cancelled: undefined };
+    current = { ...d, points, initial: points, past: [], state: 'drawing', selected: undefined, cancelled: undefined, step: d.step ?? 'points' };
     emit();
   },
   setPoints(points: RoutePoint[]) {
@@ -192,6 +206,12 @@ export const routeDraft = {
   select(i: number | undefined) {
     if (!current || current.selected === i) return;
     current = { ...current, selected: i };
+    emit();
+  },
+  /** Placing checkpoints, or setting what happens at them (the map then stops adding points). */
+  setStep(step: 'points' | 'actions') {
+    if (!current || current.step === step) return;
+    current = { ...current, step };
     emit();
   },
   /** Back one change (an added, moved or removed point). */

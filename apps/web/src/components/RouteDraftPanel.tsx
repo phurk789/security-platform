@@ -4,13 +4,14 @@
 // there, and whether to keep the camera view there as evidence. Routes can be reversed, closed into
 // a loop, and kept in the site's route library.
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownUp, Camera, Check, Eraser, FolderOpen, Hourglass, MapPinned, Repeat, Save, Trash2, Undo2, X } from 'lucide-react';
-import { ROUTE_LIMITS, routeSpeedOf, routeTimeS, type RoutePoint } from '@13store/shared';
+import { ArrowDownUp, Camera, Check, Eraser, FolderOpen, MapPinned, Repeat, Save, ScanEye, Trash2, Undo2, Video, X } from 'lucide-react';
+import { CAMERA_WAIT_S, ROUTE_LIMITS, routeSpeedOf, routeTimeS, type RouteLook, type RoutePoint } from '@13store/shared';
 import { MIN_ZONE_POINTS, checkDraft, closeLoop, isLoop, isZonePurpose, maxPoints, removePoint, reverseRoute, routeDraft, setPointSettings, useDraftDocked, useRouteDraft, type LibraryMeta, type RouteDraft } from '../domain/routeDraft';
 import { savedRoutes, useSavedRoutes } from '../domain/savedRoutes';
 import { useStore } from '../store';
 import { useT } from '../i18n';
 import { ZoneEditor } from './ZoneEditor';
+import { PointChips } from './RouteActions';
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
 
@@ -168,17 +169,7 @@ function Checkpoints({ points, selected, speed }: { points: RoutePoint[]; select
           <button type="button" className={selected === i ? 'on' : ''} onClick={() => routeDraft.select(selected === i ? undefined : i)}>
             <span className="route-cp-n">{i + 1}</span>
             <span className="grow">{p.name || t('Checkpoint {n}', { n: i + 1 })}</span>
-            {p.speed !== undefined && p.speed !== speed && <span className="route-cp-tag">{t('{v} m/s', { v: p.speed })}</span>}
-            {p.holdS ? (
-              <span className="route-cp-tag">
-                <Hourglass size={11} /> {t('{n} s', { n: p.holdS })}
-              </span>
-            ) : null}
-            {p.capture && (
-              <span className="route-cp-tag" title={t('The view here is kept as evidence')}>
-                <Camera size={11} />
-              </span>
-            )}
+            <PointChips p={p} speed={speed} />
           </button>
         </li>
       ))}
@@ -186,21 +177,37 @@ function Checkpoints({ points, selected, speed }: { points: RoutePoint[]; select
   );
 }
 
-/** Name, leg speed, wait and capture for one checkpoint. */
+/** Sweep widths offered in the editor (degrees either side); 0 = no sweep. */
+const SWEEPS = [0, 30, 60, 90];
+/** Zoom steps offered in the editor. */
+const ZOOMS = [1, 2, 3, 5, 10];
+
+/**
+ * One checkpoint's settings: its name, the speed of the leg to it, a wait, and the camera's jobs
+ * there (turn it, sweep, a photo, keep a clip). A camera job on a checkpoint the vehicle would drive
+ * through gives it a wait, so the camera has time to work.
+ */
 export function PointEditor({ i, p, speed }: { i: number; p: RoutePoint; speed: number }) {
   const t = useT();
   const set = (patch: Partial<Omit<RoutePoint, 'x' | 'y'>>) => {
     const d = routeDraft.get();
     if (d) routeDraft.setPoints(setPointSettings(d.points, i, patch));
   };
+  // Switching a camera job on also gives the vehicle a wait there when it has none.
+  const job = (patch: Partial<Omit<RoutePoint, 'x' | 'y'>>, on: boolean) => set(on && !p.holdS ? { ...patch, holdS: CAMERA_WAIT_S } : patch);
+  const look = p.look ?? {};
+  const setLook = (part: Partial<RouteLook>) => set({ look: { ...look, ...part } });
   const num = (v: string, lo: number, hi: number) => {
     if (v.trim() === '') return undefined;
     const n = Number(v);
     return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : undefined;
   };
+  const pitch = look.pitch ?? 0;
+  const yaw = look.yaw ?? 0;
+  const camera = !!(p.look || p.sweep || p.photo || p.capture);
   return (
     <div className="route-cp-edit" aria-label={t('Checkpoint {n}', { n: i + 1 })}>
-      <label>
+      <label className="wide">
         <span>{t('Name')}</span>
         <input value={p.name ?? ''} maxLength={ROUTE_LIMITS.nameLen} placeholder={t('Checkpoint {n}', { n: i + 1 })} onChange={(e) => set({ name: e.target.value || undefined })} />
       </label>
@@ -220,10 +227,55 @@ export function PointEditor({ i, p, speed }: { i: number; p: RoutePoint; speed: 
         <span>{t('Wait here (s)')}</span>
         <input type="number" min={0} max={ROUTE_LIMITS.maxHoldS} step={1} value={p.holdS ?? ''} placeholder="0" onChange={(e) => set({ holdS: num(e.target.value, 0, ROUTE_LIMITS.maxHoldS) })} />
       </label>
-      <label className="check">
-        <input type="checkbox" checked={!!p.capture} onChange={(e) => set({ capture: e.target.checked })} />
-        <Camera size={13} /> {t('Keep the view here as evidence')}
-      </label>
+      <fieldset className="route-cam wide">
+        <legend>
+          <ScanEye size={13} aria-hidden="true" /> {t('Camera at this checkpoint')}
+        </legend>
+        <label className="check">
+          <input type="checkbox" checked={!!p.look} onChange={(e) => job({ look: e.target.checked ? { pitch: -20 } : undefined }, e.target.checked)} />
+          {t('Turn the camera')}
+        </label>
+        {p.look && (
+          <>
+            <label className="route-range">
+              <span>{t('Down / up')}</span>
+              <input type="range" min={ROUTE_LIMITS.minPitch} max={ROUTE_LIMITS.maxPitch} step={5} value={pitch} onChange={(e) => setLook({ pitch: Number(e.target.value) })} />
+              <b>{pitch < 0 ? t('down {n}°', { n: -pitch }) : pitch > 0 ? t('up {n}°', { n: pitch }) : t('Level')}</b>
+            </label>
+            <label className="route-range">
+              <span>{t('Left / right')}</span>
+              <input type="range" min={-ROUTE_LIMITS.maxYaw} max={ROUTE_LIMITS.maxYaw} step={5} value={yaw} onChange={(e) => setLook({ yaw: Number(e.target.value) })} />
+              <b>{yaw < 0 ? t('left {n}°', { n: -yaw }) : yaw > 0 ? t('right {n}°', { n: yaw }) : t('Ahead')}</b>
+            </label>
+            <div className="route-seg" role="group" aria-label={t('Zoom')}>
+              <span>{t('Zoom')}</span>
+              {ZOOMS.map((z) => (
+                <button key={z} type="button" className={(look.zoom ?? 1) === z ? 'on' : ''} aria-pressed={(look.zoom ?? 1) === z} onClick={() => setLook({ zoom: z > 1 ? z : undefined })}>
+                  {z}×
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <div className="route-seg" role="group" aria-label={t('Sweep left and right')}>
+          <span>{t('Sweep left and right')}</span>
+          {SWEEPS.map((w) => (
+            <button key={w} type="button" className={(p.sweep ?? 0) === w ? 'on' : ''} aria-pressed={(p.sweep ?? 0) === w} onClick={() => job({ sweep: w || undefined }, w > 0)}>
+              {w ? `±${w}°` : t('No sweep')}
+            </button>
+          ))}
+        </div>
+        <label className="check">
+          <input type="checkbox" checked={!!p.photo} onChange={(e) => job({ photo: e.target.checked }, e.target.checked)} />
+          <Camera size={13} aria-hidden="true" /> {t('Take a photo')}
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={!!p.capture} onChange={(e) => job({ capture: e.target.checked }, e.target.checked)} />
+          <Video size={13} aria-hidden="true" /> {t('Keep the view here as evidence')}
+        </label>
+        {camera && !p.holdS && <p className="route-cam-warn">{t('The vehicle does not stop here, so the camera has no time to work. Give it a wait.')}</p>}
+        {camera && !!p.holdS && <p className="route-cam-note">{t('The camera turns when the vehicle arrives and back to the front when it leaves.')}</p>}
+      </fieldset>
       <div className="route-draft-actions">
         <button
           className="btn-ghost small danger"

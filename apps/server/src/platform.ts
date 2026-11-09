@@ -19,6 +19,8 @@ import {
   sanitizeRoute,
   checkpointLabel,
   CAPTURE_DEFAULT_S,
+  describeLook,
+  sweepYaws,
   type RoutePoint,
   type SavedRoute,
   MISSION_BATTERY_HOLD_PCT,
@@ -2712,6 +2714,7 @@ export class Platform {
           const i = e.checkpoint ?? 0;
           this.event(null, orgId, d.siteId, m.incidentId, `${d.id} passed checkpoint ${checkpointLabel(m.checkpoints, i)}`, { actor: d.id, at: e.at });
           if (m.checkpoints[i]?.capture) this.scheduleCapture(orgId, d, m, i, e.at);
+          this.checkpointCamera(orgId, d, m, i);
           break;
         }
         case 'failsafe_stop':
@@ -3616,6 +3619,83 @@ export class Platform {
       (dur + 3) * 1000,
     );
     timer.unref?.();
+  }
+
+  /**
+   * The camera jobs at a checkpoint the vehicle has just reached: turn to the point's look (and
+   * zoom), take a photo once it has settled, sweep left and right through the wait, and turn back
+   * to the front at 1× when the wait is over. They run on the vehicle's own gimbal, or on a camera
+   * that follows the vehicle. Automatic moves stop once someone takes the camera by hand; the sweep
+   * also stops when the route stops running.
+   */
+  private checkpointCamera(orgId: string, d: Device & { orgId: string; siteId: string }, m: Mission, i: number) {
+    const p = m.checkpoints[i];
+    if (!p || !(p.look || p.sweep || p.photo)) return;
+    const label = checkpointLabel(m.checkpoints, i);
+    const say = (title: string, tone: 'ok' | 'warn', detail?: string) => this.event(null, orgId, d.siteId, m.incidentId, title, { actor: d.id, tone, detail });
+    const cam = this.vehicleCamera(d);
+    if (!cam) return say(`Camera at checkpoint ${label} not turned`, 'warn', `${d.id} has no gimbal the platform can turn.`);
+    const started = this.now();
+    const handsOn = () => (this.manualCamera.get(cam.id) ?? 0) >= started;
+    const running = () => {
+      const cur = this.missionById(m.id)?.m;
+      return !!cur && (cur.status === 'executing' || cur.status === 'completed');
+    };
+    const later = (ms: number, fn: () => void) => setTimeout(fn, ms).unref?.();
+    const yaw = p.look?.yaw ?? 0;
+    const pitch = p.look?.pitch ?? 0;
+    const zoomed = !!p.look?.zoom && cam.capabilities.includes('zoom');
+    const holdMs = (p.holdS ?? 0) * 1000;
+    const actor = this.systemActor(orgId, 'system', `${d.id} route`);
+    if (p.look || p.sweep)
+      void (async () => {
+        const turn = await this.sendCamera(cam, { action: 'gimbal_angle', yaw, pitch });
+        const zoom = zoomed && turn.ok ? await this.sendCamera(cam, { action: 'zoom_to', level: p.look!.zoom! }) : undefined;
+        const ok = turn.ok && (zoom?.ok ?? true);
+        this.audit(actor, 'camera.control', cam.id, ok ? 'ok' : 'error', `route ${m.id} checkpoint ${label}: ${describeLook(p)} — ${zoom && !zoom.ok ? zoom.detail : turn.detail}`);
+        if (ok) say(`Camera at checkpoint ${label}: ${describeLook(p)}`, 'ok');
+        else say(`Camera at checkpoint ${label} not turned`, 'warn', zoom && !zoom.ok ? zoom.detail : turn.detail);
+      })();
+    // The photo once the gimbal has had time to get there.
+    if (p.photo)
+      later(p.look || p.sweep ? 2000 : 0, () => {
+        if (handsOn()) return;
+        if (!cam.capabilities.includes('photo')) return say(`No photo at checkpoint ${label}`, 'warn', `${cam.id} has no photo function.`);
+        void this.sendCamera(cam, { action: 'photo' }).then((r) => {
+          this.audit(actor, 'camera.control', cam.id, r.ok ? 'ok' : 'error', `route ${m.id} checkpoint ${label}: photo — ${r.detail}`);
+          say(r.ok ? `Photo taken at checkpoint ${label}` : `No photo at checkpoint ${label}`, r.ok ? 'ok' : 'warn', r.ok ? undefined : r.detail);
+        });
+      });
+    // The sweep: a step every 2.5 s after the photo, until the wait is nearly over.
+    if (p.sweep && holdMs > 0) {
+      const yaws = sweepYaws(yaw, p.sweep);
+      const first = p.photo ? 4000 : 2500;
+      for (let k = 0, at = first; at <= holdMs - 2000; k++, at += 2500) {
+        const y = yaws[k % yaws.length];
+        later(at, () => {
+          if (running() && !handsOn()) void this.sendCamera(cam, { action: 'gimbal_angle', yaw: y, pitch });
+        });
+      }
+    }
+    // Back to the front at 1× as the vehicle leaves, unless someone has the camera or the next
+    // checkpoint already gave it its own job.
+    later(Math.max(holdMs, 5000) + 500, () => {
+      if (handsOn()) return;
+      const cur = this.missionById(m.id)?.m;
+      const reached = cur ? cur.nextCp - 1 : i;
+      if (reached > i && cur && cur.checkpoints.slice(i + 1, reached + 1).some((q) => q.look || q.sweep)) return;
+      void (async () => {
+        await this.sendCamera(cam, { action: 'gimbal_angle', yaw: 0, pitch: 0 });
+        if (zoomed) await this.sendCamera(cam, { action: 'zoom_to', level: 1 });
+      })();
+    });
+  }
+
+  /** The gimbal that films for a vehicle: its own, or a camera that follows it. */
+  private vehicleCamera(d: Device & { orgId: string }) {
+    if (d.capabilities.includes('gimbal')) return d;
+    for (const x of this.devices.values()) if (x.orgId === d.orgId && x.follows === d.id && x.capabilities.includes('gimbal')) return x;
+    return undefined;
   }
 
   // ---- saved routes (a route library per site) ---------------------------------------
