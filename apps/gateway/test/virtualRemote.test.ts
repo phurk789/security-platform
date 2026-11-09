@@ -240,8 +240,13 @@ describe('virtual remote (no hand-held remote)', () => {
     const forward = setInterval(() => a.onDrive({ t: 'drive', deviceId: 'UGV-01', seq: seq++, throttle: 1, steer: 0, at: Date.now() }), 100);
     cleanup.push(() => clearInterval(forward));
     await until(() => rover.last()!.ch[3] === 1620);
-    clearInterval(forward);
     expect(rover.last()!.ch[11]).toBe(1900); // sticks and gear go out together
+    // A gear button on the drive panel rides with a sample and sets the virtual remote's gear; later samples keep it.
+    a.onDrive({ t: 'drive', deviceId: 'UGV-01', seq: seq++, throttle: 1, steer: 0, at: Date.now(), gear: 2 });
+    await until(() => rover.last()!.ch[11] === 1500);
+    await wait(250);
+    expect(rover.last()!.ch[11]).toBe(1500);
+    clearInterval(forward);
     // Samples stop: the dead-man centres the sticks. Nothing is ever "released" (0): there is no remote to take over.
     await until(() => rover.last()!.ch[3] === 1500, 2000);
     expect(rover.st.overrides.some((x) => x.ch[3] === 0 || x.ch[1] === 0)).toBe(false);

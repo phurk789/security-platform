@@ -40,8 +40,13 @@ export const UGV_CONFIRM_MS = 700;
 export const UGV_CONFIRM_TIMEOUT_MS = 8_000;
 /** Physics step of the simulated vehicle (ms), independent of the telemetry rate. */
 const PHYSICS_MS = 100;
-/** Console driving on outdoor simulated UGVs: the real adapter's default caps and dead-man. */
-export const SIM_TELEOP: TeleopLimits = { maxThrottle: 0.3, maxSteer: 0.6, deadmanMs: 500 };
+/**
+ * Console driving on outdoor simulated UGVs, set up like UGV-01 as paired from the console: full throttle allowed (the
+ * drive panel starts every drive at 30 %) and three gears on the motor board.
+ */
+export const SIM_TELEOP: TeleopLimits = { maxThrottle: 1, maxSteer: 0.6, deadmanMs: 500, gears: 3 };
+/** Top speed in each simulated gear, as a share of the vehicle's own. Until the driver picks one, the "remote" holds gear 3. */
+const SIM_GEARS = [0.5, 0.75, 1];
 /** Turn rate at full stick (deg/s), before the steering cap. Tracked vehicles turn on the spot. */
 const DRIVE_YAW_RATE = 90;
 
@@ -64,6 +69,8 @@ export class SimUgv extends SimDevice {
   private drive = new DriveState(SIM_TELEOP.deadmanMs);
   /** Signed speed while driven from the console (m/s, negative = reversing). */
   private driveSpeed = 0;
+  /** Gear the console driver picked in this drive (index into SIM_GEARS). */
+  private driveGear?: number;
   private driveComps?: ComponentTracker;
 
   constructor(seed: Device, opts: SimOptions = {}) {
@@ -215,11 +222,13 @@ export class SimUgv extends SimDevice {
     const r = this.drive.accept(s, this.ctx.now());
     if (r === 'release') return this.endDrive('released by the console');
     if (r === 'start') this.ctx.log.info(`${this.declaration.deviceId}: console driving started`);
+    if (r !== 'late' && typeof s.gear === 'number' && Number.isInteger(s.gear) && s.gear >= 1 && s.gear <= SIM_GEARS.length) this.driveGear = s.gear - 1;
   }
 
   private endDrive(why: string) {
     if (!this.drive.active) return;
     this.drive.end();
+    this.driveGear = undefined;
     this.ctx.log.info(`${this.declaration.deviceId}: console driving ended (${why})`);
     this.driveComps?.set('drive', { status: 'ok', detail: `Idle (${why})` });
   }
@@ -239,13 +248,14 @@ export class SimUgv extends SimDevice {
         return;
       }
       if (step.kind === 'drive') {
-        throttle = step.throttle * lim.maxThrottle;
+        throttle = step.throttle * lim.maxThrottle * SIM_GEARS[this.driveGear ?? SIM_GEARS.length - 1];
         steer = step.steer * lim.maxSteer;
       }
+      const gear = this.driveGear === undefined ? ' · gear on the remote' : ` · gear ${this.driveGear + 1} of ${SIM_GEARS.length}`;
       this.driveComps?.set(
         'drive',
         step.kind === 'drive'
-          ? { status: 'ok', detail: `Driving from the console · throttle ≤${Math.round(lim.maxThrottle * 100)}% · steering ≤${Math.round(lim.maxSteer * 100)}%` }
+          ? { status: 'ok', detail: `Driving from the console · throttle ≤${Math.round(lim.maxThrottle * 100)}% · steering ≤${Math.round(lim.maxSteer * 100)}%${gear}` }
           : step.reason === 'deadman'
             ? { status: 'warn', detail: 'No stick input from the console: stopped' }
             : { status: 'warn', detail: 'Stopped: centre the sticks to drive' },

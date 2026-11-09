@@ -2,7 +2,7 @@
 // the device list again (apps/server/src/pairing.ts); these helpers only build and display it.
 import qrcode from 'qrcode-generator';
 import { pairingLink } from '@13store/shared';
-import { noRemoteFor, type RemoteChoice } from './vehicleControl';
+import { RCU_ND_GEARS, noRemoteFor, type RemoteChoice } from './vehicleControl';
 
 /** Where the gateway runs: the edge app on the SIYI remote, or a Raspberry Pi on the vehicle (deploy/pi). */
 export type EdgeTarget = 'remote' | 'pi';
@@ -40,6 +40,8 @@ export interface RemoteForm {
   piPort?: PiPort;
   /** Raspberry Pi only: still driven with the SIYI remote, or not (the Pi is then its remote). */
   remote?: RemoteChoice;
+  /** SIYI remote only: gear buttons on the drive panel for the RCU-ND motor board (UGV-01, RC channel 11). */
+  rcuGears?: boolean;
 }
 
 export const REMOTE_DEFAULTS: RemoteForm = {
@@ -48,7 +50,15 @@ export const REMOTE_DEFAULTS: RemoteForm = {
   vehicleId: 'UGV-01',
   model: 'Small electric UGV · ArduPilot Rover',
   cameraRtsp: 'rtsp://192.168.144.25:8554/main.264',
+  rcuGears: true,
 };
+
+/**
+ * Console driving limits for a paired vehicle. Full throttle is allowed because the drive panel starts every drive at
+ * 30 % and the driver steps up (30 / 60 / 100 %). Travel 450 µs puts 100 % at the remote's own full stick (UGV-01's
+ * RC3 runs 1050–1950); steering stays about where the old default had it (0.55 × 450 ≈ 0.6 × 400).
+ */
+export const PAIRED_TELEOP = { maxThrottle: 1, maxSteer: 0.55, travel: 450 };
 
 /** Name and gateway id offered for each target (kept until the administrator types their own). */
 export const TARGET_DEFAULTS: Record<EdgeTarget, Pick<RemoteForm, 'label' | 'gatewayId'>> = {
@@ -73,8 +83,9 @@ export function remoteDevices(f: RemoteForm): Record<string, unknown>[] {
       link: { mode: 'client', ...UNIRC_DATALINK },
       allowRemoteArm: false,
       // Driving from the console (RC override, dead-man, gateway caps). Still gated by the platform: a supervisor
-      // promotes the vehicle to LIVE_MANUAL and an operator starts the drive.
-      teleop: true,
+      // promotes the vehicle to LIVE_MANUAL and an operator starts the drive. With the RCU-ND board the driver's gear
+      // buttons take channel 11 from the remote's switch until the drive ends.
+      teleop: { ...PAIRED_TELEOP, ...(f.rcuGears ? RCU_ND_GEARS : {}) },
       // UniGCS on the remote runs alongside the gateway: it connects to 127.0.0.1:19857 instead of the datalink (E-5).
       gcsRelay: true,
       ...(camera ? { stream: { rtsp: camera, push: true } } : {}),
@@ -99,7 +110,8 @@ export function piDevices(f: RemoteForm): Record<string, unknown>[] {
       radio: PI_RADIO[port],
       link: { mode: 'serial', ...PI_PORTS[port] },
       allowRemoteArm: false,
-      teleop: true,
+      // Gears, if any, belong to the virtual remote (noRemote), which the drive panel's gear buttons also set.
+      teleop: { ...PAIRED_TELEOP },
       ...noRemoteFor(f.remote ?? 'remote'),
       ...(camera ? { stream: { rtsp: camera, push: true } } : {}),
     },

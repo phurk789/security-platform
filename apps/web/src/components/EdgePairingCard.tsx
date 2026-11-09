@@ -210,6 +210,18 @@ export function EdgePairingCard({
               onChange={(e) => setForm({ ...form, cameraRtsp: e.target.value })}
               aria-label={t('Camera RTSP address')}
             />
+            {target === 'remote' && (
+              <select
+                id="pair-gears"
+                value={form.rcuGears ? 'rcu' : 'none'}
+                onChange={(e) => setForm({ ...form, rcuGears: e.target.value === 'rcu' })}
+                aria-label={t('Gear buttons when driving from the console')}
+                title={t('Gear buttons when driving from the console')}
+              >
+                <option value="rcu">{t('RCU-ND motor board · gear buttons on channel 11')}</option>
+                <option value="none">{t('No gear buttons')}</option>
+              </select>
+            )}
             {target === 'pi' && (
               <select
                 id="pair-pi-port"

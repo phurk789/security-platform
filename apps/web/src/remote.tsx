@@ -662,10 +662,10 @@ export function RemoteProvider({
           },
           () => void session.vehicleControl(deviceId, action, confirmClear),
         ),
-      driveSample(deviceId: string, seq: number, throttle: number, steer: number) {
+      driveSample(deviceId: string, seq: number, throttle: number, steer: number, gear?: number) {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-        ws.send(JSON.stringify({ type: 'drive', deviceId, seq, throttle, steer } satisfies ConsoleDrive));
+        ws.send(JSON.stringify({ type: 'drive', deviceId, seq, throttle, steer, ...(gear ? { gear } : {}) } satisfies ConsoleDrive));
         return true;
       },
       setDeviceMode: (deviceId: string, to: OperationalMode, reason: string) =>

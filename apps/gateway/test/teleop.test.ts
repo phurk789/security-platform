@@ -70,10 +70,22 @@ describe('drive state (shared by the real and simulated adapters)', () => {
     expect(teleopProblem({ steerChannel: 3 })).toMatch(/differ/);
     expect(teleopProblem({ throttleChannel: 19 })).toMatch(/1–18/);
     expect(teleopProblem({ center: 1500, travel: 800 })).toMatch(/µs/);
+    // Gear buttons: a channel and its values go together, off the stick channels, 2–6 values in range.
+    expect(teleopProblem({ gearChannel: 11, gears: [1100, 1500, 1900] })).toBeUndefined();
+    expect(teleopProblem({ gearChannel: 11 })).toMatch(/together/);
+    expect(teleopProblem({ gears: [1100, 1900] })).toMatch(/together/);
+    expect(teleopProblem({ gearChannel: 3, gears: [1100, 1900] })).toMatch(/steering or throttle/);
+    expect(teleopProblem({ gearChannel: 11, gears: [1100] })).toMatch(/2–6/);
+    expect(teleopProblem({ gearChannel: 11, gears: [1100, 2500] })).toMatch(/2–6/);
+    expect(teleopProblem({ gearChannel: 19, gears: [1100, 1900] })).toMatch(/1–18/);
     const site = (dev: object) => ({ geo: { originLat: 13.9, originLon: 100.4 }, devices: [{ type: 'mavlink', deviceId: 'UGV-09', profile: 'ardupilot-rover', ...dev }] });
     expect(() => parseSiteConfig(site({ kind: 'ugv', teleop: true }))).not.toThrow();
     expect(() => parseSiteConfig(site({ kind: 'uav', profile: 'ardupilot-copter', teleop: true }))).toThrow(ConfigError);
     expect(() => parseSiteConfig(site({ kind: 'ugv', teleop: { maxSteer: 0 } }))).toThrow(/maxSteer/);
+    // Without a hand-held remote the gears belong to noRemote only.
+    const gears = { gearChannel: 11, gears: [1100, 1500, 1900] };
+    expect(() => parseSiteConfig(site({ kind: 'ugv', teleop: gears }))).not.toThrow();
+    expect(() => parseSiteConfig(site({ kind: 'ugv', teleop: gears, noRemote: true }))).toThrow(/noRemote/);
   });
 });
 
@@ -248,6 +260,37 @@ describe('MAVLink rover: console driving through RC overrides', () => {
     expect(rover.st.overrides.at(-1)!.chan2Raw).toBe(0);
   }, 10_000);
 
+  it('takes the gear channel only once the driver picks a gear, and hands it back with the sticks', async () => {
+    const { a, rover, driveDetail } = await roverAdapter({ maxThrottle: 1, gearChannel: 11, gears: [1100, 1500, 1900] });
+    expect(a.declaration.teleop).toEqual({ maxThrottle: 1, maxSteer: 0.6, deadmanMs: 500, gears: 3 });
+    const ch11 = () => rover.st.overrides.at(-1)?.chan11Raw;
+    a.onDrive(sample(1, 0, 0));
+    a.onDrive(sample(2, 1, 0));
+    await until(() => last(rover.st).throttle === 1900); // full throttle allowed by this cap
+    expect(ch11()).toBe(0); // no gear picked yet: "ignore", the remote's switch keeps channel 11
+    await until(() => /· gear on the remote$/.test(driveDetail()?.detail ?? ''));
+
+    a.onDrive(sample(3, 1, 0, { gear: 3 }));
+    await until(() => ch11() === 1900);
+    a.onDrive(sample(4, 1, 0, { gear: 9 })); // out of range: ignored
+    a.onDrive(sample(5, 1, 0)); // no gear in the sample: the picked one holds
+    await wait(150);
+    expect(ch11()).toBe(1900);
+    await until(() => /· gear 3 of 3$/.test(driveDetail()?.detail ?? ''));
+
+    // Release: the gear channel goes back to the remote together with the sticks (65534 = release on 9–18).
+    a.onDrive(sample(6, 0, 0, { release: true }));
+    await until(() => ch11() === 65534);
+    expect(last(rover.st).throttle).toBe(0);
+
+    // The next drive starts with the gear on the remote's switch again.
+    a.onDrive(sample(1, 0, 0));
+    a.onDrive(sample(2, 1, 0));
+    await until(() => last(rover.st).throttle === 1900);
+    expect(ch11()).toBe(0);
+    a.onDrive(sample(3, 0, 0, { release: true }));
+  }, 15_000);
+
   it('offers no driving unless configured, and none on air vehicles', () => {
     const base = { deviceId: 'X-01', profile: 'ardupilot-rover' as const, link: { mode: 'client' as const, host: '127.0.0.1', port: 9 }, geo: GEO };
     expect(new MavlinkVehicleAdapter({ ...base, kind: 'ugv' }).declaration.teleop).toBeUndefined();
@@ -268,23 +311,23 @@ describe('simulated UGV: console driving', () => {
     return { a, got };
   }
   /** Keep sending the same stick position every 100 ms for `ms`. */
-  function hold(a: SimUgv, from: number, ms: number, throttle: number, steer: number) {
+  function hold(a: SimUgv, from: number, ms: number, throttle: number, steer: number, extra: Partial<SrvDrive> = {}) {
     let seq = from;
     for (let t = 0; t < ms; t += 100) {
-      a.onDrive(sample(seq++, throttle, steer));
+      a.onDrive(sample(seq++, throttle, steer, extra));
       vi.advanceTimersByTime(100);
     }
     return seq;
   }
 
-  it('declares the same limits as the real adapter and drives where the sticks point', () => {
+  it('declares limits like a paired UGV-01 and drives where the sticks point', () => {
     const { a, got } = sim();
-    expect(a.declaration.teleop).toEqual({ maxThrottle: 0.3, maxSteer: 0.6, deadmanMs: 500 });
+    expect(a.declaration.teleop).toEqual({ maxThrottle: 1, maxSteer: 0.6, deadmanMs: 500, gears: 3 });
     const start = { ...a.pos };
     const heading = a.motion.heading;
     let seq = hold(a, 1, 300, 0, 0);
-    seq = hold(a, seq, 3000, 1, 0);
-    // Capped at 30 % of the 6 m/s top speed.
+    // The drive panel's 30 % speed button sends 0.3 at full stick: 30 % of the 6 m/s top speed.
+    seq = hold(a, seq, 3000, 0.3, 0);
     expect(a.speed).toBeCloseTo(1.8, 1);
     const moved = { x: a.pos.x - start.x, y: a.pos.y - start.y };
     const rad = (heading * Math.PI) / 180;
@@ -295,10 +338,20 @@ describe('simulated UGV: console driving', () => {
     expect(got.telemetry.flatMap((t) => t.components ?? []).some((c) => c.id === 'drive' && /Driving from the console/.test(c.detail ?? ''))).toBe(true);
   });
 
+  it('slows down in a lower gear picked on the drive panel', () => {
+    const { a, got } = sim();
+    let seq = hold(a, 1, 300, 0, 0);
+    seq = hold(a, seq, 4000, 1, 0);
+    expect(a.speed).toBeCloseTo(6, 1); // gear on the "remote" (top gear), full stick
+    hold(a, seq, 4000, 1, 0, { gear: 1 });
+    expect(a.speed).toBeCloseTo(3, 1); // gear 1: half the top speed
+    expect(got.telemetry.flatMap((t) => t.components ?? []).some((c) => c.id === 'drive' && /gear 1 of 3/.test(c.detail ?? ''))).toBe(true);
+  });
+
   it('stops by itself when samples stop, and ignores samples sent while its radio link is cut', () => {
     const { a } = sim();
     hold(a, 1, 200, 0, 0);
-    hold(a, 3, 3000, 1, 0);
+    hold(a, 3, 3000, 0.3, 0); // the drive panel's 30 % level
     expect(a.speed).toBeGreaterThan(1);
     vi.advanceTimersByTime(500 + 1500);
     expect(a.speed).toBe(0);

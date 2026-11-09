@@ -17,7 +17,8 @@ describe('vehicle without a hand-held remote (console side)', () => {
   it('pairs a Pi as the remote: RCU-ND gears on channel 11, or no gears; or keeps the SIYI remote', () => {
     const rcu = piDevices({ ...REMOTE_DEFAULTS, piPort: 'usb', remote: 'none-rcu' });
     expect(() => parseSiteConfig({ geo: GEO, devices: rcu })).not.toThrow();
-    expect(rcu[0]).toMatchObject({ noRemote: { gearChannel: 11, gears: [1100, 1500, 1900] }, allowRemoteArm: false, teleop: true });
+    expect(rcu[0]).toMatchObject({ noRemote: { gearChannel: 11, gears: [1100, 1500, 1900] }, allowRemoteArm: false, teleop: { maxThrottle: 1 } });
+    expect(rcu[0].teleop).not.toHaveProperty('gearChannel'); // the virtual remote holds the gears
     expect(piDevices({ ...REMOTE_DEFAULTS, remote: 'none' })[0]).toMatchObject({ noRemote: true });
     expect(piDevices({ ...REMOTE_DEFAULTS, remote: 'remote' })[0]).not.toHaveProperty('noRemote');
     expect(piDevices(REMOTE_DEFAULTS)[0]).not.toHaveProperty('noRemote');

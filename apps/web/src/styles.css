@@ -1818,37 +1818,6 @@ table.compact th {
 .wrap-cell {
   min-width: 13.75rem;
 }
-.ev-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 23.75rem;
-  gap: 12px;
-}
-.ev-map {
-  position: relative;
-  min-height: 460px;
-  padding: 0;
-  overflow: hidden;
-}
-/* Side by side: the 3D map fills the screen height under the page head, so its controls are not
-   below the fold on a 720 px laptop and it is not a short strip on a 1440 px monitor. The side
-   column scrolls with the page. */
-@media (min-width: 1201px) {
-  .ev-grid {
-    align-items: start;
-  }
-  .ev-map {
-    min-height: 0;
-    height: max(20rem, calc(100dvh - 14rem));
-  }
-}
-.ev-side {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.ev-side .card {
-  margin: 0;
-}
 .files {
   list-style: none;
   padding: 0;
@@ -1978,7 +1947,6 @@ table.compact th {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     row-gap: 12px;
   }
-  .ev-grid,
   .rep-grid {
     grid-template-columns: 1fr;
   }
@@ -2154,9 +2122,6 @@ table.compact th {
   }
   .meta.cols {
     grid-template-columns: 1fr 1fr;
-  }
-  .ev-map {
-    min-height: 320px;
   }
   /* Phone: the details panel scrolls as one page so the steps and actions are always reachable. */
   .panel.right {

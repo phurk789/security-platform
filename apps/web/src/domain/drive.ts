@@ -45,6 +45,27 @@ export function padToSticks(dx: number, dy: number, radius: number): Sticks {
   return { throttle: round(scale(y)), steer: round(scale(x)) };
 }
 
+/** Speed buttons on the drive panel, as a share of full throttle. Every drive starts on the first (slowest). */
+export const SPEED_LEVELS = [0.3, 0.6, 1];
+
+/**
+ * The speed buttons a vehicle allows: the levels below its gateway's throttle cap, then the cap itself. A gateway
+ * capped at 30 % (the old default) gives a single level, so the panel shows no buttons.
+ */
+export function speedLevels(cap: number): number[] {
+  if (!(cap > 0)) return [];
+  return [...SPEED_LEVELS.filter((l) => l < cap - 1e-6), Math.min(cap, 1)];
+}
+
+/**
+ * Throttle to send for a stick position at a speed level. The gateway multiplies what it gets by its own cap, so
+ * the cap is divided out here: full stick at the 60 % level reaches the vehicle as 60 %.
+ */
+export function throttleAt(stick: number, level: number, cap: number): number {
+  if (!(cap > 0)) return 0;
+  return round(Math.max(-1, Math.min(1, (stick * Math.min(level, cap)) / cap)));
+}
+
 function round(v: number) {
   return Math.round(v * 100) / 100 || 0;
 }

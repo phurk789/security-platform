@@ -1,4 +1,4 @@
-import { Download, Eye, History, Radio, ShieldCheck, StickyNote } from 'lucide-react';
+import { Download, History, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { ageMs, can, currentUser, fmtDate, fmtTime, freshness, userName } from '../domain/policy';
 import { missionForIncident } from '../domain/reducer';
@@ -7,10 +7,10 @@ import type { Device, AppState, Incident } from '@13store/shared';
 import { useStore } from '../store';
 import { age, ago, roleLabel, useT } from '../i18n';
 import { FreshBadge, INCIDENT_LABEL, IncidentBadge, IntegrationBadge, MissionBadge } from '../components/Badges';
-import { CameraFeed } from '../components/CameraFeed';
-import { TwinMap } from '../components/TwinMap';
-import { RecordingsCard } from '../components/Recordings';
 import { KpiDashboard } from '../components/KpiDashboard';
+
+// The Evidence page has its own file (map, image viewer); App imports every page from here.
+export { EvidencePage } from './EvidencePage';
 
 function Page({ title, sub, children, actions }: { title: string; sub?: string; children: React.ReactNode; actions?: React.ReactNode }) {
   return (
@@ -310,142 +310,6 @@ function SiteCell({ d }: { d: Device }) {
         ))}
       </select>
     </span>
-  );
-}
-
-export function EvidencePage() {
-  const { s, dispatch, session } = useStore();
-  const t = useT();
-  const me = currentUser(s);
-  const inc = s.incidents.find((i) => i.id === s.selectedIncidentId) ?? s.incidents[0];
-  const [note, setNote] = useState('');
-  if (!inc)
-    return (
-      <Page title={t('Evidence & replay')}>
-        <p className="empty">{t('No incidents yet.')}</p>
-      </Page>
-    );
-  const related = new Set([inc.id, ...s.incidents.filter((i) => i.duplicateOf === inc.id).map((i) => i.id)]);
-  const files = s.evidence.filter((e) => related.has(e.incidentId)).filter((e) => !s.replay.active || e.capturedAt <= s.replay.at);
-  const start = inc.createdAt - 30_000;
-  const end = s.now;
-  const at = s.replay.active ? s.replay.at : s.now;
-  const cam = inc.cameraId ? s.devices[inc.cameraId] : undefined;
-
-  return (
-    <Page
-      title={t('Evidence & replay')}
-      sub={`${inc.id} · ${inc.title}`}
-      actions={
-        <div className="row gap-s">
-          <select value={inc.id} onChange={(e) => dispatch({ type: 'selectIncident', id: e.target.value })} aria-label={t('Incident')}>
-            {s.incidents.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.id} · {i.title}
-              </option>
-            ))}
-          </select>
-          {s.replay.active ? (
-            <button className="btn-primary" onClick={() => dispatch({ type: 'exitReplay' })}>
-              <Radio size={16} /> {t('Return to live')}
-            </button>
-          ) : (
-            <button className="btn-secondary" onClick={() => dispatch({ type: 'enterReplay', at: inc.createdAt })}>
-              <History size={16} /> {t('Replay this incident')}
-            </button>
-          )}
-        </div>
-      }
-    >
-      {s.replay.active && (
-        <div className="replay-bar">
-          <History size={18} />
-          <b>REPLAY</b>
-          <span className="mono">
-            {fmtDate(at)} {fmtTime(at, true)}
-          </span>
-          <span>{t('You are viewing past data. Device control is off.')}</span>
-          <input
-            type="range"
-            min={start}
-            max={end}
-            step={1000}
-            value={at}
-            onChange={(e) => dispatch({ type: 'seekReplay', at: Number(e.target.value) })}
-            aria-label={t('Replay time')}
-          />
-          <span className="mono muted">−{age(s.now - at)}</span>
-        </div>
-      )}
-      <div className="ev-grid">
-        <div className="ev-map card">
-          <TwinMap />
-        </div>
-        <div className="ev-side">
-          {cam && (
-            <CameraFeed scene={cam.view ?? 'gate'} label={`${cam.id} ${inc.place}`} time={at} freshness={s.replay.active ? 'live' : freshness(s, cam)} replay={s.replay.active} />
-          )}
-          <RecordingsCard inc={inc} />
-          <section className="card">
-            <h3>{t('Files & notes ({n})', { n: files.length })}</h3>
-            <ul className="files">
-              {files.map((e) => (
-                <li key={e.id}>
-                  <div className="row between">
-                    <b>{e.title}</b>
-                    {e.simulated && <span className="badge badge-violet solid">SIMULATED</span>}
-                  </div>
-                  <small className="muted">
-                    {t('{id} · {kind} · {source} · captured {time} · by {who}', {
-                      id: e.id,
-                      kind: t(e.kind),
-                      source: e.source,
-                      time: fmtTime(e.capturedAt, true),
-                      who: e.recordedBy,
-                    })}
-                    {e.incidentId !== inc.id && ` · ${t('from {id} (merged)', { id: e.incidentId })}`}
-                  </small>
-                  <small className="mono muted">sha-256 {e.checksum ? `${e.checksum.slice(0, 16)}…` : t('computing…')}</small>
-                  {session && e.kind !== 'note' && (
-                    <div className="row gap-s">
-                      <button className="btn-ghost small" onClick={() => session.openEvidence(e.id)}>
-                        <Eye size={14} /> {t('Open')}
-                      </button>
-                      {can(me.role, 'evidence.export') && (
-                        <button className="btn-ghost small" onClick={() => session.openEvidence(e.id, true)}>
-                          <Download size={14} /> {t('Download (logged)')}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-            <p className="fine">{t('Checksums show a file has not changed. They are not, on their own, proof of admissibility.')}</p>
-          </section>
-          {!s.replay.active && can(me.role, 'evidence.add') && (
-            <section className="card">
-              <label className="field">
-                <span>
-                  <StickyNote size={14} /> {t('Add note')}
-                </span>
-                <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('Observation, contact made, follow-up…')} />
-              </label>
-              <button
-                className="btn-secondary"
-                disabled={!note.trim()}
-                onClick={() => {
-                  dispatch({ type: 'addNote', incidentId: inc.id, text: note });
-                  setNote('');
-                }}
-              >
-                {t('Attach note')}
-              </button>
-            </section>
-          )}
-        </div>
-      </div>
-    </Page>
   );
 }
 
