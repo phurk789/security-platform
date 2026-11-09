@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boxDistance, cameraTilt, fitRanging, floorDistance, footOf, rangingProblem, type CameraRanging, type RangingSample } from '../src/ranging';
+import { DEPTH_FROM_M, boxDistance, boxDistanceBy, cameraTilt, depthDistance, depthPointOf, fitDepthScale, fitRanging, floorDistance, footOf, rangingProblem, type CameraRanging, type DepthSample, type RangingSample } from '../src/ranging';
 
 const ASPECT = 16 / 9;
 const rad = (d: number) => (d * Math.PI) / 180;
@@ -93,5 +93,86 @@ describe('calibration from people standing at known distances', () => {
     expect(rangingProblem({ heightM: 0 })).toMatch(/height/);
     expect(rangingProblem({ heightM: 0.6, tiltDeg: 95 })).toMatch(/tilt/);
     expect(rangingProblem({ heightM: 0.6, vfovDeg: 5 })).toMatch(/Field of view/);
+  });
+});
+
+describe('far away: the depth model scaled against the floor', () => {
+  // A camera 1.2 m up, 10° down, 50° tall picture; the depth model's value is A/z + B (unknown to the platform).
+  const H = 1.2;
+  const TILT = 10;
+  const VFOV = 50;
+  const A = 3.7;
+  const B = 0.42;
+  const tv = Math.tan(rad(VFOV) / 2);
+  const rayAt = (x: number, y: number) => {
+    const X = 2 * (x - 0.5) * tv * ASPECT;
+    const Y = 2 * (y - 0.5) * tv;
+    const t = rad(TILT);
+    return { X, down: Y * Math.cos(t) + Math.sin(t), fwd: Math.cos(t) - Y * Math.sin(t) };
+  };
+  /** Floor samples on a grid in the lower picture, with a little noise (deterministic). */
+  const floor = (noise = 0.01): DepthSample[] => {
+    const out: DepthSample[] = [];
+    let k = 0;
+    for (let y = 0.6; y <= 0.97; y += 0.05)
+      for (let x = 0.1; x <= 0.9; x += 0.1) {
+        const z = H / rayAt(x, y).down;
+        out.push([x, y, A / z + B + noise * Math.sin(k++ * 12.9898)]);
+      }
+    return out;
+  };
+  /** The depth model's value on someone standing D metres away, read at picture point p. */
+  const relOnBody = (D: number, p: [number, number]) => {
+    const r = rayAt(p[0], p[1]);
+    return (A * Math.hypot(r.X, r.fwd)) / D + B;
+  };
+
+  it('recovers the frame’s scale from the floor, even with things standing on it', () => {
+    const samples = floor();
+    // A box on the floor near the bottom left: much nearer than the floor there.
+    for (const [x, y] of [[0.1, 0.9], [0.2, 0.9], [0.1, 0.95], [0.2, 0.95]] as const) samples.push([x, y, A / 0.5 + B]);
+    const fit = fitDepthScale(samples, ASPECT, H, TILT, VFOV)!;
+    expect(fit).toBeDefined();
+    expect(fit.a).toBeCloseTo(A, 1);
+    expect(fit.b).toBeCloseTo(B, 1);
+    expect(fit.errPct).toBeLessThan(5);
+  });
+
+  it('gives no scale from too few samples, a flat strip, or values that grow with distance', () => {
+    expect(fitDepthScale(floor().slice(0, 4), ASPECT, H, TILT, VFOV)).toBeUndefined();
+    const strip = floor().filter(([, y]) => Math.abs(y - 0.95) < 0.001);
+    expect(fitDepthScale(strip, ASPECT, H, TILT, VFOV)).toBeUndefined();
+    const backwards = floor().map(([x, y, rel]) => [x, y, -rel] as DepthSample);
+    expect(fitDepthScale(backwards, ASPECT, H, TILT, VFOV)).toBeUndefined();
+  });
+
+  it('measures someone 15 m away from the depth model, and up close from the feet', () => {
+    const fit = fitDepthScale(floor(), ASPECT, H, TILT, VFOV)!;
+    const r: CameraRanging = { heightM: H, tiltDeg: TILT, vfovDeg: VFOV, source: 'manual' };
+    // 15 m away, feet in view.
+    const foot = project(0, 15, H, TILT, VFOV);
+    const far: [number, number, number, number] = [foot[0] - 0.01, foot[1] - 0.08, 0.02, 0.08];
+    const at = depthPointOf(far);
+    expect(depthDistance(relOnBody(15, at), at, ASPECT, TILT, VFOV, fit)).toBeCloseTo(15, 0);
+    const got = boxDistanceBy(far, ASPECT, r, undefined, { rel: relOnBody(15, at), fit })!;
+    expect(got.by).toBe('depth');
+    expect(Math.abs(got.m - 15) / 15).toBeLessThan(0.05);
+    // 4 m away: the feet decide.
+    const near = project(0, 4, H, TILT, VFOV);
+    const box: [number, number, number, number] = [near[0] - 0.03, near[1] - 0.3, 0.06, 0.3];
+    expect(boxDistanceBy(box, ASPECT, r, undefined, { rel: relOnBody(4, depthPointOf(box)), fit })).toEqual({ m: 4, by: 'floor' });
+    expect(DEPTH_FROM_M).toBe(8);
+  });
+
+  it('measures someone whose feet are out of the picture from the depth model', () => {
+    const fit = fitDepthScale(floor(), ASPECT, H, TILT, VFOV)!;
+    const r: CameraRanging = { heightM: H, tiltDeg: TILT, vfovDeg: VFOV, source: 'manual' };
+    const cut: [number, number, number, number] = [0.45, 0.3, 0.1, 0.69]; // reaches the bottom edge
+    expect(boxDistance(cut, ASPECT, r)).toBeUndefined();
+    const got = boxDistanceBy(cut, ASPECT, r, undefined, { rel: relOnBody(2.5, depthPointOf(cut)), fit })!;
+    expect(got.by).toBe('depth');
+    expect(got.m).toBeCloseTo(2.5, 0);
+    // No depth value: no distance.
+    expect(boxDistanceBy(cut, ASPECT, r, undefined, { fit })).toBeUndefined();
   });
 });
