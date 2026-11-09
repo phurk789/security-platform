@@ -4039,6 +4039,10 @@ a.latlon:hover {
 .brand-logo {
   display: block;
 }
+/* The sign-in logo grows with the card (110px at the 16px reference size). */
+.login-logo .brand-logo {
+  height: 6.875rem;
+}
 
 /* Admin users card: what each role can do. */
 .role-guide {
