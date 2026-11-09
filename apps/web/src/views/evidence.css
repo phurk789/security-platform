@@ -1,0 +1,648 @@
+/* Evidence & replay (views/EvidencePage.tsx, components/EvidenceMap.tsx, components/EvidenceImage.tsx).
+   Liquid Glass tokens, so the light and dark themes both follow. Sizes in rem so the page grows with
+   the console's root font. What sits on the map stays dark in both themes: it is over imagery. */
+.evd-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+/* The page scrolls; its parts keep their height (the map would otherwise shrink when more is below it). */
+.evd-page > * {
+  flex-shrink: 0;
+}
+.evd-page .page-head {
+  margin-bottom: 0;
+  align-items: center;
+}
+.evd-page .page-head select {
+  max-width: min(30rem, 60vw);
+}
+
+/* Cards: the same glass as the console's panels. */
+.evd-card,
+.evd-head {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.06), transparent 60%), var(--lg-surface, var(--panel));
+  border: 1px solid var(--lg-edge, var(--line));
+  border-radius: 1.25rem;
+  box-shadow: var(--lg-inset, none), var(--lg-shadow, none);
+  color: var(--text);
+}
+.evd-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+/* What happened and who saw it. */
+.evd-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  padding: 0.8rem 1.1rem;
+}
+.evd-sev {
+  width: 0.4rem;
+  align-self: stretch;
+  min-height: 2.6rem;
+  border-radius: 0.3rem;
+  background: var(--amber);
+}
+.evd-sev.sev-high {
+  background: var(--red);
+}
+.evd-sev.sev-low {
+  background: var(--green);
+}
+.evd-head h2 {
+  font-size: 1.05rem;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.evd-head h2 .mono {
+  color: var(--text-2);
+  margin-right: 0.3rem;
+  font-size: 0.92em;
+}
+.evd-head-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.9rem;
+  margin-top: 0.35rem;
+  color: var(--text-2);
+  font-size: 0.8rem;
+}
+.evd-facts {
+  display: flex;
+  gap: 1.6rem;
+  margin: 0;
+}
+.evd-facts > div {
+  min-width: 0;
+}
+.evd-facts dt {
+  margin-bottom: 0.2rem;
+  color: var(--text-3);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.evd-facts dd {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.evd-facts dd small {
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-weight: 450;
+}
+
+/* Map on the left, the selected image and the list on the right, both as tall as the screen allows.
+   Never shorter than the image card plus a few rows of the list: on a short laptop screen the page
+   scrolls a little instead of the list being squeezed out. */
+.evd-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(21rem, 26rem);
+  gap: 0.75rem;
+  height: max(42rem, calc(100dvh - 17.5rem));
+}
+.evd-map {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--lg-edge, var(--line));
+  border-radius: 1.25rem;
+  background: #040a14;
+  box-shadow: var(--lg-shadow, none);
+}
+.evd-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+/* The selected image. */
+.evd-viewer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+}
+.evd-viewer-empty {
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--text-3);
+  text-align: center;
+}
+.evd-viewer-empty p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.evd-viewer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.evd-num {
+  flex: none;
+  width: 1.6rem;
+  height: 1.6rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--lg-accent, var(--text));
+  color: var(--lg-on-accent, var(--bg));
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.evd-viewer-when {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.evd-viewer-when b {
+  font-size: 1rem;
+}
+.evd-viewer-when small {
+  color: var(--text-3);
+  font-size: 0.72rem;
+}
+.evd-step {
+  display: flex;
+  gap: 0.25rem;
+}
+.evd-step .icon-btn {
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+}
+.evd-stage {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: #06090e;
+  cursor: zoom-in;
+}
+.evd-stage > .evd-img {
+  position: absolute;
+  inset: 0;
+}
+.evd-stage-zoom {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.6rem;
+  background: rgba(10, 12, 16, 0.62);
+  color: #f4f4f5;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.evd-stage:hover .evd-stage-zoom,
+.evd-stage:focus-visible .evd-stage-zoom {
+  opacity: 1;
+}
+.evd-stage-sim {
+  position: absolute;
+  left: 0.5rem;
+  top: 0.5rem;
+}
+.evd-facts-shot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.55rem 1rem;
+  padding: 0 0.15rem;
+}
+.evd-facts-shot dd {
+  font-size: 0.86rem;
+}
+.evd-facts-shot .latlon {
+  font-size: 0.74rem;
+  font-weight: 500;
+}
+.evd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.evd-hash {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+  margin: 0;
+  padding: 0 0.15rem;
+  color: var(--text-3);
+  font-size: 0.68rem;
+}
+.evd-intact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 650;
+}
+.evd-intact.ok {
+  color: var(--green);
+}
+.evd-intact.bad {
+  color: var(--red);
+}
+
+/* An evidence image (stage, thumbnails, full size): dark behind the picture in both themes. */
+.evd-img {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #0a0f16;
+  color: rgba(244, 244, 245, 0.45);
+}
+.evd-img img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.evd-img-note {
+  display: grid;
+  place-items: center;
+}
+.evd-img-wait {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  animation: evd-spin 0.9s linear infinite;
+}
+@keyframes evd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .evd-img-wait {
+    animation: none;
+  }
+}
+
+/* Every image, oldest first; the list scrolls, the page does not. */
+.evd-list {
+  flex: 1 1 auto;
+  min-height: 9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.4rem 0.4rem 0.75rem;
+}
+.evd-list ol {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0.35rem 0.2rem 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lg-line-2, var(--line-2)) transparent;
+}
+.evd-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 5.4rem auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 0.8rem;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.evd-row:hover {
+  background: var(--lg-surface-2, var(--panel-2));
+}
+.evd-row.sel {
+  background: var(--lg-surface-2, var(--panel-2));
+  border-color: var(--line-2);
+}
+.evd-thumb {
+  width: 5.4rem;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.55rem;
+}
+.evd-thumb img {
+  object-fit: cover;
+}
+.evd-row .evd-num {
+  width: 1.35rem;
+  height: 1.35rem;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.68rem;
+}
+.evd-row.sel .evd-num {
+  border-color: transparent;
+  background: var(--lg-accent, var(--text));
+  color: var(--lg-on-accent, var(--bg));
+}
+.evd-row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.evd-row-main b {
+  font-size: 0.86rem;
+}
+.evd-row-main small {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.evd-row-flag {
+  display: grid;
+  color: var(--text-3);
+}
+
+/* Recordings, camera, notes and files below the map. */
+.evd-lower {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(24rem, 100%), 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+.evd-lower > .card {
+  margin: 0;
+}
+.evd-files {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem;
+}
+.evd-none {
+  margin: 0;
+  font-size: 0.82rem;
+}
+.evd-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 48rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+}
+.evd-note .btn-secondary {
+  align-self: flex-start;
+}
+.evd-fine {
+  margin: 0;
+}
+
+/* The map: its own key and framing button top left, MapLibre's controls top right. */
+.map-real.evd-map-real .maplibregl-ctrl-top-right {
+  top: 0;
+}
+.evd-map-key {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+.evd-map-key > * {
+  pointer-events: auto;
+}
+.evd-map-fit,
+.evd-map-key ul {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(18, 19, 24, 0.74);
+  color: #ececf0;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+.evd-map-fit {
+  width: 2.3rem;
+  height: 2.3rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.75rem;
+}
+.evd-map-fit:hover {
+  background: rgba(40, 42, 50, 0.85);
+}
+.evd-map-key ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  list-style: none;
+  font-size: 0.72rem;
+}
+.evd-map-key li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.evd-map-key i {
+  flex: none;
+  font-style: normal;
+}
+.evd-key-inc {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid #fff;
+  border-radius: 50%;
+}
+.evd-key-pin {
+  width: 1.1rem;
+  height: 1.1rem;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid #111827;
+  border-radius: 50%;
+  background: #f8fafc;
+  color: #111827;
+  font: 700 0.6rem/1 system-ui, sans-serif;
+}
+.evd-key-ring {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px dashed #fbbf24;
+  border-radius: 50%;
+  background: rgba(251, 191, 36, 0.14);
+}
+
+/* Numbered pins where each image was taken (MapLibre positions them with transform: never set one here). */
+.evd-pin {
+  width: 1.6rem;
+  height: 1.6rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 2px solid #111827;
+  border-radius: 50%;
+  background: #f8fafc;
+  color: #111827;
+  font: 700 0.74rem/1 system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55);
+}
+.evd-pin:hover {
+  box-shadow: 0 0 0 3px rgba(248, 250, 252, 0.45), 0 1px 5px rgba(0, 0, 0, 0.55);
+}
+.evd-pin.sel {
+  z-index: 2;
+  width: 2rem;
+  height: 2rem;
+  border-color: #f8fafc;
+  background: #111827;
+  color: #f8fafc;
+  font-size: 0.85rem;
+  box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.55), 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+.evd-pin-tag {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 0.45rem);
+  translate: 0 -50%;
+  padding: 0.22rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.45rem;
+  background: rgba(18, 19, 24, 0.86);
+  color: #f4f4f5;
+  font: 600 0.7rem/1.2 var(--font);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Full size: dark around the picture in both themes (above light.css's paler scrim). */
+:root .app .scrim.evd-lightbox {
+  z-index: 80;
+  padding: 1.25rem;
+  background: rgba(5, 6, 9, 0.88);
+}
+.evd-lightbox figure {
+  width: min(96vw, 120rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+}
+.evd-lightbox-img {
+  width: 100%;
+  height: min(80dvh, calc(96vw * 9 / 16));
+  border-radius: 1rem;
+  background: #000;
+}
+.evd-lightbox figcaption {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: #f4f4f5;
+  font-size: 0.9rem;
+}
+.evd-lightbox .evd-num {
+  background: #f4f4f5;
+  color: #111;
+}
+.evd-lightbox-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.evd-lightbox-text small {
+  color: rgba(244, 244, 245, 0.6);
+  font-size: 0.74rem;
+}
+.evd-lightbox .icon-btn {
+  width: 2.4rem;
+  height: 2.4rem;
+  place-items: center;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4f5;
+}
+.evd-lightbox .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+/* Narrower screens: map on top, the image and the list side by side under it, then one column. */
+@media (max-width: 1200px) {
+  .evd-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .evd-facts {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+  }
+  .evd-grid {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .evd-map {
+    height: max(22rem, 55dvh);
+  }
+  .evd-side {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
+    align-items: start;
+  }
+  .evd-list ol {
+    max-height: 24rem;
+  }
+}
+@media (max-width: 600px) {
+  .evd-head {
+    padding: 0.75rem;
+  }
+  .evd-map {
+    height: 22rem;
+  }
+  /* The key would cover a phone's small map; the framing button stays. */
+  .evd-map-key ul {
+    display: none;
+  }
+  .evd-facts-shot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .evd-lightbox figcaption {
+    flex-wrap: wrap;
+  }
+}
