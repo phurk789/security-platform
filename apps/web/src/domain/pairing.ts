@@ -40,6 +40,8 @@ export interface RemoteForm {
   piPort?: PiPort;
   /** Raspberry Pi only: still driven with the SIYI remote, or not (the Pi is then its remote). */
   remote?: RemoteChoice;
+  /** Also run the vehicle's SIYI gimbal camera as its own device, so the platform can turn it (gimbalCamera). */
+  gimbal?: boolean;
 }
 
 export const REMOTE_DEFAULTS: RemoteForm = {
@@ -58,6 +60,39 @@ export const TARGET_DEFAULTS: Record<EdgeTarget, Pick<RemoteForm, 'label' | 'gat
 
 /** UniRC 7 / 7 Pro datalink: the remote is a UDP server at this address on its own network. */
 export const UNIRC_DATALINK = { host: '192.168.144.20', port: 19856 };
+
+/** SIYI gimbal SDK (UDP) on the air unit's camera, with the A8 mini's yaw signs measured on the bench (26 Oct). */
+export const SIYI_GIMBAL = { host: '192.168.144.25', port: 37260, yawSpeedSign: 1, yawAngleSign: -1 } as const;
+
+/** The camera's address for the gimbal SDK: the host of the RTSP address, or the SIYI default when there is none. */
+export function cameraHost(rtsp: string): string {
+  const m = /^[a-z][a-z\d+.-]*:\/\/(?:[^@/?#]*@)?([\w.-]+)(?=[:/?#]|$)/i.exec(rtsp.trim());
+  return m?.[1] ?? SIYI_GIMBAL.host;
+}
+
+/** UGV-01 → UGV-01-CAM: the id the vehicle's gimbal camera is registered under. */
+export function gimbalCameraId(vehicleId: string) {
+  return `${vehicleId.trim().toUpperCase()}-CAM`;
+}
+
+/**
+ * The vehicle's SIYI gimbal camera as a device of its own that rides on the vehicle ("follows"): checkpoints and the
+ * cockpit turn it. No pos (it is where the vehicle is; the gateway refuses pos beside follows) and no stream (the video
+ * stays on the vehicle). The gateway talks to it with the SIYI SDK over the same LAN as the video.
+ */
+export function gimbalCamera(f: RemoteForm): Record<string, unknown> {
+  const vehicle = f.vehicleId.trim().toUpperCase();
+  return {
+    type: 'siyi-camera',
+    deviceId: gimbalCameraId(vehicle),
+    model: `SIYI A8 mini on ${vehicle}`,
+    follows: vehicle,
+    host: cameraHost(f.cameraRtsp),
+    port: SIYI_GIMBAL.port,
+    yawSpeedSign: SIYI_GIMBAL.yawSpeedSign,
+    yawAngleSign: SIYI_GIMBAL.yawAngleSign,
+  };
+}
 
 /** The gateway device list for a UGV driven through the remote (same shape as deploy/remote/site.*.json). */
 export function remoteDevices(f: RemoteForm): Record<string, unknown>[] {
@@ -79,6 +114,8 @@ export function remoteDevices(f: RemoteForm): Record<string, unknown>[] {
       gcsRelay: true,
       ...(camera ? { stream: { rtsp: camera, push: true } } : {}),
     },
+    // The remote reaches the camera over the air link, like the video.
+    ...(f.gimbal ? [gimbalCamera(f)] : []),
   ];
 }
 
@@ -103,6 +140,7 @@ export function piDevices(f: RemoteForm): Record<string, unknown>[] {
       ...noRemoteFor(f.remote ?? 'remote'),
       ...(camera ? { stream: { rtsp: camera, push: true } } : {}),
     },
+    ...(f.gimbal ? [gimbalCamera(f)] : []),
   ];
 }
 
@@ -143,6 +181,11 @@ export function unregistered(deviceIds: string[], registered: string[]) {
   return deviceIds.filter((id) => !known.has(id));
 }
 
+/** The device ids a device list names: the vehicle, and its gimbal camera when it is added. */
+export function deviceIdsOf(devices: Record<string, unknown>[]) {
+  return devices.map((d) => d.deviceId).filter((x): x is string => typeof x === 'string');
+}
+
 /** Device ids a JSON device list names (for the warning above), or an error text. */
 export function readDeviceList(json: string): { devices: Record<string, unknown>[]; ids: string[] } | { error: string } {
   let v: unknown;
@@ -153,7 +196,7 @@ export function readDeviceList(json: string): { devices: Record<string, unknown>
   }
   if (!Array.isArray(v) || !v.length || v.some((d) => !d || typeof d !== 'object')) return { error: 'a JSON list of devices, e.g. [{ "type": "mavlink", … }]' };
   const devices = v as Record<string, unknown>[];
-  return { devices, ids: devices.map((d) => d.deviceId).filter((x): x is string => typeof x === 'string') };
+  return { devices, ids: deviceIdsOf(devices) };
 }
 
 /** QR for the edge app (server address + code) as one SVG path of unit squares, plus its size. */

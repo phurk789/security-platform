@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { parsePairingLink, pairingLink } from '@13store/shared';
 import { parseSiteConfig } from '@13store/gateway';
-import { REMOTE_DEFAULTS, TARGET_DEFAULTS, edgeDevices, formatCode, loopbackOrigin, pairingQr, piDevices, piPairCommand, readDeviceList, remoteDevices, timeLeft, unregistered } from './pairing';
+import {
+  REMOTE_DEFAULTS,
+  TARGET_DEFAULTS,
+  cameraHost,
+  deviceIdsOf,
+  edgeDevices,
+  formatCode,
+  gimbalCamera,
+  loopbackOrigin,
+  pairingQr,
+  piDevices,
+  piPairCommand,
+  readDeviceList,
+  remoteDevices,
+  timeLeft,
+  unregistered,
+} from './pairing';
 
 const GEO = { originLat: 13.4367374, originLon: 101.0275798, rotationDeg: -28.5 };
 
@@ -45,6 +61,49 @@ describe('Pair an edge remote (Admin card)', () => {
     expect(pi5[0]).toMatchObject({ link: { mode: 'serial', path: '/dev/ttyAMA10', baud: 115200 }, radio: 'Raspberry Pi on the vehicle (TELEM1, Pi 5 UART connector)' });
     expect(edgeDevices('remote', REMOTE_DEFAULTS)).toEqual(remoteDevices(REMOTE_DEFAULTS));
     expect(TARGET_DEFAULTS.pi.gatewayId).toBe('edge-pi-ugv-01');
+  });
+
+  it("adds the vehicle's SIYI gimbal camera when ticked: it rides on the vehicle, no pos, no video of its own", () => {
+    const camera = {
+      type: 'siyi-camera',
+      deviceId: 'UGV-01-CAM',
+      model: 'SIYI A8 mini on UGV-01',
+      follows: 'UGV-01',
+      host: '192.168.144.25',
+      port: 37260,
+      yawSpeedSign: 1,
+      yawAngleSign: -1,
+    };
+    for (const target of ['pi', 'remote'] as const) {
+      const devices = edgeDevices(target, { ...REMOTE_DEFAULTS, vehicleId: ' ugv-01 ', gimbal: true, remote: target === 'pi' ? 'none-rcu' : undefined });
+      // The same check the server runs on the list before it makes a code.
+      expect(() => parseSiteConfig({ geo: GEO, devices })).not.toThrow();
+      expect(devices).toHaveLength(2);
+      expect(devices[0]).toMatchObject({ type: 'mavlink', deviceId: 'UGV-01', stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', push: true } });
+      expect(devices[1]).toEqual(camera);
+      // The card's "Register … first" warning names the camera too.
+      expect(unregistered(deviceIdsOf(devices), ['UGV-01'])).toEqual(['UGV-01-CAM']);
+    }
+    // Off unless ticked.
+    expect(piDevices(REMOTE_DEFAULTS)).toHaveLength(1);
+    expect(remoteDevices({ ...REMOTE_DEFAULTS, gimbal: false })).toHaveLength(1);
+  });
+
+  it("talks to the gimbal at the camera's RTSP host, or the SIYI default without one", () => {
+    expect(gimbalCamera({ ...REMOTE_DEFAULTS, vehicleId: 'ugv-02', cameraRtsp: ' rtsp://admin:pw@192.168.144.26:8554/main.264 ' })).toMatchObject({
+      deviceId: 'UGV-02-CAM',
+      model: 'SIYI A8 mini on UGV-02',
+      follows: 'UGV-02',
+      host: '192.168.144.26',
+    });
+    expect(cameraHost('rtsp://192.168.144.25/main.264')).toBe('192.168.144.25');
+    expect(cameraHost('rtsp://a8.local:8554/main.264')).toBe('a8.local');
+    for (const none of ['', '  ', 'main.264', 'rtsp://[fe80::1]:8554/x']) expect(cameraHost(none)).toBe('192.168.144.25');
+    // Still valid with no video: the camera is turned, the vehicle just shows no picture.
+    const blind = piDevices({ ...REMOTE_DEFAULTS, cameraRtsp: '', gimbal: true });
+    expect(() => parseSiteConfig({ geo: GEO, devices: blind })).not.toThrow();
+    expect(blind[0]).not.toHaveProperty('stream');
+    expect(blind[1]).toMatchObject({ host: '192.168.144.25' });
   });
 
   it('gives the Pi one command to type, with the console address and the code', () => {
