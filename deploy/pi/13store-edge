@@ -40,7 +40,7 @@ siyi_lan() {
   fi
   nmcli connection delete siyi-lan >/dev/null 2>&1 || true
   nmcli connection add type ethernet ifname "$ifname" con-name siyi-lan autoconnect yes connection.autoconnect-priority 100 \
-    ipv4.method manual ipv4.addresses "$ip/24" ipv4.never-default yes ipv6.method disabled >/dev/null
+    connection.autoconnect-retries 0 ipv4.method manual ipv4.addresses "$ip/24" ipv4.never-default yes ipv6.method disabled >/dev/null
   if nmcli connection up siyi-lan >/dev/null 2>&1; then
     echo "พอร์ต $ifname = $ip (เส้นทางอินเทอร์เน็ตไม่เปลี่ยน)"
   else
