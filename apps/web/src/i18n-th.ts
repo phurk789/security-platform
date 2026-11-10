@@ -379,6 +379,12 @@ export const TH: Record<string, string> = {
   Integration: 'การเชื่อมต่อ',
   Link: 'สัญญาณ',
   'Last seen': 'ล่าสุดเมื่อ',
+  // Devices page: compact table, details under a row.
+  'Link · last seen': 'สัญญาณ · ล่าสุด',
+  'Never connected': 'ยังไม่เคยเชื่อมต่อ',
+  'Just now': 'เมื่อสักครู่',
+  'Show all details': 'แสดงรายละเอียดทั้งหมด',
+  'Hide details': 'ซ่อนรายละเอียด',
   Limitations: 'ข้อจำกัด',
   'view only': 'ดูอย่างเดียว',
   'Evidence & replay': 'หลักฐานและข้อมูลย้อนหลัง',

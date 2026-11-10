@@ -1,11 +1,12 @@
-import { Download, History, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
-import { ageMs, can, currentUser, fmtDate, fmtTime, freshness, userName } from '../domain/policy';
+import { ChevronDown, ChevronsUpDown, Download, History, ShieldCheck } from 'lucide-react';
+import { Fragment, useState } from 'react';
+import { can, currentUser, fmtDate, fmtTime, freshness, userName } from '../domain/policy';
 import { missionForIncident } from '../domain/reducer';
 import { SITE, componentSummary } from '@13store/shared';
 import type { Device, AppState, Incident } from '@13store/shared';
 import { useStore } from '../store';
-import { age, ago, roleLabel, useT } from '../i18n';
+import { age, roleLabel, useT } from '../i18n';
+import { lastSeenText } from '../domain/lastSeen';
 import { FreshBadge, INCIDENT_LABEL, IncidentBadge, IntegrationBadge, MissionBadge } from '../components/Badges';
 import { useCardTable } from '../components/useCardTable';
 import { KpiDashboard } from '../components/KpiDashboard';
@@ -159,102 +160,154 @@ export function DevicesPage() {
   const sites = s.sites ?? [];
   const multi = sites.length > 1;
   const others = sites.filter((x) => x.id !== s.site?.id);
+  const devices = Object.values(s.devices);
+  // The technical details (adapter, firmware, commands, limitations) open under a row, so the
+  // table keeps to what an operator checks at a glance and fits a laptop without scrolling sideways.
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const allOpen = devices.length > 0 && devices.every((d) => open.has(d.id));
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const cols = multi ? 10 : 9;
   return (
     <Page
       title={t('Devices & integrations')}
       sub={t('Integration status (Verified / Testing / Simulated) is separate from whether a device is online. Nothing in this prototype is a verified integration.')}
+      actions={
+        devices.length > 0 && (
+          <button type="button" className="btn-ghost small dev-all" aria-pressed={allOpen} onClick={() => setOpen(allOpen ? new Set() : new Set(devices.map((d) => d.id)))}>
+            <ChevronsUpDown size={14} aria-hidden="true" /> {allOpen ? t('Hide details') : t('Show all details')}
+          </button>
+        )
+      }
     >
       <div className="table-wrap">
-        <table ref={cards} className="card-table">
+        <table ref={cards} className="card-table dev-table">
           <thead>
             <tr>
               <th>{t('Device')}</th>
-              <th>{t('Type')}</th>
               {multi && <th>{t('Site')}</th>}
+              <th>{t('Link · last seen')}</th>
               <th>{t('Integration')}</th>
               <th>{t('Equipment')}</th>
-              <th>{t('Link')}</th>
-              <th>{t('Last seen')}</th>
               <th>{t('Battery')}</th>
               <th>{t('Usage')}</th>
               <th>{t('Service')}</th>
               <th>{t('Control')}</th>
-              <th>{t('Adapter')}</th>
-              <th>{t('Firmware tested')}</th>
-              <th>{t('Commands')}</th>
-              <th>{t('Limitations')}</th>
+              {/* No visible name: on a phone the button then takes the card's full width. */}
+              <th aria-label={t('Details')} />
             </tr>
           </thead>
           <tbody>
-            {Object.keys(s.devices).length === 0 && (
+            {devices.length === 0 && (
               <tr>
-                <td colSpan={multi ? 15 : 14} className="muted">
+                <td colSpan={cols} className="muted">
                   {t('No devices at this site yet. Register one under Administration, or move one here from another site.')}
                 </td>
               </tr>
             )}
-            {Object.values(s.devices).map((d) => {
+            {devices.map((d) => {
               const f = freshness(s, d);
+              const isOpen = open.has(d.id);
               return (
-                <tr
-                  key={d.id}
-                  className="click"
-                  onClick={() => {
-                    dispatch({ type: 'selectDevice', id: d.id });
-                    dispatch({ type: 'setView', view: 'overview' });
-                  }}
-                >
-                  <td className="mono">
-                    {d.id}
-                    <br />
-                    <small className="muted">{d.model}</small>
-                  </td>
-                  <td>{d.kind.toUpperCase()}</td>
-                  {multi && (
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <SiteCell d={d} />
+                <Fragment key={d.id}>
+                  <tr
+                    className={`click${isOpen ? ' is-open' : ''}`}
+                    onClick={() => {
+                      dispatch({ type: 'selectDevice', id: d.id });
+                      dispatch({ type: 'setView', view: 'overview' });
+                    }}
+                  >
+                    <td className="dev-cell">
+                      <span className="dev-id">
+                        <b className="mono">{d.id}</b>
+                        <span className="dev-kind">{d.kind.toUpperCase()}</span>
+                      </span>
+                      {d.model && (
+                        <small className="dev-model" title={d.model}>
+                          {d.model}
+                        </small>
+                      )}
                     </td>
-                  )}
-                  <td>
-                    <IntegrationBadge i={d.integration} />
-                  </td>
-                  <td>
-                    {(() => {
-                      const q = componentSummary(d.components);
-                      return q.total
-                        ? `${q.ok}/${q.total} OK${q.pending ? ` · ${q.pending} ${t('pending')}` : ''}${q.fault + q.offline ? ` · ${q.fault + q.offline} ${t('down')}` : ''}`
-                        : '—';
-                    })()}
-                  </td>
-                  <td>
-                    <FreshBadge f={f} />
-                  </td>
-                  <td className="mono">{ago(ageMs(s, d))}</td>
-                  <td>{d.battery !== undefined ? `${Math.round(d.battery)}%` : '—'}</td>
-                  <td>
-                    {d.stats ? (
-                      <>
-                        {fmtKm(d.stats.odometerM)} · {fmtHours(d.stats.runtimeS)} · {t('{n} missions', { n: d.stats.missions })}
-                        {d.stats.docked && (
-                          <>
-                            <br />
-                            <span className="badge badge-green">{t('Docked')}</span>
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      '—'
+                    {multi && (
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <SiteCell d={d} />
+                      </td>
                     )}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <ServiceCell d={d} />
-                  </td>
-                  <td>{userName(s, d.controlOwner)}</td>
-                  <td className="mono">{d.adapterVersion}</td>
-                  <td>{d.firmwareTested}</td>
-                  <td>{d.commands.join(', ') || t('view only')}</td>
-                  <td className="wrap-cell">{d.limitations}</td>
-                </tr>
+                    <td className="dev-link">
+                      <FreshBadge f={f} />
+                      <small className="muted">{lastSeenText(t, d.lastSeen, s.now)}</small>
+                    </td>
+                    <td>
+                      <IntegrationBadge i={d.integration} />
+                    </td>
+                    <td>
+                      <EquipmentCell d={d} />
+                    </td>
+                    <td className="dev-num">{d.battery !== undefined ? `${Math.round(d.battery)}%` : '—'}</td>
+                    <td>
+                      <UsageCell d={d} />
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <ServiceCell d={d} />
+                    </td>
+                    <td>{userName(s, d.controlOwner)}</td>
+                    <td className="dev-more-cell">
+                      <button
+                        type="button"
+                        className="dev-more"
+                        aria-expanded={isOpen}
+                        aria-controls={`dev-detail-${d.id}`}
+                        aria-label={t('Details')}
+                        title={t('Details')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggle(d.id);
+                        }}
+                      >
+                        <ChevronDown size={14} aria-hidden="true" /> <span className="dev-more-label">{t('Details')}</span>
+                      </button>
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr className="dev-detail" id={`dev-detail-${d.id}`}>
+                      <td colSpan={cols}>
+                        <dl className="dev-facts">
+                          <div>
+                            <dt>{t('Adapter')}</dt>
+                            <dd className="mono">{d.adapterVersion || '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>{t('Firmware tested')}</dt>
+                            <dd>{d.firmwareTested || '—'}</dd>
+                          </div>
+                          <div>
+                            <dt>{t('Commands')}</dt>
+                            <dd>
+                              {d.commands.length ? (
+                                <span className="dev-cmds">
+                                  {d.commands.map((c) => (
+                                    <code key={c}>{c}</code>
+                                  ))}
+                                </span>
+                              ) : (
+                                t('view only')
+                              )}
+                            </dd>
+                          </div>
+                          <div className="is-wide">
+                            <dt>{t('Limitations')}</dt>
+                            <dd>{d.limitations || '—'}</dd>
+                          </div>
+                        </dl>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
@@ -278,6 +331,39 @@ export function DevicesPage() {
         </section>
       )}
     </Page>
+  );
+}
+
+/** Its parts (camera, GNSS, radio …): how many are OK, then how many are down or not checked yet. */
+function EquipmentCell({ d }: { d: Device }) {
+  const t = useT();
+  const q = componentSummary(d.components);
+  if (!q.total) return <>—</>;
+  const down = q.fault + q.offline;
+  return (
+    <span className="eq-cell">
+      <b className={down ? 'is-bad' : q.pending ? 'is-warn' : 'is-ok'}>{q.ok}/{q.total} OK</b>
+      {down > 0 && <small className="is-bad">{down} {t('down')}</small>}
+      {q.pending > 0 && <small className="is-warn">{q.pending} {t('pending')}</small>}
+    </span>
+  );
+}
+
+/** Distance, run time and missions, each kept whole on its line. */
+function UsageCell({ d }: { d: Device }) {
+  const t = useT();
+  const st = d.stats;
+  if (!st) return <>—</>;
+  return (
+    <span className="usage-cell">
+      <span>{fmtKm(st.odometerM)}</span> · <span>{fmtHours(st.runtimeS)}</span> · <span>{t('{n} missions', { n: st.missions })}</span>
+      {st.docked && (
+        <>
+          <br />
+          <span className="badge badge-green">{t('Docked')}</span>
+        </>
+      )}
+    </span>
   );
 }
 
