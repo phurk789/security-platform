@@ -7,6 +7,7 @@ import type { Device, AppState, Incident } from '@13store/shared';
 import { useStore } from '../store';
 import { age, ago, roleLabel, useT } from '../i18n';
 import { FreshBadge, INCIDENT_LABEL, IncidentBadge, IntegrationBadge, MissionBadge } from '../components/Badges';
+import { useCardTable } from '../components/useCardTable';
 import { KpiDashboard } from '../components/KpiDashboard';
 
 // The Evidence page has its own file (map, image viewer); App imports every page from here.
@@ -30,6 +31,7 @@ function Page({ title, sub, children, actions }: { title: string; sub?: string; 
 export function IncidentsPage() {
   const { s, dispatch } = useStore();
   const t = useT();
+  const cards = useCardTable();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [zone, setZone] = useState('');
@@ -83,7 +85,7 @@ export function IncidentsPage() {
         <span className="muted">{t('{n} of {total}', { n: list.length, total: s.incidents.length })}</span>
       </div>
       <div className="table-wrap">
-        <table>
+        <table ref={cards} className="card-table">
           <thead>
             <tr>
               <th>ID</th>
@@ -153,6 +155,7 @@ export function IncidentsPage() {
 export function DevicesPage() {
   const { s, dispatch, session } = useStore();
   const t = useT();
+  const cards = useCardTable();
   const sites = s.sites ?? [];
   const multi = sites.length > 1;
   const others = sites.filter((x) => x.id !== s.site?.id);
@@ -162,7 +165,7 @@ export function DevicesPage() {
       sub={t('Integration status (Verified / Testing / Simulated) is separate from whether a device is online. Nothing in this prototype is a verified integration.')}
     >
       <div className="table-wrap">
-        <table>
+        <table ref={cards} className="card-table">
           <thead>
             <tr>
               <th>{t('Device')}</th>
@@ -354,6 +357,7 @@ export function buildReport(s: AppState, inc: Incident) {
 export function ReportsPage() {
   const { s, dispatch, mode } = useStore();
   const t = useT();
+  const auditCards = useCardTable();
   const me = currentUser(s);
   const inc = s.incidents.find((i) => i.id === s.selectedIncidentId) ?? s.incidents[0];
   if (!inc)
@@ -433,7 +437,7 @@ export function ReportsPage() {
             <ShieldCheck size={16} /> {t('Audit log ({n})', { n: s.audit.length })}
           </h3>
           <div className="table-wrap">
-            <table className="compact">
+            <table ref={auditCards} className="compact card-table">
               <thead>
                 <tr>
                   <th>{t('Time')}</th>

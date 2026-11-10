@@ -1833,6 +1833,79 @@ table.compact th {
 .wrap-cell {
   min-width: 13.75rem;
 }
+/* Wide tables on a phone: each row is a card, each cell with its column's name on the left
+   (useCardTable copies the head's names onto the cells as data-label). The first cell heads the card. */
+@media (max-width: 600px) {
+  .table-wrap:has(> table.card-table) {
+    overflow-x: visible;
+    border: 0;
+  }
+  table.card-table,
+  table.card-table > tbody,
+  table.card-table > tbody > tr,
+  table.card-table > tbody > tr > td {
+    display: block;
+    width: auto;
+  }
+  table.card-table {
+    background: none;
+  }
+  /* Out of sight but still read out. */
+  table.card-table > thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  table.card-table > tbody > tr {
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+  }
+  table.card-table > tbody > tr > td {
+    position: relative;
+    min-width: 0;
+    padding: 6px 0 6px 38%;
+    border-bottom: 1px dashed var(--line);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  table.card-table > tbody > tr > td:last-child {
+    border-bottom: 0;
+  }
+  table.card-table > tbody > tr > td[data-label]::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: calc(38% - 10px);
+    color: var(--text-3);
+    font-family: var(--font);
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  /* No column name (a button column, a row-wide note): the full width. */
+  table.card-table > tbody > tr > td:not([data-label]),
+  table.card-table > tbody > tr > td:first-child {
+    padding-left: 0;
+  }
+  table.card-table > tbody > tr > td:first-child {
+    font-weight: 600;
+    border-bottom: 1px solid var(--line);
+  }
+  table.card-table > tbody > tr > td:first-child::before {
+    content: none;
+  }
+  table.card-table td.mono:has(> small),
+  table.card-table .wrap-cell {
+    min-width: 0;
+  }
+}
 .files {
   list-style: none;
   padding: 0;

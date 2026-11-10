@@ -88,16 +88,18 @@
 /* min-height, not height: in the Command Center's boxes the select gets 9px padding, and a fixed
    30px left ~10px for the words (Thai was cut through the middle). */
 .ptz-pl-row select { flex: 1; min-width: 0; min-height: 30px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); padding: 0 6px; font-size: 0.78rem; }
-/* The announcement is a whole sentence: its list takes a row of its own so the sentence that will
-   go out over the loudspeaker is readable; language and Announce sit under it. */
+/* The list shows short names; the whole sentence that will go out over the loudspeaker, in the
+   language chosen for it, is written out under the row. */
+/* In a narrow box the list takes a row of its own (language and Announce under it); wider, one row. */
 .ptz-pl-row.is-speak { flex-wrap: wrap; }
-.ptz-pl-row.is-speak select { flex: 1 1 100%; }
+.ptz-pl-row.is-speak select { flex: 1 1 9rem; }
+.ptz-say { margin: 0; padding: 6px 9px; border-radius: 6px; border-left: 2px solid var(--line-2); background: var(--panel-2); color: var(--text-2); font-size: 0.75rem; line-height: 1.45; overflow-wrap: anywhere; }
 .ptz-lang { flex: none; width: 36px; height: 30px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text-2); font-size: 0.72rem; font-weight: 700; }
 .ptz-btn.pl-spot.on { background: rgba(255, 236, 160, 0.18); border-color: #f5d76e; color: #f5d76e; }
 .ptz-btn.pl-beacon.on { border-color: var(--red); color: #fff; animation: pl-police 0.7s steps(2) infinite; }
 @keyframes pl-police { 0% { background: rgba(239, 68, 68, 0.55); } 50% { background: rgba(59, 130, 246, 0.55); } }
 .ptz-btn.pl-speak.on { border-color: var(--cyan); color: var(--cyan); }
-.ptz-pl-now { font-size: 0.76rem; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptz-pl-now { font-size: 0.76rem; line-height: 1.45; color: var(--cyan); overflow-wrap: anywhere; }
 :root[data-theme='light'] .ptz-btn.pl-spot.on { background: #fff6d6; border-color: #d4a514; color: #8a6400; }
 @media (prefers-reduced-motion: reduce) { .ptz-btn.pl-beacon.on { animation: none; background: rgba(239, 68, 68, 0.45); } }
 

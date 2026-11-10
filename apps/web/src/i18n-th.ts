@@ -749,6 +749,15 @@ export const TH: Record<string, string> = {
   Announcement: 'ข้อความประกาศ',
   'Announcement language': 'ภาษาที่ใช้ประกาศ',
   Announce: 'ประกาศ',
+  // Short names in the announcement list; the sentence itself shows in full under it.
+  'Restricted area': 'เขตหวงห้าม',
+  'Stay where you are': 'ให้รออยู่ที่เดิม',
+  'Do not touch the vehicle': 'ห้ามสัมผัสรถ',
+  'Service gate closed': 'ประตูบริการปิด',
+  'Move away calmly': 'ให้ออกจากพื้นที่',
+  'What the loudspeaker will say': 'ข้อความที่ลำโพงจะพูด',
+  // Timeline: a pending step (short, six steps share the bar).
+  'Not yet': 'รอ',
   'Searchlight on.': 'เปิดไฟส่องสว่างแล้ว',
   'Searchlight off.': 'ปิดไฟส่องสว่างแล้ว',
   'Warning light on.': 'เปิดไฟไซเรนแล้ว',
