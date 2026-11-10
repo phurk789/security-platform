@@ -2,19 +2,27 @@
 // edge app on the SIYI remote, or the kit on a Raspberry Pi on the vehicle (deploy/pi), exchanges for its
 // gateway key and site configuration. The key never appears here: the server hands it straight to the edge.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { QrCode, Smartphone, X } from 'lucide-react';
+import { Plus, QrCode, Smartphone, X } from 'lucide-react';
 import { PAIRING_CODE_TTL_MIN, fmtTime, type PairingCodeView, type SiteRef } from '@13store/shared';
 import type { Api } from '../api';
 import { useT } from '../i18n';
+import { useStore } from '../store';
 import {
   REMOTE_DEFAULTS,
+  SIYI_GIMBAL,
   TARGET_DEFAULTS,
+  cameraHost,
+  deviceIdsOf,
   edgeDevices,
   formatCode,
+  freeGatewayId,
+  gatewayClash,
+  gimbalCameraId,
   loopbackOrigin,
   pairingQr,
   piPairCommand,
   readDeviceList,
+  registrationsFor,
   timeLeft,
   unregistered,
   type EdgeTarget,
@@ -47,6 +55,7 @@ export function EdgePairingCard({
   currentSiteId?: string;
 }) {
   const t = useT();
+  const { session } = useStore();
   const [codes, setCodes] = useState<PairingCodeView[]>([]);
   const [form, setForm] = useState<RemoteForm>(REMOTE_DEFAULTS);
   const [target, setTarget] = useState<EdgeTarget>('remote');
@@ -78,13 +87,31 @@ export function EdgePairingCard({
   const live = shown && codes.find((c) => c.id === shown.id);
   const status = live?.status ?? shown?.status;
 
-  const parsed = advanced ? readDeviceList(json) : { devices: edgeDevices(target, form), ids: [form.vehicleId.trim().toUpperCase()] };
+  const built = edgeDevices(target, form);
+  const parsed = advanced ? readDeviceList(json) : { devices: built, ids: deviceIdsOf(built) };
+  // The vehicle's gimbal camera, when added: shown with the vehicle id typed so far.
+  const vehicle = form.vehicleId.trim().toUpperCase() || REMOTE_DEFAULTS.vehicleId;
+  const cam = gimbalCameraId(vehicle);
   // The gateway's key is scoped to the site it pairs for: its devices must be registered there.
   const here = site?.devices ?? registered;
   const missing = 'ids' in parsed ? unregistered(parsed.ids, here) : [];
   const elsewhere = missing.filter((id) => sites.some((x) => x.id !== site?.id && x.devices?.includes(id)));
   const unknown = missing.filter((id) => !elsewhere.includes(id));
+  // Devices the server does not know at all: the administrator may register them here, at the site being paired.
+  const regs = 'devices' in parsed ? registrationsFor(parsed.devices, unknown) : [];
+  // Another edge holds this gateway id: a code for it would cut that edge off.
+  const clash = gatewayClash(form.gatewayId, 'ids' in parsed ? parsed.ids : [], codes);
+  const freeId = clash ? freeGatewayId(form.gatewayId, codes) : '';
   const qr = useMemo(() => (shown?.code ? pairingQr(server, shown.code) : null), [shown, server]);
+
+  const registerMissing = () =>
+    act(
+      async () => {
+        for (const r of regs) await api.post('/devices', { id: r.id, kind: r.kind, model: r.model, siteId: site?.id });
+        await session?.refreshSites();
+      },
+      t('{id} registered.', { id: regs.map((r) => r.id).join(', ') }),
+    );
 
   const create = () =>
     act(async () => {
@@ -248,6 +275,10 @@ export function EdgePairingCard({
                 <option value="none">{t('No remote · no gears')}</option>
               </select>
             )}
+            <label className="check">
+              <input id="pair-gimbal" type="checkbox" checked={!!form.gimbal} onChange={(e) => setForm({ ...form, gimbal: e.target.checked })} />
+              {t("Add the vehicle's gimbal camera ({id}) so the platform can turn it", { id: cam })}
+            </label>
           </>
         )}
         <label className="check">
@@ -268,8 +299,39 @@ export function EdgePairingCard({
           <QrCode size={16} /> {t('Create pairing code')}
         </button>
       </form>
+      {form.gimbal && !advanced && (
+        <p className="fine">
+          {t(
+            '{cam} is the SIYI gimbal camera on {vehicle}, reached at {host} (SIYI SDK, UDP {port}); its video stays on {vehicle}. Register {cam} as CCTV first: it uses one more licence device. A supervisor then promotes {cam} to LIVE MANUAL: until then checkpoints take photos but do not turn it.',
+            { cam, vehicle, host: cameraHost(form.cameraRtsp), port: SIYI_GIMBAL.port },
+          )}
+        </p>
+      )}
       {'error' in parsed && advanced && <p className="fine warn-text">{t('Device list: {error}', { error: parsed.error })}</p>}
-      {unknown.length > 0 && <p className="fine warn-text">{t('Register {ids} under "Edge gateways and devices" first, or the server refuses them.', { ids: unknown.join(', ') })}</p>}
+      {clash && (
+        <div className="pair-missing">
+          <p className="fine warn-text">
+            {t('{gw} is the gateway of {ids} ({label}). A code for it cuts that edge off: give this edge its own gateway id.', {
+              gw: form.gatewayId.trim(),
+              ids: clash.deviceIds.join(', '),
+              label: clash.label,
+            })}
+          </p>
+          <button type="button" className="btn-secondary small" onClick={() => setForm({ ...form, gatewayId: freeId })}>
+            {t('Use {id}', { id: freeId })}
+          </button>
+        </div>
+      )}
+      {unknown.length > 0 && (
+        <div className="pair-missing">
+          <p className="fine warn-text">{t('Register {ids} under "Edge gateways and devices" first, or the server refuses them.', { ids: unknown.join(', ') })}</p>
+          {regs.length > 0 && (
+            <button type="button" className="btn-secondary small" onClick={() => void registerMissing()}>
+              <Plus size={14} /> {t('Register {ids} now', { ids: regs.map((r) => `${r.id} (${r.kind.toUpperCase()})`).join(', ') })}
+            </button>
+          )}
+        </div>
+      )}
       {elsewhere.length > 0 && (
         <p className="fine warn-text">{t('{ids} is registered at another site. Move it to {site} under Sites first, or the server refuses it.', { ids: elsewhere.join(', '), site: site?.name ?? '' })}</p>
       )}

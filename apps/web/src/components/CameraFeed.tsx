@@ -1,6 +1,6 @@
 import { fmtDate, fmtTime } from '../domain/policy';
 import { tr } from '../i18n';
-import type { Freshness } from '@13store/shared';
+import { vehicleCameraOf, type Freshness } from '@13store/shared';
 import { SceneFeed } from './SceneFeed';
 import { webglAvailable } from '../twin/world';
 import { useStore } from '../store';
@@ -74,7 +74,8 @@ export function CameraFeed({
   const local = !compact && !liveStream && !replay && !!id && prefs.webcamDevice === id;
   const recorded = !compact && !liveStream && !replay && !local && !!id && (prefs.source === 'recorded' || (prefs.source === null && !!sample.clip?.preferred)) && !!sample.clip && !sample.missing;
   const live3d = !compact && !liveStream && !local && !recorded && !!id && webglAvailable();
-  const g = dev?.capabilities.includes('gimbal') ? dev.gimbal : undefined;
+  // Gimbal readout: the device's own gimbal, or the gimbal camera riding on the vehicle.
+  const g = dev ? vehicleCameraOf(dev, Object.values(s.devices))?.gimbal : undefined;
   // The feed clips its content, so the source menu is positioned on the viewport.
   const [menu, setMenu] = useState<{ top: number; right: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -121,6 +122,7 @@ export function CameraFeed({
             return u;
           }}
           onBadge={(badge) => setReported({ key: streamKey, badge })}
+          statusOf={dev!.id}
         />
       ) : live3d ? (
         <SceneFeed deviceId={id!} ir={night && id!.startsWith('CCTV')} frozen={frozen} day={!night} facing={facing} />

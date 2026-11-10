@@ -1,11 +1,12 @@
 // Admin → "Edge app updates": publish a new build of the edge Android app. Paired remotes find it with their
 // gateway key ("Check for updates" in the app) and install it after the person on site confirms.
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { PackageCheck, Upload } from 'lucide-react';
+import { PackageCheck, Plus, Upload } from 'lucide-react';
 import { fmtDate, fmtTime, type EdgeAppRelease } from '@13store/shared';
 import type { Api } from '../api';
 import { useT } from '../i18n';
 import { fmtMB, publishQuery, readBuildManifest, uploadProblem, type BuildManifest } from '../domain/edgeApp';
+import { CardHead } from './CardHead';
 
 export function EdgeAppCard({
   api,
@@ -25,6 +26,8 @@ export function EdgeAppCard({
   const [manifest, setManifest] = useState<BuildManifest | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The publish form opens from the card header. */
+  const [open, setOpen] = useState(false);
 
   const load = useCallback(() => api.get<{ release: EdgeAppRelease | null }>('/admin/edge-app').then((r) => setRelease(r.release)), [api]);
   useEffect(() => {
@@ -51,6 +54,7 @@ export function EdgeAppCard({
         await api.upload(`/admin/edge-app?${publishQuery(manifest)}`, apk, 'application/vnd.android.package-archive');
         setApk(null);
         setManifest(null);
+        setOpen(false);
         await load();
       } finally {
         setBusy(false);
@@ -59,14 +63,53 @@ export function EdgeAppCard({
 
   return (
     <section className="card">
-      <h3>
-        <PackageCheck size={16} /> {t('Edge app updates')}
-      </h3>
-      <p className="fine" style={{ marginTop: 0 }}>
-        {t(
+      <CardHead
+        icon={<PackageCheck size={16} />}
+        title={t('Edge app updates')}
+        help={t(
           'Publish a new build of the 13STORE Edge app: choose the .apk and the .json that build-apk.sh wrote next to it. Paired remotes see it under "Check for updates" and install it after the person on site confirms. The app keeps its pairing.',
         )}
-      </p>
+        action={
+          !open && (
+            <button type="button" className="btn-secondary small" onClick={() => setOpen(true)}>
+              <Plus size={14} /> {t('Publish a new version')}
+            </button>
+          )
+        }
+      />
+      {open && (
+        <div className="card-form">
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void publish();
+            }}
+          >
+            <label className="check">
+              APK <input id="app-apk" type="file" accept=".apk,application/vnd.android.package-archive" onChange={(e) => setApk(e.target.files?.[0] ?? null)} />
+            </label>
+            <label className="check">
+              {t('Manifest')} <input id="app-manifest" type="file" accept=".json,application/json" onChange={(e) => void pickManifest(e.target.files?.[0])} />
+            </label>
+            <button className="btn-primary" disabled={!apk || !manifest || !!problem || busy}>
+              <Upload size={16} /> {busy ? t('Uploading…') : manifest ? t('Publish {v}', { v: manifest.versionName }) : t('Publish')}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setOpen(false);
+                setApk(null);
+                setManifest(null);
+              }}
+            >
+              {t('Cancel')}
+            </button>
+          </form>
+          {problem && <p className="fine warn-text">{problem}</p>}
+        </div>
+      )}
       {lockNote ? (
         lockNote
       ) : release ? (
@@ -86,24 +129,6 @@ export function EdgeAppCard({
       ) : (
         <p className="muted">{t('No app update published.')}</p>
       )}
-      <form
-        className="inline-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void publish();
-        }}
-      >
-        <label className="check">
-          APK <input id="app-apk" type="file" accept=".apk,application/vnd.android.package-archive" onChange={(e) => setApk(e.target.files?.[0] ?? null)} />
-        </label>
-        <label className="check">
-          {t('Manifest')} <input id="app-manifest" type="file" accept=".json,application/json" onChange={(e) => void pickManifest(e.target.files?.[0])} />
-        </label>
-        <button className="btn-primary" disabled={!apk || !manifest || !!problem || busy}>
-          <Upload size={16} /> {busy ? t('Uploading…') : manifest ? t('Publish {v}', { v: manifest.versionName }) : t('Publish')}
-        </button>
-      </form>
-      {problem && <p className="fine warn-text">{problem}</p>}
     </section>
   );
 }

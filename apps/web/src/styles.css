@@ -2252,25 +2252,55 @@ code {
   background: rgba(56, 189, 248, 0.1);
   color: var(--text);
 }
-/* ---------- Administration: cards in groups, two columns per group that end level ---------- */
+/* ---------- Administration: one tab of cards at a time, two columns that end level ---------- */
 .admin-page {
   container: admin / inline-size;
 }
-.admin-jump {
+.admin-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: -4px 0 16px;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px;
+  margin: 0 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
 }
-.admin-jump .chip {
-  font-size: 0.82rem;
-  padding: 5px 12px;
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.95rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-2);
+  font-weight: 600;
+  font-size: 0.9rem;
 }
-.admin-lock,
+.admin-tab:hover:not(.on) {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.admin-tab.on {
+  color: var(--text);
+  background: var(--panel-2);
+  border-color: var(--line-2);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+.admin-tab .tab-lock {
+  color: var(--amber);
+}
+.admin-tab-hint {
+  margin: 0;
+  font-size: 0.85rem;
+}
 .admin-msg {
   margin: 0 0 14px;
 }
-.admin-lock > span,
 .admin-msg > span {
   flex: 1 1 18rem;
 }
@@ -2292,15 +2322,73 @@ code {
   display: flex;
   flex-direction: column;
   gap: 0.875rem;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
   scroll-margin-top: 0.75rem;
 }
-.admin-group > header h2 {
-  font-size: 1.1rem;
+.admin-group[hidden] {
+  display: none;
 }
-.admin-group > header p {
-  margin: 2px 0 0;
+/* Card title row: title, the ⓘ for the explanation, the card's action on the right. */
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 2rem;
+}
+.card-head h3 {
+  min-width: 0;
+}
+.card-head-action {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.card-help-btn {
+  color: var(--text-3);
+  padding: 4px;
+}
+/* Small buttons are small here too (the theme only shrinks small primary and ghost buttons). */
+.admin-page .btn-secondary.small,
+.admin-page .btn-primary.small {
+  min-height: 2.125rem;
+  padding: 0.3rem 0.8rem;
   font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.card-help {
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.card-help p {
+  margin: 0 0 6px;
+}
+.card-help p:last-child {
+  margin-bottom: 0;
+}
+/* An add/edit form, opened from the card header. */
+.card-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.card-form .inline-form {
+  margin: 0;
+}
+.card-form .form-hint {
+  margin: 0;
 }
 .admin-group .card {
   margin: 0;
@@ -2325,10 +2413,6 @@ code {
   gap: 0.875rem;
   min-width: 0;
 }
-/* The last card of the shorter column grows, so both columns end on the same line. */
-.admin-col > .card:last-child {
-  flex: 1 1 auto;
-}
 @container admin (max-width: 60rem) {
   .admin-cols {
     grid-template-columns: minmax(0, 1fr);
@@ -2348,10 +2432,6 @@ code {
 }
 .admin-locked > span {
   flex: 1 1 14rem;
-}
-/* Why a button is still grey. */
-.admin-group .card > p.form-hint {
-  margin-top: -4px;
 }
 /* List rows: the text takes the room and wraps, the buttons stay on the right. */
 .admin-page .list li > :first-child {
@@ -2402,6 +2482,16 @@ code {
 }
 .secret {
   word-break: break-all;
+}
+/* Admin → Pair an edge remote: devices the server does not know yet, with a button to register them. */
+.pair-missing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.pair-missing > p {
+  margin: 0;
 }
 /* Admin → Pair an edge remote: the QR and digits are read from a remote's screen distance. */
 .pair-code {

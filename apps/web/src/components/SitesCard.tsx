@@ -7,6 +7,7 @@ import type { SiteRef } from '@13store/shared';
 import { useStore } from '../store';
 import { useT } from '../i18n';
 import { nextSiteAccess, parseLatLon } from '../domain/sites';
+import { CardHead } from './CardHead';
 
 /** The sites a user may see, as a small tick list. [] = every site. */
 export function SiteAccess({ value, sites, onChange, id }: { value: string[]; sites: SiteRef[]; onChange: (ids: string[]) => void; id?: string }) {
@@ -49,6 +50,8 @@ export function SitesCard({
   const [name, setName] = useState('');
   const [where, setWhere] = useState('');
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  /** The add-site form opens from the card header. */
+  const [adding, setAdding] = useState(false);
   const pos = parseLatLon(where);
   const done = async (fn: () => Promise<unknown>, ok: string) => {
     await act(fn, ok);
@@ -57,12 +60,54 @@ export function SitesCard({
 
   return (
     <section className="card sites-card">
-      <h3>
-        <MapPin size={16} /> {limit !== undefined && limit < 1000 ? t('Sites ({n} of {max})', { n: sites.length, max: limit }) : t('Sites ({n})', { n: sites.length })}
-      </h3>
-      <p className="fine" style={{ marginTop: 0 }}>
-        {t('Each device belongs to one site. Move a device while it is offline, then pair its gateway again at the new site: positions are converted with each site’s own map anchor.')}
-      </p>
+      <CardHead
+        icon={<MapPin size={16} />}
+        title={limit !== undefined && limit < 1000 ? t('Sites ({n} of {max})', { n: sites.length, max: limit }) : t('Sites ({n})', { n: sites.length })}
+        help={t('Each device belongs to one site. Move a device while it is offline, then pair its gateway again at the new site: positions are converted with each site’s own map anchor.')}
+        action={
+          !adding && (
+            <button type="button" className="btn-secondary small" onClick={() => setAdding(true)}>
+              <Plus size={14} /> {t('Add site')}
+            </button>
+          )
+        }
+      />
+      {adding && (
+        <div className="card-form">
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!pos) return;
+              // Cleared and closed only when the site was added; a refusal keeps what was typed.
+              void done(async () => {
+                await api.post('/sites', { name: name.trim(), originLat: pos.lat, originLon: pos.lon, rotationDeg: 0 });
+                setName('');
+                setWhere('');
+                setAdding(false);
+              }, t('Site {name} added.', { name: name.trim() }));
+            }}
+          >
+            <input placeholder={t('New site name, e.g. Event hall A')} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} aria-label={t('Site name')} autoFocus />
+            <input placeholder={t('Anchor: latitude, longitude')} value={where} onChange={(e) => setWhere(e.target.value)} aria-label={t('Anchor: latitude, longitude')} />
+            <button className="btn-primary" disabled={!name.trim() || !pos}>
+              <Plus size={16} /> {t('Add site')}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setAdding(false);
+                setName('');
+                setWhere('');
+              }}
+            >
+              {t('Cancel')}
+            </button>
+          </form>
+          <p className="fine form-hint">{t('The anchor is the north-west corner of the site, as latitude, longitude (copy it from Google Maps). Then open the site and draw its operating area on the map.')}</p>
+        </div>
+      )}
       <ul className="list sites-list">
         {sites.map((x) => (
           <li key={x.id}>
@@ -147,24 +192,6 @@ export function SitesCard({
           </li>
         ))}
       </ul>
-      <form
-        className="inline-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!pos) return;
-          void done(() => api.post('/sites', { name: name.trim(), originLat: pos.lat, originLon: pos.lon, rotationDeg: 0 }), t('Site {name} added.', { name: name.trim() })).then(() => {
-            setName('');
-            setWhere('');
-          });
-        }}
-      >
-        <input placeholder={t('New site name, e.g. Event hall A')} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
-        <input placeholder={t('Anchor: latitude, longitude')} value={where} onChange={(e) => setWhere(e.target.value)} />
-        <button className="btn-primary" disabled={!name.trim() || !pos}>
-          <Plus size={16} /> {t('Add site')}
-        </button>
-      </form>
-      <p className="fine">{t('The anchor is the north-west corner of the site, as latitude, longitude (copy it from Google Maps). Then open the site and draw its operating area on the map.')}</p>
       {limit !== undefined && sites.length >= limit && (
         <p className="fine warn-text">
           {t('The licence allows {n} sites and all are in use. For more, install a licence file with a higher site limit (see License below).', { n: limit })}

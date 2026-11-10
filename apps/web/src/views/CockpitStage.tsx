@@ -1,12 +1,14 @@
 // The Command Centre's stage: one main view with a small inset view (picture in picture).
 // Map first puts the system map in front with the camera in the corner and a strip of key
-// numbers. The cockpit (ห้องบังคับ) puts the onboard camera in front with a driving HUD over it
-// and the map in the corner, following the vehicle.
+// numbers. The cockpit (ห้องบังคับ) puts the onboard camera in front with a thin, see-through
+// HUD over it and the map in the corner, following the vehicle. When the vehicle is offline the
+// HUD drops its instruments (they would all read "—") and one card in the middle says what is
+// lost: the vehicle's data, its live picture, or both.
 // Both views stay mounted in a fixed order, so swapping them never restarts the video stream
 // or the map. Driving controls are NOT here: DrivePanel stays in the right column. The unit's
 // name and badges are in the workspace header above the stage, so the HUD does not repeat them.
 import { useState, type ReactNode } from 'react';
-import { Activity, Battery, Camera, Gauge, MapPinned, Maximize2, Navigation, Radio, ScanEye, Signal, Thermometer, Timer, X, type LucideIcon } from 'lucide-react';
+import { Activity, Battery, Camera, Gauge, LoaderCircle, MapPinned, Maximize2, Navigation, Radio, RotateCw, ScanEye, Signal, Thermometer, Timer, VideoOff, X, type LucideIcon } from 'lucide-react';
 import { MISSION_BATTERY_HOLD_PCT, MISSION_BATTERY_WARN_PCT, checkpointLabel, dist, routeSpeedOf, type Device, type Mission } from '@13store/shared';
 import { fmtTime, freshness } from '../domain/policy';
 import { displayNumber } from '../domain/liquidPresentation';
@@ -19,6 +21,7 @@ import { TelemetryPanel } from '../components/TelemetryPanel';
 import { AiSwitch } from '../components/AiSwitch';
 import { useLiveTracks } from '../domain/visionTracks';
 import { aiSources, aiWaiting } from '../domain/deviceAi';
+import { useLiveVideo, type LiveVideoStatus } from '../domain/liveVideo';
 
 export type StageFocus = 'map' | 'cockpit';
 
@@ -50,8 +53,15 @@ export function CockpitStage({ d, m, focus, onFocus, canViewMedia }: { d: Device
   const toggleGraphs = () => setGraphs((g) => !g);
   // The AI watching this vehicle's video: an AI box (switched on here), its own analytics, or camera AIs that follow it.
   const aiIds = aiSources(d, s.devices);
+  // Offline: no data for a while, so the instruments go and the card says so. Late data is
+  // usually back within seconds, so the instruments stay (reading "—") with a small note instead.
+  const offline = !s.replay.active && f === 'offline';
+  const late = !s.replay.active && f === 'stale';
+  // The live picture's own state, from its player: lost, reconnecting, refused…
+  const video = useLiveVideo(canViewMedia ? d.id : undefined);
+  const card = cockpit && (offline || !!video?.message);
   return (
-    <div className="lg-stage" data-focus={cockpit ? 'cockpit' : 'map'}>
+    <div className="lg-stage" data-focus={cockpit ? 'cockpit' : 'map'} data-card={card || undefined} data-offline={(cockpit && offline) || undefined}>
       {/* Fixed order: map, then camera. Only classes change when the views swap. */}
       <div className={`lg-stage-map${cockpit ? ' is-pip' : ''}`}>
         <MainMap follow={cockpit ? d.id : undefined} />
@@ -83,26 +93,31 @@ export function CockpitStage({ d, m, focus, onFocus, canViewMedia }: { d: Device
 
       {cockpit ? (
         // One grid, so the parts share the room and never land on each other on a short screen:
-        // left = what drives the vehicle and the AI, then the speed tape in the height left over;
-        // top centre = heading, the no-data banner and the route; right = room for the map inset
-        // (and the altitude tape); bottom = the number bar. The unit and its badges are in the header.
-        <div className={`lg-hud${usable ? '' : ' is-nodata'}`} aria-label={t('Driving HUD')} role="group">
+        // top = status chips (left), the compass line (centre), the map inset's room (right);
+        // bottom = the big speed with the route beside it, then the light number chips.
+        // The unit and its badges are in the header above the stage, so the HUD does not repeat them.
+        <div className={`lg-hud${usable ? '' : ' is-nodata'}${offline ? ' is-offline' : ''}`} aria-label={t('Driving HUD')} role="group">
           <div className="lg-ck">
-            <div className="lg-ck-left">
-              <div className="lg-ck-cards">
-                <ControlMode d={d} m={m} usable={usable} />
-                <AiRow d={d} ids={aiIds} />
+            <div className="lg-ck-chips">
+              <ModeChips d={d} m={m} usable={usable} />
+              <AiRow d={d} ids={aiIds} />
+            </div>
+            {!offline && (
+              <div className="lg-ck-top">
+                <HeadingLine heading={usable ? d.heading : undefined} />
+                {late && <LateNote d={d} />}
               </div>
-              <VTape value={usable ? d.speed : undefined} step={1} label="SPD" unit="m/s" side="left" />
-            </div>
-            <div className="lg-ck-top">
-              <HeadingTape heading={usable ? d.heading : undefined} />
-              <NoData d={d} />
-              {m && <MissionChip d={d} m={m} usable={usable} />}
-            </div>
-            <div className="lg-ck-right">{d.kind === 'uav' && <VTape value={usable ? d.alt : undefined} step={5} label="ALT" unit="m" side="right" />}</div>
-            <HudBar d={d} usable={usable} items={['battery', 'gnss', 'link', 'latency', 'temp']} graphs={graphs} onGraphs={toggleGraphs} />
+            )}
+            {!offline && (
+              <div className="lg-ck-speed">
+                <BigNumber label={t('Speed')} value={usable ? d.speed : undefined} unit="m/s" />
+                {d.kind === 'uav' && <BigNumber label={t('Altitude')} value={usable ? d.alt : undefined} unit="m" digits={0} />}
+                {m && <MissionChip d={d} m={m} usable={usable} />}
+              </div>
+            )}
+            {!offline && <HudBar d={d} usable={usable} items={['battery', 'gnss', 'link', 'latency', 'temp']} graphs={graphs} onGraphs={toggleGraphs} />}
           </div>
+          {card && <StageCard d={d} offline={offline} video={video} onMap={() => onFocus('map')} />}
         </div>
       ) : (
         <>
@@ -134,22 +149,32 @@ export function CockpitStage({ d, m, focus, onFocus, canViewMedia }: { d: Device
 // HUD parts
 // ---------------------------------------------------------------------------
 
-/** What is steering the vehicle (from the platform), and the autopilot's own mode and arming as it reports them. */
-function ControlMode({ d, m, usable }: { d: Device; m?: Mission; usable: boolean }) {
+/**
+ * What is steering the vehicle (from the platform), then the autopilot's own mode and arming as it
+ * reports them, as small chips. Nothing is claimed without current data, except a running or held
+ * route, which is the platform's own state.
+ */
+function ModeChips({ d, m, usable }: { d: Device; m?: Mission; usable: boolean }) {
   const t = useT();
   const [code, label, tone] = controlMode(d, m, usable, t);
-  const board = d.flightMode !== undefined || d.armed !== undefined;
+  const board = usable && (d.flightMode !== undefined || d.armed !== undefined);
   return (
-    <div className={`lg-hud-glass lg-hud-mode tone-${tone}`}>
-      <b>{code}</b>
-      <small>{label}</small>
-      {board && (
-        <span className="lg-hud-fc" title={t('As the autopilot reports it')}>
-          {t('Autopilot')} {usable ? (d.flightMode ?? '—') : '—'}
-          {usable && d.armed !== undefined && <em className={d.armed ? 'armed' : ''}>{d.armed ? 'ARMED' : 'DISARMED'}</em>}
+    <>
+      {code !== '—' && (
+        <span className={`lg-chip lg-chip-mode tone-${tone}`}>
+          <i aria-hidden="true" />
+          <b>{code}</b>
+          <small>{label}</small>
         </span>
       )}
-    </div>
+      {board && (
+        <span className="lg-chip lg-chip-fc" title={t('As the autopilot reports it')}>
+          <small>{t('Autopilot')}</small>
+          <b>{d.flightMode ?? '—'}</b>
+          {d.armed !== undefined && <em className={d.armed ? 'armed' : ''}>{d.armed ? 'ARMED' : 'DISARMED'}</em>}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -195,7 +220,7 @@ function AiRow({ d, ids }: { d: Device; ids: string[] }) {
                 ? ['ok', t('AI is watching')]
                 : ['idle', t('AI gets no pictures')];
   return (
-    <div className={`lg-hud-glass lg-hud-ai tone-${tone}`} title={modelError ?? (ai.map((x) => x.analytics?.model ?? x.model).join(' · ') || undefined)}>
+    <div className={`lg-chip lg-hud-ai tone-${tone}`} title={modelError ?? (ai.map((x) => x.analytics?.model ?? x.model).join(' · ') || undefined)}>
       <ScanEye size={15} aria-hidden="true" />
       <b>AI</b>
       <span>{text}</span>
@@ -282,7 +307,7 @@ function MissionChip({ d, m, usable }: { d: Device; m: Mission; usable: boolean 
   // Live speed while moving, else the speed the vehicle drives routes at (its autopilot setting).
   const eta = moving && left !== undefined ? left / Math.max(d.speed > 0.5 ? d.speed : routeSpeedOf(d), 0.3) : undefined;
   return (
-    <div className={`lg-hud-glass lg-hud-mission is-${m.status}`}>
+    <div className={`lg-chip lg-hud-mission is-${m.status}`}>
       <b>{moving ? 'AUTO' : m.status === 'paused' ? 'HOLD' : t('Waiting to start')}</b>
       <span>{t('Checkpoint {n} of {total}', { n: checkpointLabel(m.checkpoints, next), total })}</span>
       <span>{t('{m} m left', { m: left === undefined ? '—' : Math.round(left) })}</span>
@@ -314,8 +339,87 @@ function NoData({ d }: { d: Device }) {
   );
 }
 
-/** Compass tape: ±48° across the tape, the heading in the box under the caret. */
-function HeadingTape({ heading }: { heading?: number }) {
+/** Data a few seconds late: a small note under the compass, with how long ago. The values then read "—". */
+function LateNote({ d }: { d: Device }) {
+  const { s } = useStore();
+  const t = useT();
+  return (
+    <div className="lg-late" role="status">
+      <Radio size={14} aria-hidden="true" />
+      <b>{t('Vehicle data is late')}</b>
+      {d.lastSeen > 0 && <span>{ago(Math.max(0, s.now - d.lastSeen))}</span>}
+    </div>
+  );
+}
+
+/**
+ * The one card in the middle of the cockpit. The vehicle offline: since when, and what its live
+ * picture is doing (reconnect attempt, lost, or the last frame on screen). Data current but the
+ * picture lost: the player's own message. Its buttons try the video again and show the map large.
+ */
+function StageCard({ d, offline, video, onMap }: { d: Device; offline: boolean; video?: LiveVideoStatus; onMap: () => void }) {
+  const { s } = useStore();
+  const t = useT();
+  const msg = video?.message;
+  // The very first connect is not a loss: a quiet note, no alarm.
+  if (!offline && msg && video.phase === 'connecting' && video.attempt === 0)
+    return (
+      <div className="lg-card is-note" role="status">
+        <LoaderCircle size={16} className="lg-spin" aria-hidden="true" />
+        <span>{msg.main}</span>
+      </div>
+    );
+  const age = Math.max(0, s.now - d.lastSeen);
+  return (
+    <div className={`lg-card${offline ? ' is-offline' : ' is-video'}`} role="status" aria-live="polite">
+      <span className="lg-card-icon" aria-hidden="true">
+        {offline ? <Radio size={22} /> : <VideoOff size={22} />}
+      </span>
+      <b className="lg-card-title">{offline ? t('{id} is offline', { id: d.id }) : msg?.main}</b>
+      {offline ? (
+        <span className="lg-card-line">
+          {d.lastSeen > 0 ? t('Last data {time} ({age})', { time: fmtTime(d.lastSeen, true), age: ago(age) }) : t('Nothing received from the vehicle yet.')}
+        </span>
+      ) : (
+        msg?.sub && <span className="lg-card-line">{msg.sub}</span>
+      )}
+      {offline && (msg || !video) && (
+        <span className="lg-card-video">
+          {msg ? <VideoOff size={14} aria-hidden="true" /> : <Camera size={14} aria-hidden="true" />}
+          <span>
+            {msg ? msg.main : t('The picture on screen is the last one received.')}
+            {msg?.sub && <small>{msg.sub}</small>}
+          </span>
+        </span>
+      )}
+      <div className="lg-card-acts">
+        {video?.retry && (
+          <button type="button" className="lg-card-btn is-primary" onClick={video.retry}>
+            <RotateCw size={14} aria-hidden="true" /> {t('Try again')}
+          </button>
+        )}
+        <button type="button" className="lg-card-btn" onClick={onMap}>
+          <MapPinned size={14} aria-hidden="true" /> {t('Show the map large')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** A big number with its name and unit: the speed (and altitude) at the bottom left. */
+function BigNumber({ label, value, unit, digits = 1 }: { label: string; value?: number; unit: string; digits?: number }) {
+  const known = value !== undefined && Number.isFinite(value);
+  return (
+    <div className="lg-big">
+      <small>{label}</small>
+      <b className={known ? undefined : 'is-none'}>{known ? value.toFixed(digits) : '—'}</b>
+      <span>{unit}</span>
+    </div>
+  );
+}
+
+/** Compass as a thin line across the top: ±48° shown, fading at the ends, the heading in a pill under the caret. */
+function HeadingLine({ heading }: { heading?: number }) {
   const known = heading !== undefined && Number.isFinite(heading);
   const hdg = known ? ((heading % 360) + 360) % 360 : 0;
   const ticks = [];
@@ -324,66 +428,23 @@ function HeadingTape({ heading }: { heading?: number }) {
       const x = 150 + (a - hdg) * 3;
       const n = ((a % 360) + 360) % 360;
       const major = n % 30 === 0;
-      ticks.push(<line key={`h${a}`} x1={x} x2={x} y1={major ? 20 : 25} y2={31} className="t-tick" />);
+      ticks.push(<line key={`h${a}`} x1={x} x2={x} y1={major ? 15 : 19} y2={23} className="t-tick" />);
       if (major)
         ticks.push(
-          <text key={`l${a}`} x={x} y={15} className="t-lbl" textAnchor="middle">
+          <text key={`l${a}`} x={x} y={11} className={`t-lbl${n % 90 === 0 ? ' is-card' : ''}`} textAnchor="middle">
             {({ 0: 'N', 90: 'E', 180: 'S', 270: 'W' } as Record<number, string>)[n] ?? String(n).padStart(3, '0')}
           </text>,
         );
     }
   }
   return (
-    <div className="lg-hud-glass lg-tape-h">
-      <svg viewBox="0 0 300 58" aria-hidden="true">
-        <line x1={6} x2={294} y1={31} y2={31} className="t-tick" />
+    <div className="lg-tape-h">
+      <svg viewBox="0 0 300 30" aria-hidden="true">
+        <line x1={0} x2={300} y1={23} y2={23} className="t-base" />
         {ticks}
-        <path d="M144 39 L150 32 L156 39" className="t-caret" />
-        <rect x={122} y={39} width={56} height={18} rx={5} className="t-box" />
-        <text x={150} y={52.5} className="t-val" textAnchor="middle">
-          {known ? `${String(Math.round(hdg) % 360).padStart(3, '0')}°` : '—'}
-        </text>
+        <path d="M145 30 L150 24 L155 30" className="t-caret" />
       </svg>
-    </div>
-  );
-}
-
-/** Vertical tape (speed on the left, altitude on the right): ±5 steps around the value. */
-function VTape({ value, step, label, unit, side }: { value?: number; step: number; label: string; unit: string; side: 'left' | 'right' }) {
-  const known = value !== undefined && Number.isFinite(value);
-  const C = 132;
-  const px = 20 / step;
-  const lineX = side === 'left' ? 70 : 18;
-  const dir = side === 'left' ? -1 : 1;
-  const marks = [];
-  if (known) {
-    for (let v = Math.ceil((value - 5 * step) / step) * step; v <= value + 5 * step; v += step) {
-      if (v < 0) continue;
-      const y = C - (v - value) * px;
-      const major = Math.round(v / step) % 2 === 0;
-      marks.push(<line key={`t${v}`} x1={lineX} x2={lineX + dir * (major ? 12 : 7)} y1={y} y2={y} className="t-tick" />);
-      if (major)
-        marks.push(
-          <text key={`v${v}`} x={lineX + dir * 17} y={y + 4} className="t-lbl" textAnchor={side === 'left' ? 'end' : 'start'}>
-            {Number(v.toFixed(1))}
-          </text>,
-        );
-    }
-  }
-  const bx = side === 'left' ? 8 : 16;
-  return (
-    <div className={`lg-hud-glass lg-tape-v ${side}`}>
-      <svg viewBox="0 0 88 252" aria-hidden="true">
-        <text x={44} y={16} className="t-sm" textAnchor="middle">
-          {label} {unit}
-        </text>
-        <line x1={lineX} x2={lineX} y1={30} y2={236} className="t-tick" />
-        {marks}
-        <rect x={bx} y={C - 13} width={64} height={26} rx={6} className="t-box" />
-        <text x={bx + 32} y={C + 5.5} className="t-val big" textAnchor="middle">
-          {known ? value.toFixed(1) : '—'}
-        </text>
-      </svg>
+      <span className="lg-hdg">{known ? `${String(Math.round(hdg) % 360).padStart(3, '0')}°` : '—'}</span>
     </div>
   );
 }

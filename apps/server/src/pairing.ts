@@ -72,11 +72,23 @@ export class EdgePairing {
     this.db.prepare('UPDATE pairing_codes SET config = NULL WHERE config IS NOT NULL AND expires_at <= ?').run(now);
   }
 
+  /**
+   * The 20 newest codes, plus each gateway id's latest pairing even when it is older: the card warns before a new code
+   * reuses a gateway id that another edge holds (pairing it again would cut that edge off).
+   */
   list(a: Actor): PairingCodeView[] {
     this.p.require(a, 'admin.keys', 'pairing_codes', { mutating: false });
     const now = this.p.now();
     this.forgetExpired(now);
-    const rows = this.db.prepare('SELECT * FROM pairing_codes WHERE org_id = ? ORDER BY created_at DESC LIMIT 20').all(a.orgId) as unknown as Row[];
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM pairing_codes WHERE org_id = ?1 AND (
+           id IN (SELECT id FROM pairing_codes WHERE org_id = ?1 ORDER BY created_at DESC LIMIT 20)
+           OR id IN (SELECT p.id FROM pairing_codes p WHERE p.org_id = ?1 AND p.paired_at IS NOT NULL
+                     AND p.paired_at = (SELECT MAX(q.paired_at) FROM pairing_codes q WHERE q.org_id = p.org_id AND q.gateway_id = p.gateway_id)))
+         ORDER BY created_at DESC`,
+      )
+      .all(a.orgId) as unknown as Row[];
     return rows.map((r) => this.view(r, now));
   }
 

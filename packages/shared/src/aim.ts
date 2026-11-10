@@ -101,7 +101,8 @@ export function pickCamera(
 ): CameraChoice | null {
   const out: CameraChoice[] = [];
   for (const d of devices) {
-    if (d.kind !== 'cctv' || !d.capabilities.includes('gimbal') || !d.mount || !isOnline(d) || busy(d.id)) continue;
+    // A camera that rides on a vehicle (`follows`) is not a fixed camera: its mount is measured from the vehicle's nose.
+    if (d.kind !== 'cctv' || d.follows || !d.capabilities.includes('gimbal') || !d.mount || !isOnline(d) || busy(d.id)) continue;
     const aim = aimAt(d.pos, d.mount, target);
     if (!aim.reachable || aim.distanceM > (d.mount.rangeM ?? 250)) continue;
     if (!lineOfSight(d.pos, target, buildings, d.mount.heightM)) continue;
@@ -120,6 +121,41 @@ export function vehicleMount(d: Device): CameraMount {
 export function mountOf(d: Device): CameraMount | null {
   if (d.kind === 'cctv') return d.mount ?? null;
   return vehicleMount(d);
+}
+
+/**
+ * The gimbal camera that films for a vehicle: its own gimbal, or a gimbal camera that rides on it
+ * (a device whose `follows` is the vehicle, such as a SIYI A8 mini on its own SDK link). Pass only
+ * devices the caller may see (one organisation).
+ */
+export function vehicleCameraOf<D extends Device>(d: D, devices: Iterable<D>): D | undefined {
+  if (d.capabilities.includes('gimbal')) return d;
+  for (const x of devices) if (x.follows === d.id && x.id !== d.id && x.capabilities.includes('gimbal')) return x;
+  return undefined;
+}
+
+/**
+ * Where a gimbal camera is and where its yaw zero points, for aiming it at a place. A camera that
+ * rides on a vehicle has no position of its own: it is where the vehicle is, and its mount bearing
+ * is measured from the vehicle's nose (0 = straight ahead), so it turns with the vehicle. Null when
+ * that cannot be known: no mount on a fixed camera, or the vehicle it rides on has no position fix.
+ */
+export function cameraPose(d: Device, host?: Device): { pos: Point; mount: CameraMount } | null {
+  if (d.follows) {
+    if (!host || host.id !== d.follows || host.noFix) return null;
+    const m = d.mount;
+    return {
+      pos: host.pos,
+      mount: {
+        bearingDeg: ((((host.heading ?? 0) + (m?.bearingDeg ?? 0)) % 360) + 360) % 360,
+        heightM: m?.heightM ?? vehicleMount(host).heightM,
+        fovDeg: m?.fovDeg ?? 50,
+        rangeM: m?.rangeM ?? 150,
+      },
+    };
+  }
+  const mount = mountOf(d);
+  return mount ? { pos: d.pos, mount } : null;
 }
 
 function round1(v: number) {

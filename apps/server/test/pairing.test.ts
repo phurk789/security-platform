@@ -102,6 +102,26 @@ describe('edge pairing', () => {
     expect((await gatewayHello(second, 'edge-repair')).welcome).toBeTruthy();
   });
 
+  it("keeps each gateway id's latest pairing in the list, even behind 20 newer codes (the card warns on a reused id)", async () => {
+    const old = await createCode('edge-old', [{ ...UGV, deviceId: 'UGV-01' }]);
+    expect((await pair({ code: old.code })).status).toBe(200);
+    const r0 = row(old.id);
+    const ins = srv.db.prepare(
+      'INSERT INTO pairing_codes (id, org_id, site_id, code_hash, label, gateway_id, device_ids, config, created_by, created_at, expires_at, cancelled) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)',
+    );
+    const t0 = Date.now() + 1000;
+    for (let i = 0; i < 22; i++) ins.run(`pair-filler-${i}`, r0.org_id, r0.site_id, `filler-hash-${i}`, 'filler', `edge-filler-${i}`, '[]', null, 'test', t0 + i, t0 + i);
+    try {
+      const listed = (await admin.get('/admin/pairing-codes')).body as any[];
+      expect(listed.filter((x) => x.label === 'filler').map((x) => x.id)).toEqual(Array.from({ length: 20 }, (_, i) => `pair-filler-${21 - i}`)); // the 20 newest
+      expect(listed.find((x) => x.id === old.id)).toMatchObject({ gatewayId: 'edge-old', status: 'paired', deviceIds: ['UGV-01'] });
+      // Only the latest pairing per gateway id comes along: the first of the two edge-repair pairings is not listed.
+      expect(listed.filter((x) => x.gatewayId === 'edge-repair' && x.status === 'paired')).toHaveLength(1);
+    } finally {
+      srv.db.prepare("DELETE FROM pairing_codes WHERE id LIKE 'pair-filler-%'").run();
+    }
+  });
+
   it('cancelled and expired codes do not pair, and forget their configuration', async () => {
     const cancelled = await createCode('edge-cancel');
     expect((await admin.req('DELETE', `/admin/pairing-codes/${cancelled.id}`)).status).toBe(200);

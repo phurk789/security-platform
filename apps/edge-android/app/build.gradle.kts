@@ -30,9 +30,10 @@ android {
         // Raise versionCode for every build given to remotes: Android installs only a higher one, and in-app
         // updates offer only a higher one. -PedgeVersionCode / -PedgeVersionName override it (bench builds).
         // 0.3.0 was versionCode 5 (bench test builds 0.2.1-bench / 0.2.2-bench had used 3 and 4); 0.3.1 is 6, 0.3.2 is 7,
-        // 0.3.3 (gear buttons while driving from the console) is 8.
-        versionCode = ((project.findProperty("edgeVersionCode") as String?) ?: "8").toInt()
-        versionName = (project.findProperty("edgeVersionName") as String?) ?: "0.3.3"
+        // 0.3.3 (gear buttons while driving from the console) is 8 (built, never published); 0.3.4 (gear buttons plus the
+        // vehicle's SIYI gimbal camera that "follows" it) is 9.
+        versionCode = ((project.findProperty("edgeVersionCode") as String?) ?: "9").toInt()
+        versionName = (project.findProperty("edgeVersionName") as String?) ?: "0.3.4"
         ndk { abiFilters += edgeAbis }
     }
 

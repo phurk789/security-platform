@@ -478,7 +478,7 @@ export const TH: Record<string, string> = {
   // Admin page groups, and lists the server hides until the password is confirmed again (step-up)
   'Sections of this page': 'หัวข้อในหน้านี้',
   'People and access': 'ผู้ใช้และสิทธิ์',
-  'Who can sign in, what each role may do, keys for other systems, and the audit trail.': 'ใครเข้าระบบได้ แต่ละบทบาททำอะไรได้ คีย์สำหรับระบบอื่น และบันทึกการใช้งาน',
+  'Who can sign in, what each role may do, and keys for other systems.': 'ใครเข้าระบบได้ แต่ละบทบาททำอะไรได้ และคีย์สำหรับระบบอื่น',
   'Devices and connections': 'อุปกรณ์และการเชื่อมต่อ',
   'Register devices, pair remotes and Pis, allow their video, and publish edge app updates.': 'ลงทะเบียนอุปกรณ์ จับคู่รีโมตหรือ Pi บนรถ อนุญาตแหล่งวิดีโอ และส่งอัปเดตแอป Edge',
   'Sites and map': 'ไซต์และแผนที่',
@@ -486,10 +486,19 @@ export const TH: Record<string, string> = {
   'Detection and alerts': 'การตรวจจับและการแจ้งเตือน',
   'What raises an incident, and where alerts are sent.': 'อะไรบ้างที่จะเปิดเป็นเหตุ และส่งแจ้งเตือนไปที่ใด',
   'System and data': 'ระบบและข้อมูล',
-  'License, backups, how long data is kept, and personal-data requests.': 'สิทธิ์การใช้งาน การสำรองข้อมูล ระยะเวลาเก็บข้อมูล และคำขอด้านข้อมูลส่วนบุคคล',
+  'License, audit log, backups, how long data is kept, and personal-data requests.': 'สิทธิ์การใช้งาน บันทึกการใช้งาน การสำรองข้อมูล ระยะเวลาเก็บข้อมูล และคำขอด้านข้อมูลส่วนบุคคล',
   'Confirm password': 'ยืนยันรหัสผ่าน',
-  'Users, API keys, pairing codes, app updates and backups stay hidden until you confirm your password. A confirmation lasts 15 minutes.':
-    'รายชื่อผู้ใช้ คีย์ API รหัสจับคู่ อัปเดตแอป และข้อมูลสำรอง จะแสดงหลังยืนยันรหัสผ่าน ยืนยันครั้งหนึ่งใช้ได้ 15 นาที',
+  'Some lists here need your password': 'บางรายการในแท็บนี้ต้องยืนยันรหัสผ่านก่อน',
+  // Card headers: ⓘ opens the explanation, the button on the right opens the card's form
+  'About this': 'คำอธิบาย',
+  'Register a device': 'ลงทะเบียนอุปกรณ์',
+  'Allow a source': 'อนุญาตแหล่งวิดีโอ',
+  'Add a zone': 'เพิ่มเขต',
+  'Edit anchor': 'แก้จุดอ้างอิง',
+  'Name the zone first.': 'ตั้งชื่อเขตก่อน',
+  'No zones yet.': 'ยังไม่มีเขต',
+  'No keys yet.': 'ยังไม่มีคีย์',
+  'Publish a new version': 'เผยแพร่เวอร์ชันใหม่',
   'The user list is hidden until you confirm your password.': 'รายชื่อผู้ใช้จะแสดงหลังยืนยันรหัสผ่าน',
   'The key list is hidden until you confirm your password.': 'รายการคีย์จะแสดงหลังยืนยันรหัสผ่าน',
   'The backup list is hidden until you confirm your password.': 'รายการข้อมูลสำรองจะแสดงหลังยืนยันรหัสผ่าน',
@@ -553,6 +562,13 @@ export const TH: Record<string, string> = {
   'Create pairing code': 'สร้างรหัสจับคู่',
   'Device list: {error}': 'รายการอุปกรณ์: {error}',
   'Register {ids} under "Edge gateways and devices" first, or the server refuses them.': 'ลงทะเบียน {ids} ในการ์ด "Edge Gateway และอุปกรณ์" ก่อน ไม่อย่างนั้นเซิร์ฟเวอร์จะไม่รับ',
+  'Register {ids} now': 'ลงทะเบียน {ids} ให้เลย',
+  '{gw} is the gateway of {ids} ({label}). A code for it cuts that edge off: give this edge its own gateway id.':
+    '{gw} เป็นรหัส Gateway ของ {ids} ({label}) อยู่ ถ้าสร้างรหัสจับคู่ด้วยรหัสนี้ ตัวเดิมจะหลุดทันที ให้ใช้รหัส Gateway ของตัวเอง',
+  'Use {id}': 'ใช้ {id}',
+  "Add the vehicle's gimbal camera ({id}) so the platform can turn it": 'เพิ่มกล้องกิมบอลบนรถ ({id}) ให้ระบบหันกล้องได้',
+  '{cam} is the SIYI gimbal camera on {vehicle}, reached at {host} (SIYI SDK, UDP {port}); its video stays on {vehicle}. Register {cam} as CCTV first: it uses one more licence device. A supervisor then promotes {cam} to LIVE MANUAL: until then checkpoints take photos but do not turn it.':
+    '{cam} คือกล้องกิมบอล SIYI บน {vehicle} ระบบสั่งกล้องที่ {host} (SIYI SDK พอร์ต UDP {port}) ส่วนภาพยังมาทาง {vehicle} เหมือนเดิม ลงทะเบียน {cam} ชนิด CCTV ก่อน (นับเป็นอุปกรณ์เพิ่มอีก 1 ตัวใน License) จากนั้นหัวหน้าเวรเลื่อน {cam} เป็น LIVE MANUAL ระหว่างที่ยังไม่เลื่อน จุดตรวจถ่ายรูปได้แต่ไม่หันกล้อง',
   Waiting: 'รอจับคู่',
   Paired: 'จับคู่แล้ว',
   Expired: 'หมดอายุ',
@@ -1611,6 +1627,11 @@ export const TH: Record<string, string> = {
   'Vehicle data is late': 'ข้อมูลจากรถล่าช้า',
   'Last received {time} ({age}). Values show as —.': 'ล่าสุดเมื่อ {time} ({age}) · ค่าทั้งหมดแสดงเป็น —',
   'Nothing received from the vehicle yet. Values show as —.': 'ยังไม่ได้รับข้อมูลจากรถ · ค่าทั้งหมดแสดงเป็น —',
+  // Cockpit: the one card in the middle when the vehicle or its picture is lost.
+  '{id} is offline': '{id} ขาดการเชื่อมต่อ',
+  'Last data {time} ({age})': 'ข้อมูลล่าสุด {time} ({age})',
+  'Nothing received from the vehicle yet.': 'ยังไม่ได้รับข้อมูลจากรถ',
+  'The picture on screen is the last one received.': 'ภาพบนจอคือภาพสุดท้ายที่ได้รับ',
   // Mission planning page.
   'Mission planning': 'การวางแผนภารกิจ',
   '{a} drafts · {b} awaiting approval · {c} ready to accept · {d} running': 'ร่าง {a} · รออนุมัติ {b} · รอรับภารกิจ {c} · กำลังวิ่ง {d}',

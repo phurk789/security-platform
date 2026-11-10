@@ -58,7 +58,7 @@ export interface AdapterDeclaration {
   view?: Device['view'];
   /** Live video published through the site media server. */
   stream?: StreamInfo;
-  /** Vision on another device's video: that device's id (see Device.follows). */
+  /** The vehicle this device rides on or watches (a camera AI on its video, or its gimbal camera): see Device.follows. */
   follows?: string;
   /** Gimbal camera mounting (bearing of yaw zero, height, field of view). */
   mount?: CameraMount;

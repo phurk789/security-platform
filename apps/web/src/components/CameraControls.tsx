@@ -3,7 +3,7 @@
 // and logged by the platform; the status line says "confirmed" only when the camera answered.
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { Camera, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, Crosshair, Flashlight, LocateFixed, Megaphone, Minus, Plus, Siren } from 'lucide-react';
-import { ANNOUNCEMENTS, aimAt, describeCameraAction, mountOf, type CameraAction, type Device } from '@13store/shared';
+import { ANNOUNCEMENTS, aimAt, cameraPose, describeCameraAction, type CameraAction, type Device } from '@13store/shared';
 import { can, currentUser, freshness, userName } from '../domain/policy';
 import { useT } from '../i18n';
 import { useStore, type CameraResult } from '../store';
@@ -37,15 +37,18 @@ export function CameraControls({ device: d, aimAt: target }: { device: Device; /
 
   const f = freshness(s, d);
   const g = d.gimbal;
+  // A camera riding on a vehicle (`follows`) goes with that vehicle: its control holder, its position and heading.
+  const host = d.follows ? s.devices[d.follows] : undefined;
+  const owner = d.kind !== 'cctv' ? d.controlOwner : host?.controlOwner;
   const reason = !can(me.role, 'camera.control')
     ? t('Your role cannot move cameras.')
     : s.replay.active
       ? t('Replay: camera control is off.')
       : f === 'offline'
         ? t('Camera offline. Control unavailable.')
-        : d.kind !== 'cctv' && d.controlOwner && d.controlOwner !== me.id
+        : owner && owner !== me.id
           ? t('Only {name} can move this camera.', {
-              name: userName(s, d.controlOwner),
+              name: userName(s, owner),
             })
           : null;
   const off = !!reason;
@@ -160,8 +163,8 @@ export function CameraControls({ device: d, aimAt: target }: { device: Device; /
   };
 
   const inc = target ? s.incidents.find((i) => i.id === target.incidentId) : undefined;
-  const mount = mountOf(d);
-  const aim = inc && mount ? aimAt(d.pos, mount, inc.pos) : null;
+  const pose = cameraPose(d, host);
+  const aim = inc && pose ? aimAt(pose.pos, pose.mount, inc.pos) : null;
   const pointAt = async () => {
     if (off || !inc) return;
     setBusy(true);

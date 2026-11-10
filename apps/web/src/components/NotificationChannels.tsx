@@ -6,6 +6,7 @@ import { NOTIFY_EVENTS, NOTIFY_EVENT_LABEL, fmtDate, fmtTime, type NotificationC
 import { ApiError } from '../api';
 import { useStore } from '../store';
 import { useT } from '../i18n';
+import { CardHead } from './CardHead';
 
 const EMPTY = {
   id: '',
@@ -80,19 +81,22 @@ export function NotificationChannels({ onStepUp }: { onStepUp: (retry: () => voi
 
   return (
     <section className="card">
-      <div className="row between wrap">
-        <h3>
-          <BellRing size={16} /> {t('Notification channels')} <small className="muted">({channels.length})</small>
-        </h3>
-        <button className="btn-secondary small" onClick={() => setOpen((o) => !o)}>
-          <Plus size={14} /> {t('Add channel')}
-        </button>
-      </div>
-      <p className="fine" style={{ marginTop: 0 }}>
-        {t(
+      <CardHead
+        icon={<BellRing size={16} />}
+        title={
+          <>
+            {t('Notification channels')} <small className="muted">({channels.length})</small>
+          </>
+        }
+        help={t(
           'Where the platform sends alerts, SLA breaches, geofence breaches and other events: a signed webhook (any system), a LINE group through the Messaging API, or an HTTP SMS gateway. Every delivery is logged.',
         )}
-      </p>
+        action={
+          <button className="btn-secondary small" onClick={() => setOpen((o) => !o)}>
+            <Plus size={14} /> {t('Add channel')}
+          </button>
+        }
+      />
       {msg && <p className={`banner ${msg.tone === 'ok' ? 'info' : 'warn'}`}>{msg.text}</p>}
       <ul className="list">
         {channels.map((c) => (

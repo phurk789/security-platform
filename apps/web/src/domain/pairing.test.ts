@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { parsePairingLink, pairingLink } from '@13store/shared';
 import { parseSiteConfig } from '@13store/gateway';
-import { REMOTE_DEFAULTS, TARGET_DEFAULTS, edgeDevices, formatCode, loopbackOrigin, pairingQr, piDevices, piPairCommand, readDeviceList, remoteDevices, timeLeft, unregistered } from './pairing';
+import {
+  REMOTE_DEFAULTS,
+  TARGET_DEFAULTS,
+  cameraHost,
+  deviceIdsOf,
+  edgeDevices,
+  formatCode,
+  freeGatewayId,
+  gatewayClash,
+  gimbalCamera,
+  loopbackOrigin,
+  pairingQr,
+  piDevices,
+  piPairCommand,
+  readDeviceList,
+  registrationsFor,
+  remoteDevices,
+  timeLeft,
+  unregistered,
+} from './pairing';
 
 const GEO = { originLat: 13.4367374, originLon: 101.0275798, rotationDeg: -28.5 };
 
@@ -51,6 +70,49 @@ describe('Pair an edge remote (Admin card)', () => {
     expect(TARGET_DEFAULTS.pi.gatewayId).toBe('edge-pi-ugv-01');
   });
 
+  it("adds the vehicle's SIYI gimbal camera when ticked: it rides on the vehicle, no pos, no video of its own", () => {
+    const camera = {
+      type: 'siyi-camera',
+      deviceId: 'UGV-01-CAM',
+      model: 'SIYI A8 mini on UGV-01',
+      follows: 'UGV-01',
+      host: '192.168.144.25',
+      port: 37260,
+      yawSpeedSign: 1,
+      yawAngleSign: -1,
+    };
+    for (const target of ['pi', 'remote'] as const) {
+      const devices = edgeDevices(target, { ...REMOTE_DEFAULTS, vehicleId: ' ugv-01 ', gimbal: true, remote: target === 'pi' ? 'none-rcu' : undefined });
+      // The same check the server runs on the list before it makes a code.
+      expect(() => parseSiteConfig({ geo: GEO, devices })).not.toThrow();
+      expect(devices).toHaveLength(2);
+      expect(devices[0]).toMatchObject({ type: 'mavlink', deviceId: 'UGV-01', stream: { rtsp: 'rtsp://192.168.144.25:8554/main.264', push: true } });
+      expect(devices[1]).toEqual(camera);
+      // The card's "Register … first" warning names the camera too.
+      expect(unregistered(deviceIdsOf(devices), ['UGV-01'])).toEqual(['UGV-01-CAM']);
+    }
+    // Off unless ticked.
+    expect(piDevices(REMOTE_DEFAULTS)).toHaveLength(1);
+    expect(remoteDevices({ ...REMOTE_DEFAULTS, gimbal: false })).toHaveLength(1);
+  });
+
+  it("talks to the gimbal at the camera's RTSP host, or the SIYI default without one", () => {
+    expect(gimbalCamera({ ...REMOTE_DEFAULTS, vehicleId: 'ugv-02', cameraRtsp: ' rtsp://admin:pw@192.168.144.26:8554/main.264 ' })).toMatchObject({
+      deviceId: 'UGV-02-CAM',
+      model: 'SIYI A8 mini on UGV-02',
+      follows: 'UGV-02',
+      host: '192.168.144.26',
+    });
+    expect(cameraHost('rtsp://192.168.144.25/main.264')).toBe('192.168.144.25');
+    expect(cameraHost('rtsp://a8.local:8554/main.264')).toBe('a8.local');
+    for (const none of ['', '  ', 'main.264', 'rtsp://[fe80::1]:8554/x']) expect(cameraHost(none)).toBe('192.168.144.25');
+    // Still valid with no video: the camera is turned, the vehicle just shows no picture.
+    const blind = piDevices({ ...REMOTE_DEFAULTS, cameraRtsp: '', gimbal: true });
+    expect(() => parseSiteConfig({ geo: GEO, devices: blind })).not.toThrow();
+    expect(blind[0]).not.toHaveProperty('stream');
+    expect(blind[1]).toMatchObject({ host: '192.168.144.25' });
+  });
+
   it('gives the Pi one command to type, with the console address and the code', () => {
     expect(piPairCommand('http://192.168.20.13:8090', '042917')).toBe('sudo 13store-edge pair http://192.168.20.13:8090 042917');
   });
@@ -68,6 +130,44 @@ describe('Pair an edge remote (Admin card)', () => {
 
   it('names devices the server does not know yet', () => {
     expect(unregistered(['UGV-01', 'CAM-09'], ['UGV-01', 'CCTV-01'])).toEqual(['CAM-09']);
+  });
+
+  it('warns before a code takes a gateway id another edge holds, and offers a free id', () => {
+    const code = (gatewayId: string, deviceIds: string[], pairedAt: number, label = 'remote', status: 'paired' | 'expired' = 'paired') => ({ gatewayId, deviceIds, pairedAt, label, status });
+    const one = [code('edge-unirc-01', ['UGV-01'], 1, 'SIYI UniRC 7 Pro')];
+    // A second remote for UGV-02 under UGV-01's gateway id: clash.
+    expect(gatewayClash('edge-unirc-01', ['UGV-02', 'UGV-02-CAM'], one)).toEqual({ label: 'SIYI UniRC 7 Pro', deviceIds: ['UGV-01'] });
+    // The same vehicle paired again (now with its camera): fine. A new id, an empty id, a code that never paired: fine.
+    expect(gatewayClash('edge-unirc-01', ['UGV-01', 'UGV-01-CAM'], one)).toBeUndefined();
+    expect(gatewayClash('edge-unirc-02', ['UGV-02'], one)).toBeUndefined();
+    expect(gatewayClash(' ', ['UGV-02'], one)).toBeUndefined();
+    expect(gatewayClash('edge-x', ['UGV-02'], [code('edge-x', ['UGV-01'], 1, 'r', 'expired')])).toBeUndefined();
+
+    // 10 Nov: SIYI 02 paired as edge-unirc-01 for UGV-02, then again as edge-unirc-02. edge-unirc-01 is free for UGV-01
+    // again (UGV-02 moved on), but edge-unirc-02 now belongs to UGV-02.
+    const day = [...one, code('edge-unirc-01', ['UGV-02', 'UGV-02-CAM'], 2, 'SIYI 02'), code('edge-unirc-02', ['UGV-02', 'UGV-02-CAM'], 3, 'SIYI 02')];
+    expect(gatewayClash('edge-unirc-01', ['UGV-01', 'UGV-01-CAM'], day)).toBeUndefined();
+    expect(gatewayClash('edge-unirc-01', ['UGV-03'], day)).toBeUndefined();
+    expect(gatewayClash('edge-unirc-02', ['UGV-03'], day)).toEqual({ label: 'SIYI 02', deviceIds: ['UGV-02', 'UGV-02-CAM'] });
+
+    expect(freeGatewayId('edge-unirc-01', day)).toBe('edge-unirc-03');
+    expect(freeGatewayId('edge-pi-ugv-01', [{ gatewayId: 'edge-pi-ugv-01' }])).toBe('edge-pi-ugv-02');
+    expect(freeGatewayId('my-gateway', [{ gatewayId: 'my-gateway' }])).toBe('my-gateway-01');
+  });
+
+  it('says what to register for the unknown devices: vehicles by their kind, cameras as CCTV, in list order', () => {
+    const devices = remoteDevices({ ...REMOTE_DEFAULTS, vehicleId: 'UGV-02', model: 'Tracked UGV', gimbal: true });
+    expect(registrationsFor(devices, ['UGV-02-CAM', 'UGV-02'])).toEqual([
+      { id: 'UGV-02', kind: 'ugv', model: 'Tracked UGV' },
+      { id: 'UGV-02-CAM', kind: 'cctv', model: 'SIYI A8 mini on UGV-02' },
+    ]);
+    // Only the missing ones; an air vehicle as UAV; no model text → none sent; ids are matched as written.
+    expect(registrationsFor(devices, ['UGV-02-CAM'])).toEqual([{ id: 'UGV-02-CAM', kind: 'cctv', model: 'SIYI A8 mini on UGV-02' }]);
+    expect(registrationsFor([{ type: 'mavlink', deviceId: 'UAV-01', kind: 'uav', model: ' ' }, { type: 'onvif', deviceId: 'CAM-07' }], ['UAV-01', 'CAM-07'])).toEqual([
+      { id: 'UAV-01', kind: 'uav' },
+      { id: 'CAM-07', kind: 'cctv' },
+    ]);
+    expect(registrationsFor(devices, [])).toEqual([]);
   });
 
   it('reads a hand-written device list, or says what is wrong with it', () => {

@@ -39,7 +39,10 @@ export type DeviceConfig =
       payload?: { module: 'loudhailer-4in1'; spotlightRelay?: number; beaconRelay?: number };
       /** Indoor vehicle: ArduPilot external navigation (LOCAL_POSITION_NED) instead of GPS. */
       indoor?: { buildingId: string; level: number; origin: { x: number; y: number }; yawDeg?: number };
-      /** Onboard camera video through the site media server (shown on the vehicle). Video only: gimbal control needs a siyi-camera device. */
+      /**
+       * Onboard camera video through the site media server (shown on the vehicle). Video only: for gimbal control add a
+       * siyi-camera device with "follows" set to this vehicle (deploy/pi/README_TH.md, section 12).
+       */
       stream?: StreamInfo;
       /** UGVs: allow live driving from the console (RC override on steering/throttle). `true` = defaults. */
       teleop?: true | TeleopConfig;
@@ -60,14 +63,23 @@ export type DeviceConfig =
       host?: string;
       port?: number;
       model?: string;
-      pos: { x: number; y: number };
+      /** Fixed camera: where it stands (site metres). Not set on a camera that follows a vehicle. */
+      pos?: { x: number; y: number };
+      /**
+       * The camera rides on this vehicle (its gimbal camera, e.g. UGV-01's A8 mini): the platform turns it at checkpoints
+       * and from the vehicle's cockpit, and takes its position and heading from the vehicle. Video stays on the vehicle.
+       */
+      follows?: string;
       stream?: StreamInfo;
       firmwareTested?: string;
       /** Yaw sign conventions, see SiyiCameraConfig (A8 mini: yawSpeedSign 1, yawAngleSign -1). */
       yawSign?: 1 | -1;
       yawSpeedSign?: 1 | -1;
       yawAngleSign?: 1 | -1;
-      /** Bearing of the gimbal's centre position, lens height, field of view: lets the platform point it at alerts. */
+      /**
+       * Bearing of the gimbal's centre position, lens height, field of view: lets the platform point it at alerts. On a
+       * camera that follows a vehicle the bearing is from the vehicle's nose (0 = straight ahead).
+       */
       mount?: CameraMount;
     }
   | ({ type: 'onvif' } & OnvifCameraConfig)
@@ -139,8 +151,13 @@ export function parseSiteConfig(json: unknown): SiteConfig {
       if (r.host !== undefined && (typeof r.host !== 'string' || !/^\d{1,3}(\.\d{1,3}){3}$/.test(r.host)))
         throw new ConfigError(`${d.deviceId}: gcsRelay.host must be an IPv4 address such as 127.0.0.1 (the relay accepts anyone who can reach it).`);
     }
-    if (d.type === 'siyi-camera' && (!d.pos || !Number.isFinite(d.pos.x) || !Number.isFinite(d.pos.y)))
-      throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required.`);
+    if (d.type === 'siyi-camera' && d.follows !== undefined) {
+      if (typeof d.follows !== 'string' || !/^[A-Z0-9-]{3,32}$/.test(d.follows) || d.follows === d.deviceId)
+        throw new ConfigError(`${d.deviceId}: follows must be the id of the vehicle this camera rides on, e.g. "UGV-01".`);
+      // Its position is the vehicle's: a pos here would be ignored, so say so instead.
+      if (d.pos !== undefined) throw new ConfigError(`${d.deviceId}: a camera that follows ${d.follows} takes its position from it. Remove pos.`);
+    } else if (d.type === 'siyi-camera' && (!d.pos || !Number.isFinite(d.pos.x) || !Number.isFinite(d.pos.y)))
+      throw new ConfigError(`${d.deviceId}: pos {x, y} (site metres) is required, or "follows" with the id of the vehicle the camera rides on.`);
     if (d.type === 'siyi-camera' && d.mount && (!Number.isFinite(d.mount.bearingDeg) || !Number.isFinite(d.mount.heightM)))
       throw new ConfigError(`${d.deviceId}: mount needs bearingDeg and heightM.`);
     if (d.type === 'vision') {
@@ -214,6 +231,7 @@ export function adaptersFromConfig(c: SiteConfig): Adapter[] {
           port: d.port ?? SIYI_DEFAULT.port,
           model: d.model,
           pos: d.pos,
+          follows: d.follows,
           stream: d.stream,
           firmwareTested: d.firmwareTested,
           yawSign: d.yawSign,
