@@ -322,8 +322,8 @@ function PayloadRow({ d, off, busy, run }: { d: Device; off: boolean; busy: bool
         )}
       </div>
       {has('speaker') && (
-        <div className="ptz-pl-row">
-          <select value={msg} disabled={off} onChange={(e) => setMsg(e.target.value)} aria-label={t('Announcement')}>
+        <div className="ptz-pl-row is-speak">
+          <select value={msg} disabled={off} onChange={(e) => setMsg(e.target.value)} aria-label={t('Announcement')} title={lang === 'th' ? preset.th : preset.en}>
             {ANNOUNCEMENTS.map((m) => (
               <option key={m.id} value={m.id}>
                 {lang === 'th' ? m.th : m.en}

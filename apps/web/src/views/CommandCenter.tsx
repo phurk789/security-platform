@@ -266,7 +266,7 @@ function LiquidUnitCard({ d, selected }: { d: Device; selected: boolean }) {
       aria-label={t('Select unit {id}', { id: d.id })} onClick={() => dispatch({ type: 'selectDevice', id: d.id })}>
       <div className="lg-unit-top"><DevicePortrait d={d} /><div><b>{d.id}</b><small>{d.kind.toUpperCase()}{d.integration === 'simulated' ? ' · SIMULATED' : ''}</small></div><ChevronRight size={16} /></div>
       <div className="lg-unit-status">{s.replay.active ? <span className="badge badge-grey">REPLAY</span> : <FreshBadge f={f} />}<ModeBadge d={d} /></div>
-      <span className="lg-unit-model">{d.model}</span>
+      <span className="lg-unit-model" title={d.model}>{d.model}</span>
       <div className="lg-unit-numbers"><span><Battery size={14} />{displayNumber(usable ? d.battery : undefined, 0, 0, 100)} %</span><span><Gauge size={14} />{displayNumber(usable ? d.speed : undefined, 1, 0)} m/s</span><span><Signal size={14} />{displayNumber(usable ? d.signal : undefined, 0, 0, 100)} %</span></div>
     </button>
   );

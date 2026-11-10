@@ -33,6 +33,17 @@ import type { RemoteChoice } from '../domain/vehicleControl';
 
 const STATUS_TONE: Record<PairingCodeView['status'], string> = { waiting: 'badge-amber', paired: 'badge-green', expired: 'badge-grey', cancelled: 'badge-grey' };
 const STATUS_LABEL: Record<PairingCodeView['status'], string> = { waiting: 'Waiting', paired: 'Paired', expired: 'Expired', cancelled: 'Cancelled' };
+// Long choices: a list on a phone cuts them, so the list's title repeats the one chosen.
+const PI_PORT_LABEL: Record<PiPort, string> = {
+  uart: 'TELEM1 to the Pi pins (/dev/ttyAMA0)',
+  pi5: 'TELEM1 to the Pi 5 UART connector (/dev/ttyAMA10)',
+  usb: 'USB cable (/dev/ttyACM0)',
+};
+const REMOTE_LABEL: Record<RemoteChoice, string> = {
+  remote: 'SIYI remote still used to drive by hand',
+  'none-rcu': 'No remote · RCU-ND motor board (gears on channel 11)',
+  none: 'No remote · no gears',
+};
 
 export function EdgePairingCard({
   api,
@@ -243,7 +254,7 @@ export function EdgePairingCard({
                 value={form.rcuGears ? 'rcu' : 'none'}
                 onChange={(e) => setForm({ ...form, rcuGears: e.target.value === 'rcu' })}
                 aria-label={t('Gear buttons when driving from the console')}
-                title={t('Gear buttons when driving from the console')}
+                title={`${t('Gear buttons when driving from the console')}: ${form.rcuGears ? t('RCU-ND motor board · gear buttons on channel 11') : t('No gear buttons')}`}
               >
                 <option value="rcu">{t('RCU-ND motor board · gear buttons on channel 11')}</option>
                 <option value="none">{t('No gear buttons')}</option>
@@ -255,11 +266,11 @@ export function EdgePairingCard({
                 value={form.piPort ?? 'uart'}
                 onChange={(e) => setForm({ ...form, piPort: e.target.value as PiPort })}
                 aria-label={t('Flight controller cable')}
-                title={t('Flight controller cable')}
+                title={`${t('Flight controller cable')}: ${t(PI_PORT_LABEL[form.piPort ?? 'uart'])}`}
               >
-                <option value="uart">{t('TELEM1 to the Pi pins (/dev/ttyAMA0)')}</option>
-                <option value="pi5">{t('TELEM1 to the Pi 5 UART connector (/dev/ttyAMA10)')}</option>
-                <option value="usb">{t('USB cable (/dev/ttyACM0)')}</option>
+                {(Object.keys(PI_PORT_LABEL) as PiPort[]).map((k) => (
+                  <option key={k} value={k}>{t(PI_PORT_LABEL[k])}</option>
+                ))}
               </select>
             )}
             {target === 'pi' && (
@@ -268,11 +279,11 @@ export function EdgePairingCard({
                 value={form.remote ?? 'remote'}
                 onChange={(e) => setForm({ ...form, remote: e.target.value as RemoteChoice })}
                 aria-label={t('Hand-held remote')}
-                title={t('Hand-held remote')}
+                title={`${t('Hand-held remote')}: ${t(REMOTE_LABEL[form.remote ?? 'remote'])}`}
               >
-                <option value="remote">{t('SIYI remote still used to drive by hand')}</option>
-                <option value="none-rcu">{t('No remote · RCU-ND motor board (gears on channel 11)')}</option>
-                <option value="none">{t('No remote · no gears')}</option>
+                {(Object.keys(REMOTE_LABEL) as RemoteChoice[]).map((k) => (
+                  <option key={k} value={k}>{t(REMOTE_LABEL[k])}</option>
+                ))}
               </select>
             )}
             <label className="check">

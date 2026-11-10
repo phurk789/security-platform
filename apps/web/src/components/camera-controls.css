@@ -43,7 +43,8 @@
 .ptz-aim { grid-area: aim; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 32px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); border: 1px solid var(--cyan-d); color: var(--cyan); font-size: 0.82rem; font-weight: 600; }
 .ptz-aim .muted { font-weight: 400; font-size: 0.75rem; }
 .ptz-aim:not(:disabled):hover { background: rgba(56, 189, 248, 0.18); }
-.ptz-status { grid-area: status; font-size: 0.75rem; color: var(--text-3); min-height: 1.1em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Wraps rather than cuts: the hint is long in Thai, and an error's detail must be read in full. */
+.ptz-status { grid-area: status; font-size: 0.75rem; line-height: 1.45; color: var(--text-3); min-height: 1.1em; overflow-wrap: anywhere; }
 .ptz-status.ok { color: var(--green); }
 .ptz-status.warn { color: var(--amber); }
 .ptz-status.err { color: var(--red); }
@@ -84,7 +85,13 @@
 .ptz-payload { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px dashed var(--line-2); }
 .ptz-pl-row { display: flex; gap: 6px; min-width: 0; }
 .ptz-pl-row .ptz-btn { flex: 1; }
-.ptz-pl-row select { flex: 1; min-width: 0; height: 30px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); padding: 0 6px; font-size: 0.78rem; }
+/* min-height, not height: in the Command Center's boxes the select gets 9px padding, and a fixed
+   30px left ~10px for the words (Thai was cut through the middle). */
+.ptz-pl-row select { flex: 1; min-width: 0; min-height: 30px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); padding: 0 6px; font-size: 0.78rem; }
+/* The announcement is a whole sentence: its list takes a row of its own so the sentence that will
+   go out over the loudspeaker is readable; language and Announce sit under it. */
+.ptz-pl-row.is-speak { flex-wrap: wrap; }
+.ptz-pl-row.is-speak select { flex: 1 1 100%; }
 .ptz-lang { flex: none; width: 36px; height: 30px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text-2); font-size: 0.72rem; font-weight: 700; }
 .ptz-btn.pl-spot.on { background: rgba(255, 236, 160, 0.18); border-color: #f5d76e; color: #f5d76e; }
 .ptz-btn.pl-beacon.on { border-color: var(--red); color: #fff; animation: pl-police 0.7s steps(2) infinite; }

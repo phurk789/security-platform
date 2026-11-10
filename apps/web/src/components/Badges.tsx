@@ -68,9 +68,12 @@ export function CommandBadge({ status }: { status: CommandStatus }) {
 
 export function FreshBadge({ f, age }: { f: Freshness; age?: string }) {
   const t = useT();
-  if (f === 'live') return <Badge tone="green" title={t('Data is fresh')}>LIVE{age ? ` · ${age}` : ''}</Badge>;
-  if (f === 'stale') return <Badge tone="amber" solid title={t('Data is late. New commands are held.')}>STALE{age ? ` · ${age}` : ''}</Badge>;
-  return <Badge tone="red" solid title={t('No data from this device')}>OFFLINE{age ? ` · ${t('last seen {age}', { age })}` : ''}</Badge>;
+  // The title repeats the age, so a badge cut short in a narrow card still says it in full on hover.
+  const tip = (note: string, when?: string) => (when ? `${note} · ${when}` : note);
+  if (f === 'live') return <Badge tone="green" title={tip(t('Data is fresh'), age)}>LIVE{age ? ` · ${age}` : ''}</Badge>;
+  if (f === 'stale') return <Badge tone="amber" solid title={tip(t('Data is late. New commands are held.'), age)}>STALE{age ? ` · ${age}` : ''}</Badge>;
+  const seen = age ? t('last seen {age}', { age }) : undefined;
+  return <Badge tone="red" solid title={tip(t('No data from this device'), seen)}>OFFLINE{seen ? ` · ${seen}` : ''}</Badge>;
 }
 
 export function IntegrationBadge({ i }: { i: IntegrationStatus }) {
