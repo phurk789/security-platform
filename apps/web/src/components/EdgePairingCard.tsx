@@ -15,6 +15,8 @@ import {
   deviceIdsOf,
   edgeDevices,
   formatCode,
+  freeGatewayId,
+  gatewayClash,
   gimbalCameraId,
   loopbackOrigin,
   pairingQr,
@@ -97,6 +99,9 @@ export function EdgePairingCard({
   const unknown = missing.filter((id) => !elsewhere.includes(id));
   // Devices the server does not know at all: the administrator may register them here, at the site being paired.
   const regs = 'devices' in parsed ? registrationsFor(parsed.devices, unknown) : [];
+  // Another edge holds this gateway id: a code for it would cut that edge off.
+  const clash = gatewayClash(form.gatewayId, 'ids' in parsed ? parsed.ids : [], codes);
+  const freeId = clash ? freeGatewayId(form.gatewayId, codes) : '';
   const qr = useMemo(() => (shown?.code ? pairingQr(server, shown.code) : null), [shown, server]);
 
   const registerMissing = () =>
@@ -303,6 +308,20 @@ export function EdgePairingCard({
         </p>
       )}
       {'error' in parsed && advanced && <p className="fine warn-text">{t('Device list: {error}', { error: parsed.error })}</p>}
+      {clash && (
+        <div className="pair-missing">
+          <p className="fine warn-text">
+            {t('{gw} is the gateway of {ids} ({label}). A code for it cuts that edge off: give this edge its own gateway id.', {
+              gw: form.gatewayId.trim(),
+              ids: clash.deviceIds.join(', '),
+              label: clash.label,
+            })}
+          </p>
+          <button type="button" className="btn-secondary small" onClick={() => setForm({ ...form, gatewayId: freeId })}>
+            {t('Use {id}', { id: freeId })}
+          </button>
+        </div>
+      )}
       {unknown.length > 0 && (
         <div className="pair-missing">
           <p className="fine warn-text">{t('Register {ids} under "Edge gateways and devices" first, or the server refuses them.', { ids: unknown.join(', ') })}</p>

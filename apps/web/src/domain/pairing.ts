@@ -1,7 +1,7 @@
 // Admin → "Pair an edge remote" (CLEANUP_PLAN E-3): what the card sends and shows. The server checks
 // the device list again (apps/server/src/pairing.ts); these helpers only build and display it.
 import qrcode from 'qrcode-generator';
-import { pairingLink } from '@13store/shared';
+import { pairingLink, type PairingCodeView } from '@13store/shared';
 import { RCU_ND_GEARS, noRemoteFor, type RemoteChoice } from './vehicleControl';
 
 /** Where the gateway runs: the edge app on the SIYI remote, or a Raspberry Pi on the vehicle (deploy/pi). */
@@ -194,6 +194,40 @@ export function unregistered(deviceIds: string[], registered: string[]) {
 }
 
 /** The device ids a device list names: the vehicle, and its gimbal camera when it is added. */
+/**
+ * Who holds this gateway id now, when a new code would take it from them. Pairing a gateway id again revokes the key of
+ * its previous pairing, so that edge drops off (on 10 Nov a second remote paired as edge-unirc-01 cut UGV-01's remote
+ * off). No clash when the new list shares a device with the last pairing (the same vehicle paired again), or when
+ * those devices have since been paired under another gateway id (that edge moved on).
+ */
+export function gatewayClash(
+  gatewayId: string,
+  ids: string[],
+  codes: Pick<PairingCodeView, 'gatewayId' | 'deviceIds' | 'status' | 'label' | 'pairedAt'>[],
+): { label: string; deviceIds: string[] } | undefined {
+  const gw = gatewayId.trim();
+  const paired = codes.filter((c) => c.status === 'paired').sort((a, b) => (b.pairedAt ?? 0) - (a.pairedAt ?? 0));
+  const last = paired.find((c) => c.gatewayId === gw);
+  if (!gw || !last || last.deviceIds.some((id) => ids.includes(id))) return undefined;
+  const movedOn = (id: string) => paired.some((c) => c.gatewayId !== gw && (c.pairedAt ?? 0) > (last.pairedAt ?? 0) && c.deviceIds.includes(id));
+  const held = last.deviceIds.filter((id) => !movedOn(id));
+  return held.length ? { label: last.label, deviceIds: held } : undefined;
+}
+
+/** A gateway id no pairing has used, numbered like the one typed: edge-unirc-01 → edge-unirc-02 (or "-01" added). */
+export function freeGatewayId(gatewayId: string, codes: Pick<PairingCodeView, 'gatewayId'>[]): string {
+  const used = new Set(codes.map((c) => c.gatewayId));
+  const typed = gatewayId.trim();
+  const m = /^(.*?)(\d+)$/.exec(typed);
+  const base = m ? m[1] : `${typed}-`;
+  const width = m ? m[2].length : 2;
+  for (let n = 1; n < 1000; n++) {
+    const id = `${base}${String(n).padStart(width, '0')}`;
+    if (!used.has(id)) return id;
+  }
+  return `${base}${used.size + 1}`;
+}
+
 /**
  * What to register for the devices of a list the server does not know yet, in list order (the vehicle before its
  * camera): its id, the kind the server files it under (a MAVLink or ROS vehicle by its own kind, any camera as CCTV)

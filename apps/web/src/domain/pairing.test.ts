@@ -8,6 +8,8 @@ import {
   deviceIdsOf,
   edgeDevices,
   formatCode,
+  freeGatewayId,
+  gatewayClash,
   gimbalCamera,
   loopbackOrigin,
   pairingQr,
@@ -128,6 +130,29 @@ describe('Pair an edge remote (Admin card)', () => {
 
   it('names devices the server does not know yet', () => {
     expect(unregistered(['UGV-01', 'CAM-09'], ['UGV-01', 'CCTV-01'])).toEqual(['CAM-09']);
+  });
+
+  it('warns before a code takes a gateway id another edge holds, and offers a free id', () => {
+    const code = (gatewayId: string, deviceIds: string[], pairedAt: number, label = 'remote', status: 'paired' | 'expired' = 'paired') => ({ gatewayId, deviceIds, pairedAt, label, status });
+    const one = [code('edge-unirc-01', ['UGV-01'], 1, 'SIYI UniRC 7 Pro')];
+    // A second remote for UGV-02 under UGV-01's gateway id: clash.
+    expect(gatewayClash('edge-unirc-01', ['UGV-02', 'UGV-02-CAM'], one)).toEqual({ label: 'SIYI UniRC 7 Pro', deviceIds: ['UGV-01'] });
+    // The same vehicle paired again (now with its camera): fine. A new id, an empty id, a code that never paired: fine.
+    expect(gatewayClash('edge-unirc-01', ['UGV-01', 'UGV-01-CAM'], one)).toBeUndefined();
+    expect(gatewayClash('edge-unirc-02', ['UGV-02'], one)).toBeUndefined();
+    expect(gatewayClash(' ', ['UGV-02'], one)).toBeUndefined();
+    expect(gatewayClash('edge-x', ['UGV-02'], [code('edge-x', ['UGV-01'], 1, 'r', 'expired')])).toBeUndefined();
+
+    // 10 Nov: SIYI 02 paired as edge-unirc-01 for UGV-02, then again as edge-unirc-02. edge-unirc-01 is free for UGV-01
+    // again (UGV-02 moved on), but edge-unirc-02 now belongs to UGV-02.
+    const day = [...one, code('edge-unirc-01', ['UGV-02', 'UGV-02-CAM'], 2, 'SIYI 02'), code('edge-unirc-02', ['UGV-02', 'UGV-02-CAM'], 3, 'SIYI 02')];
+    expect(gatewayClash('edge-unirc-01', ['UGV-01', 'UGV-01-CAM'], day)).toBeUndefined();
+    expect(gatewayClash('edge-unirc-01', ['UGV-03'], day)).toBeUndefined();
+    expect(gatewayClash('edge-unirc-02', ['UGV-03'], day)).toEqual({ label: 'SIYI 02', deviceIds: ['UGV-02', 'UGV-02-CAM'] });
+
+    expect(freeGatewayId('edge-unirc-01', day)).toBe('edge-unirc-03');
+    expect(freeGatewayId('edge-pi-ugv-01', [{ gatewayId: 'edge-pi-ugv-01' }])).toBe('edge-pi-ugv-02');
+    expect(freeGatewayId('my-gateway', [{ gatewayId: 'my-gateway' }])).toBe('my-gateway-01');
   });
 
   it('says what to register for the unknown devices: vehicles by their kind, cameras as CCTV, in list order', () => {
