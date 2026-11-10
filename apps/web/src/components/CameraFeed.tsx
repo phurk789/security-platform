@@ -122,6 +122,7 @@ export function CameraFeed({
             return u;
           }}
           onBadge={(badge) => setReported({ key: streamKey, badge })}
+          statusOf={dev!.id}
         />
       ) : live3d ? (
         <SceneFeed deviceId={id!} ir={night && id!.startsWith('CCTV')} frozen={frozen} day={!night} facing={facing} />

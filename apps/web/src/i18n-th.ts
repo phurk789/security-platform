@@ -1623,6 +1623,11 @@ export const TH: Record<string, string> = {
   'Vehicle data is late': 'ข้อมูลจากรถล่าช้า',
   'Last received {time} ({age}). Values show as —.': 'ล่าสุดเมื่อ {time} ({age}) · ค่าทั้งหมดแสดงเป็น —',
   'Nothing received from the vehicle yet. Values show as —.': 'ยังไม่ได้รับข้อมูลจากรถ · ค่าทั้งหมดแสดงเป็น —',
+  // Cockpit: the one card in the middle when the vehicle or its picture is lost.
+  '{id} is offline': '{id} ขาดการเชื่อมต่อ',
+  'Last data {time} ({age})': 'ข้อมูลล่าสุด {time} ({age})',
+  'Nothing received from the vehicle yet.': 'ยังไม่ได้รับข้อมูลจากรถ',
+  'The picture on screen is the last one received.': 'ภาพบนจอคือภาพสุดท้ายที่ได้รับ',
   // Mission planning page.
   'Mission planning': 'การวางแผนภารกิจ',
   '{a} drafts · {b} awaiting approval · {c} ready to accept · {d} running': 'ร่าง {a} · รออนุมัติ {b} · รอรับภารกิจ {c} · กำลังวิ่ง {d}',

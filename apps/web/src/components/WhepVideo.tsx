@@ -23,6 +23,7 @@ import {
   type VideoEvent,
   type VideoState,
 } from '../domain/videoState';
+import { reportLiveVideo } from '../domain/liveVideo';
 
 /** Keep the stream this long after the view was hidden, so quick tab switches don't reconnect. */
 const IDLE_CLOSE_MS = 10_000;
@@ -61,10 +62,13 @@ export function WhepVideo({
   getUrl,
   onBadge,
   config,
+  statusOf,
 }: {
   getUrl: () => Promise<string>;
   /** Called when the feed's status tag changes (LIVE, DELAYED, RECONNECTING …). */
   onBadge?: (b: VideoBadge) => void;
+  /** Device whose video this is: its state is shared for other views (domain/liveVideo.ts). */
+  statusOf?: string;
   /** Thresholds; defaults in VIDEO_DEFAULTS (LIVE within 2 s of the last frame). */
   config?: Partial<VideoConfig>;
 }) {
@@ -203,6 +207,24 @@ export function WhepVideo({
 
   const msg = message(t, view, cfgRef.current);
   const canRetry = view.phase === 'offline' || view.phase === 'denied' || view.phase === 'expired';
+  const retry = useCallback(() => dispatch({ type: 'retry', at: now() }), [dispatch]);
+
+  // Share the state for the views around the player (the cockpit's offline card).
+  const owner = useRef({}).current;
+  useEffect(() => {
+    if (!statusOf) return;
+    const max = cfgRef.current.maxRetries;
+    reportLiveVideo(statusOf, owner, {
+      phase: view.phase,
+      attempt: view.attempt,
+      maxRetries: max,
+      message: msg,
+      retry: canRetry || view.phase === 'reconnecting' ? retry : undefined,
+    });
+    // msg is rebuilt from view on every render; view and the language decide it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusOf, owner, view, t, canRetry, retry]);
+  useEffect(() => (statusOf ? () => reportLiveVideo(statusOf, owner, null) : undefined), [statusOf, owner]);
   return (
     <>
       <video ref={video} className="whep" autoPlay muted playsInline />
@@ -213,7 +235,7 @@ export function WhepVideo({
             <div>{msg.main}</div>
             {msg.sub && <small>{msg.sub}</small>}
             {canRetry && (
-              <button type="button" className="feed-q whep-retry" onClick={() => dispatch({ type: 'retry', at: now() })}>
+              <button type="button" className="feed-q whep-retry" onClick={retry}>
                 {t('Try again')}
               </button>
             )}
