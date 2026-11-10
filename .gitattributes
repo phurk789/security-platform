@@ -6,3 +6,6 @@ deploy/edge/*.yml text eol=lf
 apps/edge-android/gradlew text eol=lf
 *.jar binary
 deploy/pi/* text eol=lf
+# The event kit runs on Windows: cmd and Windows PowerShell 5.1 want CRLF (the build adds the .ps1 BOM).
+deploy/event/*.cmd text eol=crlf
+deploy/event/*.ps1 text eol=crlf

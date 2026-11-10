@@ -1,0 +1,40 @@
+# The platform's media server for the event kit (deploy/event): mediamtx.exe next to the platform on the same PC.
+# event.ps1 writes media/mediamtx.yml from this file at every start, with this PC's LAN address in place of __IP__
+# and the platform's port in place of __PORT__. Edge gateways push camera video in over RTSP; browsers watch over
+# WebRTC (WHEP). MediaMTX asks the platform about every publish and every viewer (POST /api/v1/media/auth).
+# Ports as on the office server: 18554 RTSP in, 18889 WHEP, 18189 WebRTC media (UDP + TCP).
+logLevel: info
+
+rtsp: yes
+rtspAddress: :18554
+# The gateway sends "pub:<token>"; digest auth cannot pass the token on to the platform.
+rtspAuthMethods: [basic]
+rtmp: no
+hls: no
+srt: no
+
+webrtc: yes
+webrtcAddress: :18889
+webrtcLocalUDPAddress: :18189
+webrtcLocalTCPAddress: :18189
+# Announce only the address the event network reaches (not WSL / Hyper-V adapters).
+webrtcIPsFromInterfaces: no
+webrtcAdditionalHosts: [__IP__]
+
+authMethod: http
+authHTTPAddress: http://127.0.0.1:__PORT__/api/v1/media/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+api: no
+metrics: no
+playback: no
+
+pathDefaults:
+  record: no
+
+paths:
+  # Any path the platform lets a gateway publish (the device id in lower case, e.g. ugv-01).
+  all_others:
