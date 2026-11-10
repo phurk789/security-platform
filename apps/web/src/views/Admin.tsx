@@ -49,6 +49,7 @@ import { EdgePairingCard } from '../components/EdgePairingCard';
 import { SiteAccess, SitesCard } from '../components/SitesCard';
 import { EdgeAppCard } from '../components/EdgeAppCard';
 import { CardHead } from '../components/CardHead';
+import { useCardTable } from '../components/useCardTable';
 import { finishedDraft, routeDraft, useRouteDraft } from '../domain/routeDraft';
 
 interface ZoneForm {
@@ -198,6 +199,7 @@ export function AdminPage() {
 function Admin() {
   const { session } = useStore();
   const t = useT();
+  const userCards = useCardTable();
   const api = session!.api;
   const [users, setUsers] = useState<UserAdminView[]>([]);
   const [keys, setKeys] = useState<ApiKeyView[]>([]);
@@ -407,7 +409,7 @@ function Admin() {
         lockNote(t('The user list is hidden until you confirm your password.'))
       ) : (
         <div className="table-wrap">
-          <table className="compact">
+          <table ref={userCards} className="compact card-table">
             <thead>
               <tr>
                 <th>{t('Name')}</th>
