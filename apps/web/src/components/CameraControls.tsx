@@ -289,6 +289,15 @@ export function CameraControls({ device: d, aimAt: target }: { device: Device; /
   );
 }
 
+/** Short names for the loudspeaker presets: a whole sentence did not fit the list. */
+const SAY_NAME: Record<string, string> = {
+  restricted: 'Restricted area',
+  stay: 'Stay where you are',
+  hands_off: 'Do not touch the vehicle',
+  gate_closed: 'Service gate closed',
+  evacuate: 'Move away calmly',
+};
+
 /** 4-in-1 module: searchlight, red/blue warning light, loudspeaker presets. */
 function PayloadRow({ d, off, busy, run }: { d: Device; off: boolean; busy: boolean; run: (a: CameraAction) => Promise<void> }) {
   const t = useT();
@@ -297,6 +306,8 @@ function PayloadRow({ d, off, busy, run }: { d: Device; off: boolean; busy: bool
   const [lang, setLang] = useState<'th' | 'en'>('th');
   const has = (c: string) => d.capabilities.includes(c);
   const preset = ANNOUNCEMENTS.find((m) => m.id === msg)!;
+  // The sentence that goes out over the loudspeaker, in the language chosen for it.
+  const say = lang === 'th' ? preset.th : preset.en;
   return (
     <div className="ptz-payload" role="group" aria-label={t('4-in-1 module')}>
       <div className="ptz-pl-row">
@@ -322,11 +333,11 @@ function PayloadRow({ d, off, busy, run }: { d: Device; off: boolean; busy: bool
         )}
       </div>
       {has('speaker') && (
-        <div className="ptz-pl-row">
-          <select value={msg} disabled={off} onChange={(e) => setMsg(e.target.value)} aria-label={t('Announcement')}>
+        <div className="ptz-pl-row is-speak">
+          <select value={msg} disabled={off} onChange={(e) => setMsg(e.target.value)} aria-label={t('Announcement')} title={say}>
             {ANNOUNCEMENTS.map((m) => (
               <option key={m.id} value={m.id}>
-                {lang === 'th' ? m.th : m.en}
+                {SAY_NAME[m.id] ? t(SAY_NAME[m.id]) : lang === 'th' ? m.th : m.en}
               </option>
             ))}
           </select>
@@ -339,13 +350,18 @@ function PayloadRow({ d, off, busy, run }: { d: Device; off: boolean; busy: bool
             onClick={() =>
               void run({
                 action: 'announce',
-                message: lang === 'th' ? preset.th : preset.en,
+                message: say,
               })
             }
           >
             <Megaphone size={15} /> {t('Announce')}
           </button>
         </div>
+      )}
+      {has('speaker') && (
+        <p className="ptz-say" aria-label={t('What the loudspeaker will say')} title={t('What the loudspeaker will say')}>
+          “{say}”
+        </p>
       )}
       {g?.announcing && <div className="ptz-pl-now">📢 {g.announcing}</div>}
     </div>

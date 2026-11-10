@@ -281,6 +281,8 @@
 :root .app.liquid-ui .t3-bld b { letter-spacing: 0; }
 :root .app.liquid-ui :is(.fleet-card,.inc-card) { background: var(--lg-surface); border-color: var(--line); border-radius: 14px; }
 :root .app.liquid-ui .fleet-card.sel { border-color: var(--text-3); }
+/* Last resort when even its own line is too narrow: cut with "…" (the title has the full text). */
+:root .app.liquid-ui .fc-fresh .badge { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 :root .app.liquid-ui .fc-thumb, :root .app.liquid-ui .fc-ico { background: var(--lg-surface-2); color: var(--text); }
 :root .app.liquid-ui .fc-state span:first-child { color: var(--text); }
 :root .app.liquid-ui .hud-filters button.on { background: var(--lg-surface-2); color: var(--text); border-color: var(--text-3); }
@@ -339,22 +341,33 @@
 @media (max-width: 600px) {
   :root .app.liquid-ui .main { grid-template-columns: minmax(0,1fr); grid-template-rows: 62px minmax(0,1fr); }
   :root .app.liquid-ui .sidenav { margin: 5px 10px; display: flex; flex-direction: row; gap: 3px; padding: 4px; border-radius: 16px; overflow-x: auto; overflow-y: hidden; }
-  :root .app.liquid-ui .sidenav button { flex: 0 0 58px; width: 58px; min-height: 42px; flex-direction: column; padding: 5px 3px; gap: 3px; border-radius: 12px; font-size: .5rem; }
+  /* At least 58px, wider when the label needs it ("Command center"); the row scrolls sideways. */
+  :root .app.liquid-ui .sidenav button { flex: 0 0 auto; width: auto; min-width: 58px; min-height: 42px; flex-direction: column; padding: 5px 4px; gap: 3px; border-radius: 12px; font-size: .5rem; }
   :root .app.liquid-ui .sidenav button .ico svg { width: 16px; height: 16px; }
   :root .app.liquid-ui .sidenav button:last-child { margin-top: 0; }
-  :root .app.liquid-ui .topbar { padding: 10px 12px; gap: 9px; }
-  :root .app.liquid-ui .brand { gap: 8px; }
+  /* The top bar in two rows (it took four, about a quarter of the screen): the logo with the avatar
+     at its right, then the mode pill with the switches. The name is in the avatar's title. */
+  :root .app.liquid-ui .topbar { position: relative; min-height: 0; padding: 8px 10px 8px 12px; gap: 8px 6px; }
+  :root .app.liquid-ui .brand { flex: 1 1 100%; gap: 8px; min-height: 2.25rem; padding-right: 4rem; }
+  :root .app.liquid-ui .topbar .brand-mark { height: 1.75rem; }
   :root .app.liquid-ui .product { font-size: .61rem; letter-spacing: .08em; max-width: 190px; }
   :root .app.liquid-ui .brand .divider { display: none; }
-  :root .app.liquid-ui .top-right { flex-wrap: wrap; width: 100%; justify-content: flex-end; gap: 7px; }
-  :root .app.liquid-ui .user { margin-left: auto; order: -1; margin-right: auto; }
-  :root .app.liquid-ui .user-txt { display: block; }
+  :root .app.liquid-ui .top-mid { order: 2; width: auto; flex: 1 1 auto; min-width: 0; justify-content: flex-start; }
+  :root .app.liquid-ui .top-right { order: 3; width: auto; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: 5px; margin-left: auto; }
+  :root .app.liquid-ui .user { position: absolute; top: 8px; right: 8px; margin: 0; }
+  :root .app.liquid-ui .user-txt { display: none; }
+  :root .app.liquid-ui .user-btn { gap: 2px; }
+  :root .app.liquid-ui :is(.appearance-toggle,.sound-toggle,.lg-glass-toggle) { min-height: 2rem; min-width: 2rem; padding: .3rem .4rem; }
+  :root .app.liquid-ui .lang-toggle button { padding: 3px 7px; }
   :root .app.liquid-ui .lg-glass-toggle span { display: none; }
   :root .app.liquid-ui .cc { padding: 9px 10px; }
   :root .app.liquid-ui .lg-device-badges { justify-content: flex-start; }
   :root .app.liquid-ui .lg-view-seg { flex: 1 1 100%; display: flex; }
   :root .app.liquid-ui .lg-view-seg button { flex: 1; }
-  :root .app.liquid-ui .cc-side { display: flex; flex-direction: column; }
+  /* Stretch, not the tablet grid's "start": the boxes behind "Other panels" (.cc-more is display:
+     contents) are not direct children, and the camera box, sized by its title alone (its body is a
+     size container), shrank to ~200px and cut its own controls off. */
+  :root .app.liquid-ui .cc-side { display: flex; flex-direction: column; align-items: stretch; }
   :root .app.liquid-ui .cc-side > * { width: 100%; }
   :root .app.liquid-ui .tlm-sparks { grid-template-columns: repeat(3,minmax(0,1fr)); }
   :root .app.liquid-ui .footer { padding: 0 12px; font-size: .53rem; }
@@ -395,9 +408,17 @@
 :root .app.liquid-ui .lg-stage[data-focus='cockpit'] .lg-stage-cam:not(.is-pip) .feed-osd { left: auto; right: 16px; transform: none; bottom: calc(1.2rem + 64px); }
 :root .app.liquid-ui .lg-stage[data-offline] .lg-stage-cam:not(.is-pip) .feed-bottom { bottom: 14px; }
 :root .app.liquid-ui .lg-stage[data-card] .lg-stage-cam:not(.is-pip) .whep-msg > div { display: none; }
-/* Main map: its scale and "no fix" note move above the number strip. */
-:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-stage-map .maplibregl-ctrl-bottom-left { bottom: 62px; }
-:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-stage-map .map-nofix { bottom: 66px; }
+/* Main map: its scale and "no fix" note move above the number strip. The map's credits (Esri…)
+   keep a thin row of their own along the bottom, one line, so the strip, the camera inset and the
+   graphs sit above that row (--attr-h) instead of covering it. */
+:root .app.liquid-ui .lg-stage[data-focus='map'] { --attr-h: 22px; }
+:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-stage-map .maplibregl-ctrl-bottom-right { right: 0; bottom: 0; max-width: 100%; }
+:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-stage-map .maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib { margin: 0; max-width: 100%; min-height: 0; border-radius: 8px 0 0 0; line-height: var(--attr-h); padding-block: 0; }
+:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-stage-map .maplibregl-ctrl-attrib-inner { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-hud-map .lg-hud-bar { bottom: calc(12px + var(--attr-h)); }
+:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-stage-cam.is-pip { bottom: calc(64px + var(--attr-h)); }
+:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-stage-map .maplibregl-ctrl-bottom-left { bottom: calc(62px + var(--attr-h)); }
+:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-stage-map .map-nofix { bottom: calc(66px + var(--attr-h)); }
 /* HUD layer: only its buttons take the pointer. */
 :root .app.liquid-ui .lg-hud { position: absolute; inset: 0; z-index: 3; pointer-events: none; color: var(--hud-fg); container-type: inline-size; }
 :root .app.liquid-ui .lg-hud button { pointer-events: auto; }
@@ -413,6 +434,12 @@
 :root .app.liquid-ui .lg-ck-speed { grid-area: speed; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 18px; min-width: 0; }
 /* Chips: small, round, a light tint behind the text. */
 :root .app.liquid-ui .lg-chip { --text: #f5f5f7; --text-2: #d1d1d8; --text-3: #a5a5ae; --line: rgba(255,255,255,.16); display: inline-flex; align-items: center; gap: 6px; min-height: 1.85rem; padding: 2px 11px; border-radius: 999px; color: var(--hud-fg); background: rgba(12,12,16,.42); border: 1px solid rgba(255,255,255,.14); backdrop-filter: blur(10px) saturate(1.1); -webkit-backdrop-filter: blur(10px) saturate(1.1); font-size: .7rem; line-height: 1.25; white-space: nowrap; }
+/* A chip is never wider than its column: its words give way first, cut with "…" (the full text is in
+   its title), while the code (STANDBY, MANUAL, AI) and the switch keep their size. Chips take the
+   pointer (the rest of the HUD lets it through to the video), so that title shows on hover. */
+:root .app.liquid-ui .lg-chip { max-width: 100%; min-width: 0; pointer-events: auto; }
+:root .app.liquid-ui .lg-chip > :is(b,i,em,svg,.ai-switch) { flex: none; }
+:root .app.liquid-ui .lg-chip > :is(small,span) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 :root .app.liquid-ui .lg-chip > b { font-weight: 700; letter-spacing: .06em; }
 :root .app.liquid-ui .lg-chip > small { font-size: .64rem; color: var(--hud-dim); }
 :root .app.liquid-ui .lg-chip-mode > i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--hud-dim); }
@@ -527,9 +554,32 @@
   :root .app.liquid-ui .lg-ck .lg-hud-stat { gap: 4px; padding: 4px 5px; }
   :root .app.liquid-ui .lg-ck .lg-hud-stat b { font-size: .9rem; }
 }
+/* A narrow stage (phone), map first: the number strip stays one line and scrolls sideways (on two
+   lines the camera inset covered it); the map's title card goes (it sat on the layer tools, and the
+   header already names the unit); the inset's "Camera" button moves to its foot, clear of the
+   SIMULATED FEED tag, and the inset's own time line goes. */
+@container stage (max-width: 600px) {
+  :root .app.liquid-ui .lg-hud-map .lg-hud-bar { flex-wrap: nowrap; justify-content: flex-start; max-width: calc(100% - 24px); overflow-x: auto; scrollbar-width: none; pointer-events: auto; }
+  :root .app.liquid-ui .lg-hud-map .lg-hud-bar > * { flex: none; }
+  :root .app.liquid-ui .lg-map-label { display: none; }
+  :root .app.liquid-ui .lg-stage-cam.is-pip .lg-pip-hit { align-items: flex-end; }
+  :root .app.liquid-ui .lg-stage-cam.is-pip .feed-bottom { display: none; }
+}
+/* A big screen: the cockpit's words and numbers grow with the stage (the root font stops at 19px,
+   so on a 2560 screen the chips were 13px over a 1900px picture). zoom scales each part whole, so
+   the grid still places it; the camera's time and gimbal lines grow by the same step and stay clear
+   of the number chips. The compass already grows with its column. */
+@container stage (min-width: 1300px) {
+  :root .app.liquid-ui :is(.lg-ck-chips > *, .lg-hdg, .lg-late, .lg-ck-speed > *, .lg-ck > .lg-hud-bar, .lg-card),
+  :root .app.liquid-ui .lg-stage[data-focus='cockpit'] .lg-stage-cam:not(.is-pip) :is(.feed-bottom, .feed-osd) { zoom: 1.15; }
+}
+@container stage (min-width: 1800px) {
+  :root .app.liquid-ui :is(.lg-ck-chips > *, .lg-hdg, .lg-late, .lg-ck-speed > *, .lg-ck > .lg-hud-bar, .lg-card),
+  :root .app.liquid-ui .lg-stage[data-focus='cockpit'] .lg-stage-cam:not(.is-pip) :is(.feed-bottom, .feed-osd) { zoom: 1.35; }
+}
 /* Last 60 s graphs: a drawer over the stage, clear of the inset view. */
 :root .app.liquid-ui .lg-graphs { position: absolute; left: 12px; bottom: 66px; z-index: 7; width: min(32.5rem, calc(100% - 24px)); max-height: calc(100% - 130px); overflow: auto; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 16px; color: var(--text); background: var(--lg-surface-solid); box-shadow: 0 16px 40px rgba(0,0,0,.32); }
-:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-graphs { width: min(32.5rem, calc(100% - var(--pip-w) - 48px)); }
+:root .app.liquid-ui .lg-stage[data-focus='map'] .lg-graphs { width: min(32.5rem, calc(100% - var(--pip-w) - 48px)); bottom: calc(66px + var(--attr-h)); }
 :root .app.liquid-ui .lg-stage[data-focus='cockpit'] .lg-graphs { left: auto; right: 12px; }
 :root .app.liquid-ui .lg-graphs-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 :root .app.liquid-ui .lg-graphs-head b { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; }

@@ -105,7 +105,7 @@ export function TopBar() {
         <SoundToggle />
         <LangToggle />
         <div className="user">
-          <button className="user-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <button className="user-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open} title={`${me.name} · ${me.title}`}>
             <span className="avatar">
               {me.name
                 .split(' ')
@@ -424,7 +424,8 @@ export function BottomTimeline() {
             <li key={i} className={p.state}>
               <div className="ph-top">
                 <span className="ph-dot">{p.state === 'done' ? <Check size={14} /> : null}</span>
-                <span className="ph-time">{p.time ? fmtTime(p.time) : t('Pending')}</span>
+                {/* A short word: six steps share the bar, and "รอดำเนินการ" was cut on a laptop. */}
+                <span className="ph-time" title={p.time ? undefined : t('Pending')}>{p.time ? fmtTime(p.time) : t('Not yet')}</span>
               </div>
               <b>{p.label}</b>
               <small>{p.detail}</small>
