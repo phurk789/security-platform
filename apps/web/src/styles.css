@@ -1833,6 +1833,177 @@ table.compact th {
 .wrap-cell {
   min-width: 13.75rem;
 }
+/* Devices page: what an operator checks at a glance, one tidy line or two per device; the
+   technical details (adapter, firmware, commands, limitations) open in a panel under the row. */
+.dev-table td {
+  vertical-align: middle;
+}
+/* Long Thai column names wrap instead of widening their column. */
+.dev-table th {
+  white-space: normal;
+  vertical-align: bottom;
+}
+/* A laptop: the details button keeps only its arrow (its name stays for screen readers). */
+@media (min-width: 601px) and (max-width: 1279px) {
+  .dev-more-label {
+    display: none;
+  }
+  .dev-more {
+    padding: 5px 7px;
+  }
+  .dev-cell {
+    min-width: 8.5rem;
+  }
+  .dev-table :is(th, td) {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+.dev-cell {
+  min-width: 11rem;
+  max-width: 17rem;
+}
+.dev-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.dev-id b {
+  font-weight: 600;
+}
+.dev-kind {
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--text-3);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.dev-model {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text-3);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+.dev-link {
+  white-space: nowrap;
+}
+.dev-link small {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.72rem;
+}
+.dev-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.eq-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+}
+.eq-cell b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.eq-cell small {
+  font-size: 0.72rem;
+}
+.eq-cell .is-bad {
+  color: var(--red);
+}
+.eq-cell .is-warn {
+  color: var(--amber);
+}
+.usage-cell {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+.usage-cell > span:not(.badge) {
+  white-space: nowrap;
+}
+.dev-more-cell {
+  width: 1%;
+  text-align: right;
+}
+.dev-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  color: var(--text-2);
+  background: transparent;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dev-more:hover {
+  color: var(--text);
+}
+.dev-more svg {
+  transition: transform 0.15s;
+}
+.dev-more[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+.page-head .dev-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  align-self: flex-end;
+  white-space: nowrap;
+}
+tr.is-open > td {
+  border-bottom-color: transparent;
+}
+tr.dev-detail > td {
+  padding: 0 12px 14px;
+}
+.dev-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 10px 24px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.dev-facts > .is-wide {
+  grid-column: 1 / -1;
+}
+.dev-facts dt {
+  margin-bottom: 3px;
+  color: var(--text-3);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.dev-facts dd {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.dev-cmds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.dev-cmds code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.14);
+  font-size: 0.72rem;
+}
 /* Wide tables on a phone: each row is a card, each cell with its column's name on the left
    (useCardTable copies the head's names onto the cells as data-label). The first cell heads the card. */
 @media (max-width: 600px) {
@@ -1902,8 +2073,24 @@ table.compact th {
     content: none;
   }
   table.card-table td.mono:has(> small),
-  table.card-table .wrap-cell {
+  table.card-table .wrap-cell,
+  table.card-table .dev-cell {
     min-width: 0;
+    max-width: none;
+  }
+  /* Devices: an opened row and its details read as one card. */
+  table.card-table > tbody > tr.is-open {
+    margin-bottom: 0;
+    border-bottom: 0;
+    border-radius: 12px 12px 0 0;
+  }
+  table.card-table > tbody > tr.dev-detail {
+    padding-top: 0;
+    border-top: 0;
+    border-radius: 0 0 12px 12px;
+  }
+  table.card-table .dev-more-cell {
+    text-align: left;
   }
 }
 .files {
