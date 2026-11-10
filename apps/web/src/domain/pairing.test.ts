@@ -14,6 +14,7 @@ import {
   piDevices,
   piPairCommand,
   readDeviceList,
+  registrationsFor,
   remoteDevices,
   timeLeft,
   unregistered,
@@ -127,6 +128,21 @@ describe('Pair an edge remote (Admin card)', () => {
 
   it('names devices the server does not know yet', () => {
     expect(unregistered(['UGV-01', 'CAM-09'], ['UGV-01', 'CCTV-01'])).toEqual(['CAM-09']);
+  });
+
+  it('says what to register for the unknown devices: vehicles by their kind, cameras as CCTV, in list order', () => {
+    const devices = remoteDevices({ ...REMOTE_DEFAULTS, vehicleId: 'UGV-02', model: 'Tracked UGV', gimbal: true });
+    expect(registrationsFor(devices, ['UGV-02-CAM', 'UGV-02'])).toEqual([
+      { id: 'UGV-02', kind: 'ugv', model: 'Tracked UGV' },
+      { id: 'UGV-02-CAM', kind: 'cctv', model: 'SIYI A8 mini on UGV-02' },
+    ]);
+    // Only the missing ones; an air vehicle as UAV; no model text → none sent; ids are matched as written.
+    expect(registrationsFor(devices, ['UGV-02-CAM'])).toEqual([{ id: 'UGV-02-CAM', kind: 'cctv', model: 'SIYI A8 mini on UGV-02' }]);
+    expect(registrationsFor([{ type: 'mavlink', deviceId: 'UAV-01', kind: 'uav', model: ' ' }, { type: 'onvif', deviceId: 'CAM-07' }], ['UAV-01', 'CAM-07'])).toEqual([
+      { id: 'UAV-01', kind: 'uav' },
+      { id: 'CAM-07', kind: 'cctv' },
+    ]);
+    expect(registrationsFor(devices, [])).toEqual([]);
   });
 
   it('reads a hand-written device list, or says what is wrong with it', () => {

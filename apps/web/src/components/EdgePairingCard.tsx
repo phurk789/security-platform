@@ -2,10 +2,11 @@
 // edge app on the SIYI remote, or the kit on a Raspberry Pi on the vehicle (deploy/pi), exchanges for its
 // gateway key and site configuration. The key never appears here: the server hands it straight to the edge.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { QrCode, Smartphone, X } from 'lucide-react';
+import { Plus, QrCode, Smartphone, X } from 'lucide-react';
 import { PAIRING_CODE_TTL_MIN, fmtTime, type PairingCodeView, type SiteRef } from '@13store/shared';
 import type { Api } from '../api';
 import { useT } from '../i18n';
+import { useStore } from '../store';
 import {
   REMOTE_DEFAULTS,
   SIYI_GIMBAL,
@@ -19,6 +20,7 @@ import {
   pairingQr,
   piPairCommand,
   readDeviceList,
+  registrationsFor,
   timeLeft,
   unregistered,
   type EdgeTarget,
@@ -51,6 +53,7 @@ export function EdgePairingCard({
   currentSiteId?: string;
 }) {
   const t = useT();
+  const { session } = useStore();
   const [codes, setCodes] = useState<PairingCodeView[]>([]);
   const [form, setForm] = useState<RemoteForm>(REMOTE_DEFAULTS);
   const [target, setTarget] = useState<EdgeTarget>('remote');
@@ -92,7 +95,18 @@ export function EdgePairingCard({
   const missing = 'ids' in parsed ? unregistered(parsed.ids, here) : [];
   const elsewhere = missing.filter((id) => sites.some((x) => x.id !== site?.id && x.devices?.includes(id)));
   const unknown = missing.filter((id) => !elsewhere.includes(id));
+  // Devices the server does not know at all: the administrator may register them here, at the site being paired.
+  const regs = 'devices' in parsed ? registrationsFor(parsed.devices, unknown) : [];
   const qr = useMemo(() => (shown?.code ? pairingQr(server, shown.code) : null), [shown, server]);
+
+  const registerMissing = () =>
+    act(
+      async () => {
+        for (const r of regs) await api.post('/devices', { id: r.id, kind: r.kind, model: r.model, siteId: site?.id });
+        await session?.refreshSites();
+      },
+      t('{id} registered.', { id: regs.map((r) => r.id).join(', ') }),
+    );
 
   const create = () =>
     act(async () => {
@@ -289,7 +303,16 @@ export function EdgePairingCard({
         </p>
       )}
       {'error' in parsed && advanced && <p className="fine warn-text">{t('Device list: {error}', { error: parsed.error })}</p>}
-      {unknown.length > 0 && <p className="fine warn-text">{t('Register {ids} under "Edge gateways and devices" first, or the server refuses them.', { ids: unknown.join(', ') })}</p>}
+      {unknown.length > 0 && (
+        <div className="pair-missing">
+          <p className="fine warn-text">{t('Register {ids} under "Edge gateways and devices" first, or the server refuses them.', { ids: unknown.join(', ') })}</p>
+          {regs.length > 0 && (
+            <button type="button" className="btn-secondary small" onClick={() => void registerMissing()}>
+              <Plus size={14} /> {t('Register {ids} now', { ids: regs.map((r) => `${r.id} (${r.kind.toUpperCase()})`).join(', ') })}
+            </button>
+          )}
+        </div>
+      )}
       {elsewhere.length > 0 && (
         <p className="fine warn-text">{t('{ids} is registered at another site. Move it to {site} under Sites first, or the server refuses it.', { ids: elsewhere.join(', '), site: site?.name ?? '' })}</p>
       )}

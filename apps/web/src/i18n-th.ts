@@ -562,6 +562,7 @@ export const TH: Record<string, string> = {
   'Create pairing code': 'สร้างรหัสจับคู่',
   'Device list: {error}': 'รายการอุปกรณ์: {error}',
   'Register {ids} under "Edge gateways and devices" first, or the server refuses them.': 'ลงทะเบียน {ids} ในการ์ด "Edge Gateway และอุปกรณ์" ก่อน ไม่อย่างนั้นเซิร์ฟเวอร์จะไม่รับ',
+  'Register {ids} now': 'ลงทะเบียน {ids} ให้เลย',
   "Add the vehicle's gimbal camera ({id}) so the platform can turn it": 'เพิ่มกล้องกิมบอลบนรถ ({id}) ให้ระบบหันกล้องได้',
   '{cam} is the SIYI gimbal camera on {vehicle}, reached at {host} (SIYI SDK, UDP {port}); its video stays on {vehicle}. Register {cam} as CCTV first: it uses one more licence device. A supervisor then promotes {cam} to LIVE MANUAL: until then checkpoints take photos but do not turn it.':
     '{cam} คือกล้องกิมบอล SIYI บน {vehicle} ระบบสั่งกล้องที่ {host} (SIYI SDK พอร์ต UDP {port}) ส่วนภาพยังมาทาง {vehicle} เหมือนเดิม ลงทะเบียน {cam} ชนิด CCTV ก่อน (นับเป็นอุปกรณ์เพิ่มอีก 1 ตัวใน License) จากนั้นหัวหน้าเวรเลื่อน {cam} เป็น LIVE MANUAL ระหว่างที่ยังไม่เลื่อน จุดตรวจถ่ายรูปได้แต่ไม่หันกล้อง',

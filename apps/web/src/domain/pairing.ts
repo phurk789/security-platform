@@ -194,6 +194,23 @@ export function unregistered(deviceIds: string[], registered: string[]) {
 }
 
 /** The device ids a device list names: the vehicle, and its gimbal camera when it is added. */
+/**
+ * What to register for the devices of a list the server does not know yet, in list order (the vehicle before its
+ * camera): its id, the kind the server files it under (a MAVLink or ROS vehicle by its own kind, any camera as CCTV)
+ * and its model text. The card's "Register … now" button posts these to /devices.
+ */
+export function registrationsFor(devices: Record<string, unknown>[], missing: string[]): { id: string; kind: 'ugv' | 'uav' | 'cctv'; model?: string }[] {
+  const want = new Set(missing);
+  return devices.flatMap((d) => {
+    const id = d.deviceId;
+    if (typeof id !== 'string' || !want.delete(id)) return [];
+    const vehicle = d.type === 'mavlink' || d.type === 'ros2-nav2';
+    const kind = vehicle ? (d.kind === 'uav' ? 'uav' : 'ugv') : 'cctv';
+    const model = typeof d.model === 'string' && d.model.trim() ? d.model.trim().slice(0, 80) : undefined;
+    return [{ id, kind, ...(model ? { model } : {}) }];
+  });
+}
+
 export function deviceIdsOf(devices: Record<string, unknown>[]) {
   return devices.map((d) => d.deviceId).filter((x): x is string => typeof x === 'string');
 }

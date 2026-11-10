@@ -2483,6 +2483,16 @@ code {
 .secret {
   word-break: break-all;
 }
+/* Admin → Pair an edge remote: devices the server does not know yet, with a button to register them. */
+.pair-missing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.pair-missing > p {
+  margin: 0;
+}
 /* Admin → Pair an edge remote: the QR and digits are read from a remote's screen distance. */
 .pair-code {
   display: flex;
