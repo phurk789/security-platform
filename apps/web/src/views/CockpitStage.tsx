@@ -158,17 +158,19 @@ function ModeChips({ d, m, usable }: { d: Device; m?: Mission; usable: boolean }
   const t = useT();
   const [code, label, tone] = controlMode(d, m, usable, t);
   const board = usable && (d.flightMode !== undefined || d.armed !== undefined);
+  // Titles carry the full text: a chip's words are cut with "…" when its column is narrow.
+  const armed = d.armed === undefined ? '' : d.armed ? ' · ARMED' : ' · DISARMED';
   return (
     <>
       {code !== '—' && (
-        <span className={`lg-chip lg-chip-mode tone-${tone}`}>
+        <span className={`lg-chip lg-chip-mode tone-${tone}`} title={`${code} · ${label}`}>
           <i aria-hidden="true" />
           <b>{code}</b>
           <small>{label}</small>
         </span>
       )}
       {board && (
-        <span className="lg-chip lg-chip-fc" title={t('As the autopilot reports it')}>
+        <span className="lg-chip lg-chip-fc" title={`${t('As the autopilot reports it')}: ${d.flightMode ?? '—'}${armed}`}>
           <small>{t('Autopilot')}</small>
           <b>{d.flightMode ?? '—'}</b>
           {d.armed !== undefined && <em className={d.armed ? 'armed' : ''}>{d.armed ? 'ARMED' : 'DISARMED'}</em>}
@@ -220,7 +222,7 @@ function AiRow({ d, ids }: { d: Device; ids: string[] }) {
                 ? ['ok', t('AI is watching')]
                 : ['idle', t('AI gets no pictures')];
   return (
-    <div className={`lg-chip lg-hud-ai tone-${tone}`} title={modelError ?? (ai.map((x) => x.analytics?.model ?? x.model).join(' · ') || undefined)}>
+    <div className={`lg-chip lg-hud-ai tone-${tone}`} title={[`AI: ${text}`, modelError ?? ai.map((x) => x.analytics?.model ?? x.model).join(' · ')].filter(Boolean).join(' · ')}>
       <ScanEye size={15} aria-hidden="true" />
       <b>AI</b>
       <span>{text}</span>

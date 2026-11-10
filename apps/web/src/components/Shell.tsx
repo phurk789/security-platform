@@ -424,7 +424,7 @@ export function BottomTimeline() {
             <li key={i} className={p.state}>
               <div className="ph-top">
                 <span className="ph-dot">{p.state === 'done' ? <Check size={14} /> : null}</span>
-                <span className="ph-time">{p.time ? fmtTime(p.time) : t('Pending')}</span>
+                <span className="ph-time" title={p.time ? undefined : t('Pending')}>{p.time ? fmtTime(p.time) : t('Pending')}</span>
               </div>
               <b>{p.label}</b>
               <small>{p.detail}</small>

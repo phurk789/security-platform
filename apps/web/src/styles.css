@@ -100,6 +100,10 @@ h2 {
 .grow {
   flex: 1;
 }
+/* A growing list or field may also shrink below its longest option (the Assign row overflowed). */
+:is(select, input).grow {
+  min-width: 0;
+}
 .sep {
   color: var(--line-2);
 }
@@ -1746,6 +1750,17 @@ input[type='text'] {
   margin: 4px 0 0;
   max-width: 760px;
 }
+/* The header's actions (an incident list + a button) wrap on a phone instead of running off
+   the screen; the list may shrink to the width there is. */
+.page-head > .row {
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+.page-head > .row > select {
+  min-width: 0;
+  max-width: 100%;
+}
 .card {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -1855,6 +1870,8 @@ table.compact th {
 }
 .report {
   white-space: pre-wrap;
+  /* Long unbroken tokens (checksums, ids) wrap too, so the preview never scrolls sideways on a phone. */
+  overflow-wrap: anywhere;
   font-family: var(--mono);
   font-size: 0.8rem;
   color: var(--text-2);
@@ -1948,7 +1965,8 @@ table.compact th {
     row-gap: 12px;
   }
   .rep-grid {
-    grid-template-columns: 1fr;
+    /* minmax(0, …): a plain 1fr grew to the audit table's width and pushed the page sideways on a phone. */
+    grid-template-columns: minmax(0, 1fr);
   }
   .kpi-row {
     grid-template-columns: repeat(2, 1fr);
@@ -2063,11 +2081,13 @@ table.compact th {
     grid-template-rows: auto minmax(380px, 1fr) auto;
     overflow-y: auto;
   }
+  /* Below the map's tool bar and clear of its zoom buttons on the right (they start 54px down);
+     the row used to cover the zoom buttons and touch the tool bar. */
   .kpis {
     max-width: none;
     left: 8px;
-    right: 8px;
-    top: 56px;
+    right: 52px;
+    top: 66px;
     gap: 6px;
     flex-wrap: nowrap;
   }
@@ -2081,11 +2101,11 @@ table.compact th {
   .kpi b .muted {
     display: none;
   }
+  /* Two short lines rather than "…": the cards are narrow on a phone. */
   .kpi small {
     font-size: 0.66rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
   }
   .tl-head {
     flex-wrap: wrap;
@@ -3985,6 +4005,14 @@ html:lang(th) .meta dt {
   .kpi-dash .kpi-charts {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+/* The response-time table: its headings wrap on a phone; if it is still too wide, it scrolls in its box. */
+.kpi-charts .chart:has(> table) {
+  min-width: 0;
+  overflow-x: auto;
+}
+.kpi-charts .chart table th {
+  white-space: normal;
 }
 .kpi-charts .chart h4 {
   margin: 0 0 6px;

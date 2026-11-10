@@ -159,6 +159,8 @@ export function FleetCard({ d, video }: { d: Device; video: boolean }) {
           ? t('Standby')
           : t('Display only');
   const thumb = useVehicleThumb(d);
+  // Cut with "…" in a narrow card, so the full label (and the model) is in its title.
+  const kind = `${d.catalogId ?? (d.kind === 'uav' ? 'UAV' : 'UGV')}${d.payloads?.length ? ' · 4in1' : ''}${d.integration === 'simulated' ? ' · SIM' : ''}`;
   return (
     <article className={`fleet-card f-${f}${sel ? ' sel' : ''}`} onClick={() => dispatch({ type: 'selectDevice', id: d.id })}>
       <header>
@@ -170,10 +172,8 @@ export function FleetCard({ d, video }: { d: Device; video: boolean }) {
           </span>
         )}
         <b>{d.id}</b>
-        <span className="fc-kind">
-          {d.catalogId ?? (d.kind === 'uav' ? 'UAV' : 'UGV')}
-          {d.payloads?.length ? ' · 4in1' : ''}
-          {d.integration === 'simulated' ? ' · SIM' : ''}
+        <span className="fc-kind" title={`${kind} · ${d.model}`}>
+          {kind}
         </span>
         <span className="fc-fresh">
           <FreshBadge f={f} age={f === 'live' ? undefined : ago(ageMs(s, d))} />

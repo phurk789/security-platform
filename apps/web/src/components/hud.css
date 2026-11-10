@@ -172,13 +172,16 @@
 .fleet-card.sel { border-color: var(--cyan); box-shadow: inset 0 0 0 1px rgba(56, 225, 255, 0.3), 0 0 18px rgba(56, 225, 255, 0.16); }
 .fleet-card.f-stale { border-color: rgba(251, 191, 36, 0.55); }
 .fleet-card.f-offline { border-color: rgba(248, 113, 113, 0.55); }
-.fleet-card header { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* The header wraps: a long status badge ("OFFLINE · ล่าสุดเมื่อ …") takes a line of its own instead
+   of spilling out of the card. The model label only takes the room left over, so it never pushes
+   a short badge (LIVE) down. */
+.fleet-card header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .fleet-card header b { font-family: var(--hud-font); font-size: 1rem; letter-spacing: 0.05em; white-space: nowrap; }
-.fleet-card header .fc-kind { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.fleet-card header .fc-kind { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fc-ico { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 5px; background: rgba(56, 225, 255, 0.12); color: var(--cyan); }
 .fc-ico.k-uav { background: rgba(167, 139, 250, 0.15); color: var(--violet); }
 .fc-kind { font-family: var(--hud-font); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.12em; color: var(--text-3); white-space: nowrap; }
-.fc-fresh { margin-left: auto; flex: none; }
+.fc-fresh { margin-left: auto; flex: none; min-width: 0; max-width: 100%; }
 .fc-feed .feed { aspect-ratio: 16 / 9; border-radius: 4px; }
 .fc-feed .feed-top { top: 5px; left: 7px; right: 5px; }
 .fc-feed .feed-label { font-size: 0.68rem; }
